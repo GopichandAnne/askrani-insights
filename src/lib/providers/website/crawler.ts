@@ -6,6 +6,7 @@ import {
   extractDocumentLinks,
   type JsonLdFacts,
 } from "./jsonld";
+import { renderHtml } from "./render";
 
 /**
  * Website crawler — guide 5.4 strategy. The most controllable competitive
@@ -31,6 +32,10 @@ export interface CrawlOptions {
   respectRobots?: boolean;
   // menu/flyer keywords worth prioritizing in the frontier
   priorityHints?: string[];
+  // Playwright fallback for JS-rendered pages (guide 5.4 step 5). Default on.
+  render?: boolean;
+  // cap on how many pages we're willing to render per crawl (renders are slow)
+  maxRenders?: number;
 }
 
 export interface CrawlResult {
@@ -61,6 +66,17 @@ function sameHost(a: string, b: string): boolean {
 // Asset extensions that are never HTML pages. Linked PDFs/images are captured
 // separately as media (extractDocumentLinks); everything here is crawl noise.
 const NON_HTML = /\.(css|js|mjs|json|xml|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|eot|mp4|webm|mp3|zip|pdf)(\?|#|$)/i;
+
+// A page "looks JS-rendered" when static HTML yields little readable text and
+// carries SPA framework markers — the case where Playwright pays off (5.4 §5).
+function looksJsRendered(html: string, text: string): boolean {
+  if (text.length >= 800) return false; // already has real content statically
+  const spa =
+    /__NEXT_DATA__|id=["']root["']|data-reactroot|window\.__NUXT__|ng-version|__remixContext|data-server-rendered/i.test(
+      html,
+    ) || (html.match(/<script/gi)?.length ?? 0) > 8;
+  return spa;
+}
 
 function isCrawlableHtml(url: string): boolean {
   try {
@@ -161,6 +177,9 @@ export async function crawlWebsite(
   const maxPages = opts.maxPages ?? 25;
   const cache = opts.cache;
   const respectRobots = opts.respectRobots ?? true;
+  const renderEnabled = opts.render ?? true;
+  const maxRenders = opts.maxRenders ?? 4;
+  let rendersUsed = 0;
   const result: CrawlResult = {
     observations: [],
     pagesFetched: 0,
@@ -255,16 +274,35 @@ export async function crawlWebsite(
     });
     result.pagesFetched++;
 
-    const facts = extractJsonLd(html);
-    const text = extractReadableText(html);
-    const docLinks = extractDocumentLinks(html, url);
+    let facts = extractJsonLd(html);
+    let text = extractReadableText(html);
+    let provenance: RawObservation["provenance"] = "PUBLIC_WEBSITE_HTTP";
+    let effectiveHtml = html;
 
+    // Playwright fallback: render JS-thin pages and re-extract (guide 5.4 §5).
+    if (renderEnabled && rendersUsed < maxRenders && looksJsRendered(html, text)) {
+      const rendered = await renderHtml(url, { timeoutMs: 20000, settleMs: 6000 });
+      if (rendered) {
+        rendersUsed++;
+        const f2 = extractJsonLd(rendered);
+        const t2 = extractReadableText(rendered);
+        // only adopt the rendered version if it actually surfaced more
+        if (t2.length > text.length || f2.menuItems.length > facts.menuItems.length) {
+          facts = f2;
+          text = t2;
+          effectiveHtml = rendered;
+          provenance = "PUBLIC_WEBSITE_BROWSER";
+        }
+      }
+    }
+
+    const docLinks = extractDocumentLinks(effectiveHtml, url);
     const isMenuLike =
       facts.menuItems.length > 0 || /menu|specials|offers|deals/i.test(url);
 
     result.observations.push({
       provider: "website",
-      provenance: "PUBLIC_WEBSITE_HTTP",
+      provenance,
       platform: "website",
       contentKind: isMenuLike ? "menu" : "page",
       externalRef: url,
@@ -277,13 +315,14 @@ export async function crawlWebsite(
       media: jsonLdToMedia(docLinks),
       observedAt: now,
       contentHash,
-      raw: { url, htmlLength: html.length },
+      raw: { url, htmlLength: effectiveHtml.length, rendered: provenance === "PUBLIC_WEBSITE_BROWSER" },
       structuredHints: structuredHints(facts),
     });
 
-    // enqueue same-host links (bounded by crawl budget)
+    // enqueue same-host links (bounded by crawl budget). Use the rendered HTML
+    // when we rendered, so client-injected nav/menu links are discovered too.
     if (result.pagesFetched < maxPages) {
-      for (const m of html.matchAll(/href=["']([^"']+)["']/gi)) {
+      for (const m of effectiveHtml.matchAll(/href=["']([^"']+)["']/gi)) {
         try {
           const abs = new URL(m[1], url).toString().split("#")[0];
           if (sameHost(abs, root.origin) && !seen.has(abs) && isCrawlableHtml(abs))
