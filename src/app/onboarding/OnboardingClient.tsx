@@ -1,12 +1,15 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { analyzeMarket, type AnalysisResult, type AnalyzedBusiness } from "./actions";
 import { TrustChip, ProvenanceBadge } from "@/components/TrustChip";
 
 const initial: AnalysisResult = {
   ok: false,
   llmUsed: false,
+  signedIn: false,
+  saved: false,
   target: null,
   competitors: [],
   recommendations: [],
@@ -68,6 +71,29 @@ export function OnboardingClient() {
 
       {state.ok && (
         <>
+          {state.saved ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-trust-direct/30 bg-trust-direct/5 p-3 text-sm text-trust-direct">
+              <span>Saved to your workspace. It now feeds your ongoing screens.</span>
+              <Link href="/recommendations" className="font-medium underline">
+                View recommendations →
+              </Link>
+              <Link href="/offers" className="font-medium underline">
+                View offers →
+              </Link>
+            </div>
+          ) : state.savedError ? (
+            <div className="rounded-lg border border-trust-low/30 bg-trust-low/5 p-3 text-sm text-trust-low">
+              Analysis ran, but saving failed: {state.savedError}
+            </div>
+          ) : !state.signedIn ? (
+            <div className="flex items-center gap-3 rounded-lg border border-line bg-surface p-3 text-sm text-ink-soft">
+              <span>This is a live preview.</span>
+              <Link href="/login" className="font-medium text-brand hover:underline">
+                Sign in to save it to a workspace →
+              </Link>
+            </div>
+          ) : null}
+
           {!state.llmUsed && (
             <p className="rounded-lg border border-trust-inferred/30 bg-trust-inferred/5 p-3 text-xs text-trust-inferred">
               Running in structured-markup-only mode (no <code>ANTHROPIC_API_KEY</code> set). Offers

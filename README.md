@@ -108,12 +108,23 @@ scripts/                   # crawl + selftest runners
 docs/ARCHITECTURE.md       # guide §1–18 → code map, and what's next
 ```
 
+## Auth + saving
+
+Sign in at **/login** (email + password). The public market analysis needs no
+account; signing in **auto-saves** each analysis into your workspace, and the
+feed / offers / competitors / recommendations screens then read from it.
+
+- New users get an organization + membership bootstrapped on first sign-in.
+- Tenant isolation is enforced by Postgres RLS (`0002_rls.sql`), not app code.
+- For local dev, disable "Confirm email" in Supabase Auth settings so
+  email+password sign-up creates a session immediately (otherwise confirm via
+  the emailed link, then sign in).
+
 ## What's next (see ARCHITECTURE.md for detail)
 
-- Auth + persistence: sign-in, org/workspace creation, persist the onboarding
-  analysis into the schema (currently an ephemeral live preview).
 - Continuous monitoring: schedule collection runs (the guide's Temporal
   `BusinessMonitoringWorkflow`; a queue/cron adapter for the Supabase stack).
-- Wire the data screens (feed/offers/competitors/recommendations) to persisted rows.
+- Event & significance detection → `market_event` rows in the feed.
+- Competitor discovery v1 with full score components (guide §9.2).
 - Playwright rendering fallback for JS-only sites (hook is marked in the crawler).
 - Grocery vertical module; then the §7.4 expansion verticals.

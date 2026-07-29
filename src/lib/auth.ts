@@ -1,0 +1,65 @@
+import { redirect } from "next/navigation";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+
+export function isSupabaseConfigured(): boolean {
+  return (
+    !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
+
+export function isServiceConfigured(): boolean {
+  return isSupabaseConfigured() && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+
+/** Current auth user, or null. Safe to call when Supabase is unconfigured. */
+export async function getUser() {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+}
+
+/** Require a signed-in user; redirect to /login otherwise. */
+export async function requireUser() {
+  const user = await getUser();
+  if (!user) redirect("/login");
+  return user;
+}
+
+/**
+ * Ensure the signed-in user belongs to an organization; create one on first
+ * sign-in. Runs with the service-role client (bypasses RLS) — organization and
+ * org_membership have no authenticated INSERT policy by design, so tenant
+ * bootstrap is a trusted server operation keyed off the verified auth user.
+ */
+export async function ensureOrgForUser(userId: string, email?: string | null): Promise<string> {
+  const svc = createServiceClient();
+
+  const { data: existing } = await svc
+    .from("org_membership")
+    .select("organization_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  if (existing?.organization_id) return existing.organization_id as string;
+
+  const orgName = email ? `${email.split("@")[0]}'s workspace` : "My workspace";
+  const { data: org, error: orgErr } = await svc
+    .from("organization")
+    .insert({ name: orgName })
+    .select("id")
+    .single();
+  if (orgErr) throw new Error(`create org: ${orgErr.message}`);
+
+  const { error: memErr } = await svc.from("org_membership").insert({
+    organization_id: org.id,
+    user_id: userId,
+    role: "owner",
+  });
+  if (memErr) throw new Error(`create membership: ${memErr.message}`);
+
+  return org.id as string;
+}

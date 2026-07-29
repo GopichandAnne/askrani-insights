@@ -58,15 +58,26 @@ secondary behind `lib/extraction/llm.ts` (guide 3.1).
 connector abstraction exist; only the live Meta OAuth (app-review-gated) is left
 unwired — the single explicit exclusion.
 
+## Done since foundation
+
+- **Auth + persistence** ✅ — Supabase Auth (email+password), session-refresh
+  middleware, org bootstrap on first sign-in (`lib/auth.ts`), and
+  `persistAnalysis` (`lib/persist.ts`) writing businesses, content_items, offers,
+  competitor_edges and recommendations into the canonical model. Onboarding
+  auto-saves when signed in.
+- **Read screens wired** ✅ — feed / offers / competitors / recommendations read
+  the signed-in user's active workspace via the RLS client; recommendations
+  support approve / save / dismiss (with recorded reason).
+
 ## The next increment (in order)
 
-1. **Auth + persistence** — Supabase Auth sign-in; create org/workspace; persist
-   the onboarding analysis (businesses, content_items, observations, offers,
-   competitor_edges, recommendations) instead of returning it ephemerally.
-2. **Scheduled monitoring** — a collection scheduler (cron/queue) running
+1. **Scheduled monitoring** — a collection scheduler (cron/queue) running
    `BusinessMonitoringWorkflow`-equivalent runs per policy (guide 5.2/5.3),
-   writing to `provider_run` + `raw_payload` + the pipeline.
-3. **Wire the data screens** to persisted rows (feed/offers/competitors/recs).
-4. **Competitor discovery v1** persisted with `score_components` (guide 9.2).
-5. **Playwright fallback** for JS-only sites (hook marked in `crawler.ts`).
-6. **Grocery module**, then §7.4 expansion verticals.
+   writing to `provider_run` + `raw_payload` + the pipeline, so the feed grows
+   without a manual re-run.
+2. **Event & significance detection** — diff new observations against history to
+   emit `market_event` rows (Appendix B) into the feed.
+3. **Competitor discovery v1** persisted with full `score_components` (guide 9.2)
+   instead of onboarding's offer-overlap-only score.
+4. **Playwright fallback** for JS-only sites (hook marked in `crawler.ts`).
+5. **Grocery module**, then §7.4 expansion verticals.

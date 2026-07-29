@@ -4,6 +4,8 @@ import { crawlWebsite } from "@/lib/providers/website/crawler";
 import { runExtraction, type PipelineOffer } from "@/lib/extraction/pipeline";
 import { isLlmConfigured } from "@/lib/extraction/llm";
 import { generateRecommendations, type BusinessOffers, type Recommendation } from "@/lib/recommend/engine";
+import { getUser, ensureOrgForUser, isServiceConfigured } from "@/lib/auth";
+import { persistAnalysis } from "@/lib/persist";
 
 /**
  * Live onboarding analysis — the whole intelligence thread in one server action,
@@ -34,6 +36,10 @@ export interface AnalysisResult {
   ok: boolean;
   error?: string;
   llmUsed: boolean;
+  signedIn: boolean;
+  saved: boolean;
+  savedError?: string;
+  workspaceId?: string;
   target: AnalyzedBusiness | null;
   competitors: AnalyzedBusiness[];
   recommendations: Recommendation[];
@@ -101,7 +107,7 @@ export async function analyzeMarket(
     .slice(0, MAX_COMPETITORS);
 
   if (!targetUrl) {
-    return { ok: false, error: "Enter your business website to analyze.", llmUsed: false, target: null, competitors: [], recommendations: [] };
+    return { ok: false, error: "Enter your business website to analyze.", llmUsed: false, signedIn: false, saved: false, target: null, competitors: [], recommendations: [] };
   }
 
   try {
@@ -120,15 +126,45 @@ export async function analyzeMarket(
 
     const recommendations = generateRecommendations(targetOffers, competitorOffers);
 
+    // Persist when signed in — the logged-out preview stays ephemeral.
+    let saved = false;
+    let savedError: string | undefined;
+    let workspaceId: string | undefined;
+    const user = await getUser();
+    const signedIn = !!user;
+    if (user && isServiceConfigured()) {
+      try {
+        const orgId = await ensureOrgForUser(user.id, user.email);
+        const res = await persistAnalysis({
+          orgId,
+          target: { name: targetRes.biz.name, url: targetUrl, offers: targetRes.offers },
+          competitors: competitors.map((c) => ({
+            name: c.biz.name,
+            url: c.biz.url,
+            offers: c.offers,
+          })),
+          recommendations,
+        });
+        saved = true;
+        workspaceId = res.workspaceId;
+      } catch (e) {
+        savedError = (e as Error).message;
+      }
+    }
+
     return {
       ok: true,
       llmUsed: isLlmConfigured(),
+      signedIn,
+      saved,
+      savedError,
+      workspaceId,
       target: targetRes.biz,
       competitors: competitors.map((c) => c.biz),
       recommendations,
     };
   } catch (e) {
-    return { ok: false, error: (e as Error).message, llmUsed: isLlmConfigured(), target: null, competitors: [], recommendations: [] };
+    return { ok: false, error: (e as Error).message, llmUsed: isLlmConfigured(), signedIn: false, saved: false, target: null, competitors: [], recommendations: [] };
   }
 }
 
