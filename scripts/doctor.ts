@@ -47,13 +47,19 @@ async function main() {
     const db = createClient(url, service, { auth: { persistSession: false } });
     const tables = ["organization", "workspace", "business", "offer", "recommendation", "competitor_edge"];
     for (const t of tables) {
-      const { error } = await db.from(t).select("*", { count: "exact", head: true });
+      // Use a real row select (not a HEAD count) — HEAD requests don't reliably
+      // surface PostgREST's "table not in schema cache" error, which gives false
+      // positives when the schema hasn't been applied.
+      const { error } = await db.from(t).select("id").limit(1);
       if (error) {
         bad(`table "${t}" — ${error.message}`);
         problems++;
       } else {
         ok(`table "${t}" exists`);
       }
+    }
+    if (problems > 0) {
+      info('→ Run supabase/setup.sql in the Supabase SQL Editor to create the schema.');
     }
   } else {
     info("skipping DB probe until Supabase keys are set");

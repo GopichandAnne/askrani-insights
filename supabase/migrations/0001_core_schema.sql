@@ -144,11 +144,14 @@ create table external_identity (
   url               text,
   handle            text,
   verification_state text not null default 'unverified', -- unverified | observed | owner_verified
-  created_at        timestamptz not null default now(),
-  unique (business_id, platform, coalesce(external_id, url, handle))
+  created_at        timestamptz not null default now()
 );
 create index external_identity_business on external_identity(business_id);
 create index external_identity_lookup on external_identity(platform, external_id);
+-- One identity per (business, platform, handle). A UNIQUE *index* on an
+-- expression is required — a table-level UNIQUE constraint cannot use coalesce().
+create unique index external_identity_uniq
+  on external_identity(business_id, platform, coalesce(external_id, url, handle));
 
 -- Competitor set for a workspace, with explainable component scores (Section 9).
 create table competitor_edge (
