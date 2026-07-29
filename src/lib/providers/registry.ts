@@ -1,6 +1,7 @@
 import type { PublicContentProvider, DiscoverInput, ProfileCandidate } from "./types";
 import { WebsiteProvider } from "./website";
 import { GoogleProvider } from "./google";
+import { OsmProvider } from "./osm";
 import { ApifyProvider } from "./apify";
 import { BrightDataProvider } from "./brightdata";
 
@@ -18,6 +19,7 @@ export function allProviders(): PublicContentProvider[] {
     _all = [
       new WebsiteProvider(),
       new GoogleProvider(),
+      new OsmProvider(),
       new ApifyProvider(),
       new BrightDataProvider(),
     ];
