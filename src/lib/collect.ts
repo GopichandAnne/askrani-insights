@@ -2,17 +2,19 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { crawlWebsite } from "@/lib/providers/website/crawler";
 import { runExtraction, type PipelineOffer } from "@/lib/extraction/pipeline";
 import { getProvider } from "@/lib/providers/registry";
+import type { RawObservation } from "@/lib/providers/types";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
  * Autonomous collection worker — the guide's per-business monitoring pass
- * (§5.3 BusinessMonitoringWorkflow), bounded so one call fits a request
- * timeout. Pulls everything available for a business (website crawl + offer
- * extraction now; Google reviews/photos + social when those keys are present),
- * records a provider_run, and stamps last_collected_at.
- *
- * The client drives collection one business at a time so long crawls never
- * block a single request; a background queue is the later hardening.
+ * (§5.3). For one business it fans out across every *applicable, configured*
+ * source, recording a provider_run per source:
+ *   • website crawl + offer extraction   (always; free)
+ *   • Google reviews/photos              (when GOOGLE_MAPS_API_KEY set)
+ *   • Yelp reviews                       (when YELP_API_KEY set)
+ *   • social posts via Apify + extraction (when APIFY_TOKEN set and a handle exists)
+ * Each source is guarded and bounded so one job fits a request timeout, and each
+ * stays dormant until its key is present (website-only otherwise).
  */
 
 const MAX_PAGES = 8;
@@ -25,6 +27,8 @@ export interface CollectResult {
   pagesFetched: number;
   offersWritten: number;
   reviews: number;
+  socialPosts: number;
+  sources: string[]; // which sources actually contributed this run
   error?: string;
 }
 
@@ -57,23 +61,68 @@ async function insertOffers(
   return rows.length;
 }
 
-async function upsertContentItem(
+/** Upsert a content_item from any RawObservation (website page, review, post). */
+async function upsertObsContentItem(
   svc: Svc,
   businessId: string,
-  url: string,
-  provenance: string,
+  obs: RawObservation,
   nowIso: string,
 ): Promise<string> {
+  const externalRef = obs.externalRef ?? obs.sourceUrl ?? `${obs.platform}:${obs.contentHash}`;
   const { data, error } = await svc
     .from("content_item")
     .upsert(
-      { business_id: businessId, platform: "website", external_ref: url, provenance, url, observed_at: nowIso },
+      {
+        business_id: businessId,
+        platform: obs.platform,
+        external_ref: externalRef,
+        provenance: obs.provenance,
+        url: obs.sourceUrl,
+        text: obs.text ?? null,
+        media: obs.media ?? [],
+        published_at: obs.publishedAt ?? null,
+        observed_at: nowIso,
+      },
       { onConflict: "platform,external_ref" },
     )
     .select("id")
     .single();
   if (error) throw new Error(`content_item upsert: ${error.message}`);
   return data.id as string;
+}
+
+async function startRun(svc: Svc, provider: string, businessId: string): Promise<string | undefined> {
+  const { data } = await svc
+    .from("provider_run")
+    .insert({ provider, input_hash: `${businessId}:${provider}:${Date.now()}`, status: "started" })
+    .select("id")
+    .single();
+  return data?.id as string | undefined;
+}
+async function finishRun(svc: Svc, runId: string | undefined, count: number, error?: string) {
+  if (!runId) return;
+  await svc
+    .from("provider_run")
+    .update({
+      status: error && count === 0 ? "partial" : "succeeded",
+      result_count: count,
+      cost_usd: 0,
+      finished_at: new Date().toISOString(),
+      error: error ?? null,
+    })
+    .eq("id", runId);
+}
+
+/** Bounded poll of a provider job to a terminal state. */
+async function pollJob(provider: any, jobId: string, maxMs: number) {
+  const deadline = Date.now() + maxMs;
+  // Date.now() is fine here (regular server code, not a workflow script)
+  while (Date.now() < deadline) {
+    const st = await provider.getJob(jobId);
+    if (st.status === "succeeded" || st.status === "failed") return st;
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  return provider.getJob(jobId);
 }
 
 export async function collectBusiness(businessId: string): Promise<CollectResult> {
@@ -86,8 +135,11 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
     .eq("id", businessId)
     .single();
   if (bErr || !biz) {
-    return { businessId, name: "?", ok: false, pagesFetched: 0, offersWritten: 0, reviews: 0, error: bErr?.message ?? "not found" };
+    return { businessId, name: "?", ok: false, pagesFetched: 0, offersWritten: 0, reviews: 0, socialPosts: 0, sources: [], error: bErr?.message ?? "not found" };
   }
+  const vertical = biz.vertical ?? "restaurant";
+  const attrs = (biz.attributes as any) ?? {};
+  const geo = attrs.geo as { lat: number; lng: number } | undefined;
 
   const result: CollectResult = {
     businessId,
@@ -97,86 +149,151 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
     pagesFetched: 0,
     offersWritten: 0,
     reviews: 0,
+    socialPosts: 0,
+    sources: [],
   };
-
-  // provider_run bookkeeping (guide §16.1: track real cost/counts)
-  const { data: run } = await svc
-    .from("provider_run")
-    .insert({ provider: "website", input_hash: `${businessId}:${Date.now()}`, status: "started" })
-    .select("id")
-    .single();
-
   const errors: string[] = [];
-  const collectedOffers: PipelineOffer[] = [];
+  let attrsDirty = false;
 
-  // ── website crawl + offer extraction ──────────────────────────────────
+  // ── 1) WEBSITE (always) ─────────────────────────────────────────────────
   if (biz.website) {
+    const run = await startRun(svc, "website", businessId);
+    let n = 0;
     try {
       const crawl = await crawlWebsite(biz.website, { maxPages: MAX_PAGES });
       result.pagesFetched = crawl.pagesFetched;
       for (const obs of crawl.observations) {
         if (!obs.sourceUrl) continue;
         try {
-          const ci = await upsertContentItem(svc, businessId, obs.sourceUrl, obs.provenance, nowIso);
-          const out = await runExtraction(obs, { vertical: biz.vertical ?? "restaurant", name: biz.canonical_name });
-          if (out.offers.length) {
-            result.offersWritten += await insertOffers(svc, businessId, ci, out.offers, nowIso);
-            collectedOffers.push(...out.offers);
-          }
+          const ci = await upsertObsContentItem(svc, businessId, obs, nowIso);
+          const out = await runExtraction(obs, { vertical, name: biz.canonical_name });
+          n += await insertOffers(svc, businessId, ci, out.offers, nowIso);
         } catch (e) {
-          errors.push(`${obs.sourceUrl}: ${(e as Error).message}`);
+          errors.push(`website ${obs.sourceUrl}: ${(e as Error).message}`);
         }
       }
+      if (n > 0 || crawl.pagesFetched > 0) result.sources.push("website");
     } catch (e) {
-      errors.push(`crawl: ${(e as Error).message}`);
+      errors.push(`website: ${(e as Error).message}`);
     }
+    result.offersWritten += n;
+    await finishRun(svc, run, n);
   } else {
     errors.push("no website on file");
   }
 
-  // ── Google reviews (only when keyed and we have a place id) ───────────
-  const placeId = (biz.attributes as any)?.place_id;
+  // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");
-  if (placeId && google?.isConfigured()) {
+  if (google?.isConfigured()) {
+    const run = await startRun(svc, "google", businessId);
+    let n = 0;
     try {
-      const job = await google.collectContent({ urls: [placeId] });
-      // small poll
-      for (let i = 0; i < 8; i++) {
-        const st = await google.getJob(job.jobId);
-        if (st.status === "succeeded" || st.status === "failed") break;
-        await new Promise((r) => setTimeout(r, 800));
+      let placeId = attrs.place_id as string | undefined;
+      if (!placeId) {
+        const cands = await google.discoverProfiles({ query: `${biz.canonical_name}`, near: geo, limit: 1 });
+        placeId = cands[0]?.externalId;
+        if (placeId) {
+          attrs.place_id = placeId;
+          attrsDirty = true;
+        }
       }
-      for await (const rev of google.fetchResults(job.jobId)) {
-        const ci = await upsertContentItem(svc, businessId, rev.sourceUrl ?? `${placeId}#${result.reviews}`, rev.provenance, nowIso);
-        await svc.from("content_item").update({ text: rev.text }).eq("id", ci);
-        result.reviews++;
+      if (placeId) {
+        const job = await google.collectContent({ urls: [placeId] });
+        await pollJob(google, job.jobId, 30000);
+        for await (const rev of google.fetchResults(job.jobId)) {
+          await upsertObsContentItem(svc, businessId, rev, nowIso);
+          n++;
+        }
+        if (n > 0) result.sources.push("google");
       }
     } catch (e) {
-      errors.push(`google reviews: ${(e as Error).message}`);
+      errors.push(`google: ${(e as Error).message}`);
+    }
+    result.reviews += n;
+    await finishRun(svc, run, n);
+  }
+
+  // ── 3) YELP reviews (resolve+store yelp id first) ────────────────────────
+  const yelp = getProvider("yelp");
+  if (yelp?.isConfigured()) {
+    const run = await startRun(svc, "yelp", businessId);
+    let n = 0;
+    try {
+      let yelpId = attrs.yelp_id as string | undefined;
+      if (!yelpId) {
+        const cands = await yelp.discoverProfiles({ query: biz.canonical_name, near: geo, limit: 1 });
+        yelpId = cands[0]?.externalId;
+        if (yelpId) {
+          attrs.yelp_id = yelpId;
+          attrsDirty = true;
+        }
+      }
+      if (yelpId) {
+        const job = await yelp.collectContent({ urls: [yelpId] });
+        await pollJob(yelp, job.jobId, 20000);
+        for await (const rev of yelp.fetchResults(job.jobId)) {
+          await upsertObsContentItem(svc, businessId, rev, nowIso);
+          n++;
+        }
+        if (n > 0) result.sources.push("yelp");
+      }
+    } catch (e) {
+      errors.push(`yelp: ${(e as Error).message}`);
+    }
+    result.reviews += n;
+    await finishRun(svc, run, n);
+  }
+
+  // ── 4) SOCIAL via Apify (from a captured handle; with offer extraction) ──
+  const apify = getProvider("apify");
+  if (apify?.isConfigured()) {
+    const { data: idents } = await svc
+      .from("external_identity")
+      .select("platform,url,handle")
+      .eq("business_id", businessId)
+      .in("platform", ["instagram", "facebook"]);
+    const ig = (idents ?? []).find((i: any) => i.platform === "instagram");
+    const handleUrl = ig?.url ?? (ig?.handle ? `https://www.instagram.com/${ig.handle}/` : undefined);
+    if (handleUrl) {
+      const run = await startRun(svc, "apify", businessId);
+      let posts = 0;
+      let offers = 0;
+      try {
+        const job = await apify.collectContent({ urls: [handleUrl], resultsLimit: 12 });
+        const st = await pollJob(apify, job.jobId, 75000); // Apify runs are slower
+        if (st.status === "succeeded") {
+          for await (const post of apify.fetchResults(job.jobId)) {
+            const ci = await upsertObsContentItem(svc, businessId, post, nowIso);
+            posts++;
+            try {
+              const out = await runExtraction(post, { vertical, name: biz.canonical_name });
+              offers += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+            } catch {
+              /* extraction best-effort on social captions */
+            }
+          }
+          if (posts > 0) result.sources.push("social");
+        } else {
+          errors.push(`apify: run ${st.status}`);
+        }
+      } catch (e) {
+        errors.push(`apify: ${(e as Error).message}`);
+      }
+      result.socialPosts += posts;
+      result.offersWritten += offers;
+      await finishRun(svc, run, posts + offers);
     }
   }
 
-  // stamp last_collected_at
+  // stamp last_collected_at (+ any resolved ids)
   await svc
     .from("business")
-    .update({ attributes: { ...(biz.attributes as any), last_collected_at: nowIso } })
+    .update({ attributes: { ...attrs, last_collected_at: nowIso } })
     .eq("id", businessId);
+  void attrsDirty;
 
-  // finish provider_run
-  if (run?.id) {
-    await svc
-      .from("provider_run")
-      .update({
-        status: errors.length && result.offersWritten === 0 ? "partial" : "succeeded",
-        result_count: result.offersWritten,
-        cost_usd: 0,
-        finished_at: new Date().toISOString(),
-        error: errors.length ? errors.slice(0, 5).join("; ") : null,
-      })
-      .eq("id", run.id);
-  }
-
-  if (errors.length && result.offersWritten === 0 && result.pagesFetched === 0) {
+  const produced = result.pagesFetched + result.offersWritten + result.reviews + result.socialPosts;
+  if (produced === 0 && errors.length) {
     result.ok = false;
     result.error = errors.slice(0, 3).join("; ");
   }
@@ -233,9 +350,7 @@ export async function refreshRecommendations(workspaceId: string): Promise<numbe
   }
 
   const { data: names } = await svc.from("business").select("id,canonical_name").in("id", allIds);
-  const nameOf = new Map<string, string>(
-    (names ?? []).map((n: any) => [n.id, n.canonical_name]),
-  );
+  const nameOf = new Map<string, string>((names ?? []).map((n: any) => [n.id, n.canonical_name]));
 
   const target: BusinessOffers = {
     businessId: ws.target_business_id,

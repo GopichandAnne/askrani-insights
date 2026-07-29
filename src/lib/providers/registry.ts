@@ -2,6 +2,7 @@ import type { PublicContentProvider, DiscoverInput, ProfileCandidate } from "./t
 import { WebsiteProvider } from "./website";
 import { GoogleProvider } from "./google";
 import { OsmProvider } from "./osm";
+import { YelpProvider } from "./yelp";
 import { ApifyProvider } from "./apify";
 import { BrightDataProvider } from "./brightdata";
 
@@ -20,6 +21,7 @@ export function allProviders(): PublicContentProvider[] {
       new WebsiteProvider(),
       new GoogleProvider(),
       new OsmProvider(),
+      new YelpProvider(),
       new ApifyProvider(),
       new BrightDataProvider(),
     ];
