@@ -1,0 +1,17 @@
+-- Seed: starter restaurant canonical taxonomy (guide 7.3).
+-- Embeddings are populated by the extraction worker (scripts/embed.ts) once
+-- ANTHROPIC/OpenAI keys are present; names + aliases are enough to bootstrap
+-- fuzzy (pg_trgm) linking on day one.
+
+insert into canonical_entity (vertical, kind, name, aliases, attributes) values
+  ('restaurant','dish','Chicken Tikka Masala', array['CTM','tikka masala'], '{"cuisine":"indian","dietary":["gluten_free_optional"]}'),
+  ('restaurant','dish','Butter Chicken',       array['murgh makhani'],       '{"cuisine":"indian"}'),
+  ('restaurant','dish','Margherita Pizza',     array['margarita pizza'],     '{"cuisine":"italian","dietary":["vegetarian"]}'),
+  ('restaurant','dish','Chicken Biryani',      array['biriyani','biryani'],  '{"cuisine":"indian"}'),
+  ('restaurant','dish','Pad Thai',             array['phad thai'],           '{"cuisine":"thai"}'),
+  ('restaurant','dish','Cheeseburger',         array['burger'],              '{"cuisine":"american"}'),
+  ('restaurant','dish','Caesar Salad',         array['ceasar salad'],        '{"cuisine":"american","dietary":["vegetarian_optional"]}'),
+  ('restaurant','service','Catering Package',  array['catering'],            '{}'),
+  ('restaurant','event','Happy Hour',          array['happyhour'],           '{"daypart":"evening"}'),
+  ('restaurant','event','Weekend Brunch',      array['brunch'],              '{"daypart":"morning"}')
+on conflict do nothing;

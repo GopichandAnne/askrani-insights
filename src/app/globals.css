@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-surface-sunken text-ink antialiased;
+}
+
+/* Confidence chip — reused wherever an observation is shown so trust is
+   never hidden (guide Final Build Principle: "Never hide uncertainty"). */
+.chip {
+  @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+}
