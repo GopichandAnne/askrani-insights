@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { collectBusiness, refreshRecommendations } from "@/lib/collect";
+import { detectEventsForBusiness } from "@/lib/events";
 
 /**
  * Background collection queue (guide §5.3). Enqueue jobs; a worker drains them
@@ -80,6 +81,12 @@ export async function processOneJob(): Promise<TickResult> {
   try {
     const res = await collectBusiness(job.business_id);
     offersWritten = res.offersWritten;
+    // detect changes vs history (no-op on first collection) — guide §5
+    try {
+      await detectEventsForBusiness(job.business_id, job.workspace_id);
+    } catch {
+      /* detection is best-effort; never fail the job on it */
+    }
     await svc
       .from("collection_job")
       .update({ status: "done", result: res, error: res.error ?? null })

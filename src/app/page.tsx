@@ -1,81 +1,118 @@
 import Link from "next/link";
+import { activeWorkspace } from "@/lib/workspace";
+import { createClient } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
 
 /**
  * "Today" — the guide's primary screen (12.1): prioritized changes and actions.
- * Full data wiring lands with the workspace/recommendation work; this is the
- * shell plus a first-run state so the app runs before Supabase is configured.
+ * Shows recent detected changes + the top recommendations for the active
+ * workspace; falls back to a getting-started state otherwise.
  */
-export default function TodayPage() {
-  const configured =
-    !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export default async function TodayPage() {
+  const state = await activeWorkspace();
 
   return (
     <div className="space-y-8">
       <section>
         <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
         <p className="mt-1 max-w-2xl text-ink-soft">
-          What changed in your local market, why it matters, and what to do
-          next — every item carries its source, observed time, and confidence.
+          What changed in your local market, why it matters, and what to do next —
+          every item carries its source and confidence.
         </p>
       </section>
 
-      {!configured && (
-        <section className="rounded-xl border border-line bg-surface p-6">
-          <h2 className="font-medium">Finish setup</h2>
-          <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-ink-soft">
-            <li>
-              Create a Supabase project, then copy <code>.env.example</code> to{" "}
-              <code>.env.local</code> and fill the Supabase keys.
-            </li>
-            <li>
-              Apply the migration in <code>supabase/migrations</code> (canonical
-              data model).
-            </li>
-            <li>
-              Add <code>ANTHROPIC_API_KEY</code> to enable the extraction layer.
-            </li>
-            <li>
-              Optional: add Google / Apify / Bright Data keys to activate those
-              collection adapters.
-            </li>
-          </ol>
-          <Link
-            href="/onboarding"
-            className="mt-4 inline-flex rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white"
-          >
-            Create your first workspace
-          </Link>
-        </section>
+      {state.status !== "ok" ? (
+        <FirstRun reason={state.status} />
+      ) : (
+        <Dashboard workspaceId={state.workspace.id} name={state.workspace.name} />
       )}
+    </div>
+  );
+}
 
-      <section className="grid gap-4 sm:grid-cols-3">
-        {[
-          {
-            href: "/feed",
-            title: "Market feed",
-            body: "Unified competitor timeline: posts, promotions, menus, reviews.",
-          },
-          {
-            href: "/offers",
-            title: "Offers & pricing",
-            body: "Structured dish/offer comparison with price history and evidence.",
-          },
-          {
-            href: "/recommendations",
-            title: "Recommendations",
-            body: "Prioritized actions with rationale, evidence, impact and effort.",
-          },
-        ].map((c) => (
-          <Link
-            key={c.href}
-            href={c.href}
-            className="rounded-xl border border-line bg-surface p-5 hover:border-brand"
-          >
-            <div className="font-medium">{c.title}</div>
-            <p className="mt-1 text-sm text-ink-soft">{c.body}</p>
-          </Link>
-        ))}
+function FirstRun({ reason }: { reason: "unconfigured" | "signedout" | "empty" }) {
+  const msg =
+    reason === "unconfigured"
+      ? "Add your Supabase keys to .env.local to get started."
+      : reason === "signedout"
+        ? "Sign in to set up your workspace."
+        : "Set up your business and we'll start monitoring your local market.";
+  const cta = reason === "signedout" ? { href: "/login", label: "Sign in" } : { href: "/onboarding", label: "Set up your workspace" };
+  return (
+    <section className="rounded-xl border border-line bg-surface p-6">
+      <p className="text-ink-soft">{msg}</p>
+      <Link href={cta.href} className="mt-4 inline-flex rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white">
+        {cta.label}
+      </Link>
+    </section>
+  );
+}
+
+async function Dashboard({ workspaceId, name }: { workspaceId: string; name: string }) {
+  const supabase = await createClient();
+  const [{ data: events }, { data: recs }] = await Promise.all([
+    supabase
+      .from("market_event")
+      .select("id,event_type,significance,summary,business:business_id(canonical_name)")
+      .eq("workspace_id", workspaceId)
+      .order("time_start", { ascending: false })
+      .order("significance", { ascending: false })
+      .limit(6),
+    supabase
+      .from("recommendation")
+      .select("id,category,title,action,priority")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "dismissed")
+      .order("priority", { ascending: false })
+      .limit(4),
+  ]);
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <section className="rounded-xl border border-line bg-surface p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">What changed</h2>
+          <Link href="/feed" className="text-xs text-brand hover:underline">feed →</Link>
+        </div>
+        {!events?.length ? (
+          <p className="mt-3 text-sm text-ink-faint">
+            No changes yet — they appear once a business is re-collected and something moves.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2 text-sm">
+            {events.map((e) => (
+              <li key={e.id} className="flex gap-2">
+                <span className="chip shrink-0 bg-surface-sunken text-ink-soft">{String(e.event_type).replace(/_/g, " ")}</span>
+                <span className="text-ink-soft">
+                  <span className="font-medium text-ink">{(e.business as any)?.canonical_name}</span> — {e.summary}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-line bg-surface p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">Top actions</h2>
+          <Link href="/recommendations" className="text-xs text-brand hover:underline">all →</Link>
+        </div>
+        {!recs?.length ? (
+          <p className="mt-3 text-sm text-ink-faint">No recommendations yet for {name}.</p>
+        ) : (
+          <ul className="mt-3 space-y-3 text-sm">
+            {recs.map((r) => (
+              <li key={r.id}>
+                <div className="flex items-center gap-2">
+                  <span className="chip bg-brand-soft text-brand">{r.category}</span>
+                  <span className="font-medium">{r.title}</span>
+                </div>
+                <p className="mt-0.5 text-ink-soft">{r.action}</p>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );
