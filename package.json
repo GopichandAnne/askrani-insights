@@ -10,7 +10,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "crawl": "tsx scripts/crawl.ts",
-    "selftest": "tsx scripts/selftest.ts"
+    "selftest": "tsx scripts/selftest.ts",
+    "doctor": "tsx scripts/doctor.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
