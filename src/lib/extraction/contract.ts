@@ -11,11 +11,15 @@ import { z } from "zod";
  */
 
 export const EvidenceRef = z.object({
-  // one of: caption span, ocr block, image bbox [x,y,w,h] (0..1), transcript ts
-  kind: z.enum(["caption_span", "ocr_block", "image_bbox", "transcript_ts", "dom_element"]),
+  // one of: caption span, ocr block, image bbox [x,y,w,h] (0..1), transcript ts.
+  // Tolerant: an unrecognized kind from the model degrades to caption_span
+  // instead of discarding the whole extraction.
+  kind: z
+    .enum(["caption_span", "ocr_block", "image_bbox", "transcript_ts", "dom_element"])
+    .catch("caption_span"),
   media_id: z.string().optional(),
   // free-form locator matching `kind`; validated softly to tolerate model output
-  locator: z.record(z.string(), z.any()).default({}),
+  locator: z.record(z.string(), z.any()).catch({}).default({}),
   text: z.string().optional(),
 });
 export type EvidenceRef = z.infer<typeof EvidenceRef>;
@@ -35,6 +39,7 @@ export const Pricing = z.object({
       "catering",
       "unknown",
     ])
+    .catch("unknown")
     .default("unknown"),
   amount: z.number().nonnegative().optional(),
   currency: z.string().default("USD"),
@@ -44,34 +49,42 @@ export const Pricing = z.object({
 export type Pricing = z.infer<typeof Pricing>;
 
 export const ExtractedOffer = z.object({
-  entity_text: z.string(), // original wording, preserved (guide 8.2)
+  entity_text: z.string().catch(""), // original wording; blanks filtered downstream
   canonical_entity_id: z.string().nullable().optional(),
   // restaurant-relevant descriptors; grocery reuses brand/size_* (guide 7.2/7.3)
   brand: z.string().optional(),
   cuisine: z.string().optional(),
-  meal_period: z.enum(["breakfast", "brunch", "lunch", "dinner", "late_night", "all_day"]).optional(),
-  dietary_tags: z.array(z.string()).default([]),
+  meal_period: z
+    .enum(["breakfast", "brunch", "lunch", "dinner", "late_night", "all_day"])
+    .optional()
+    .catch(undefined),
+  dietary_tags: z.array(z.string()).catch([]).default([]),
   size_value: z.number().optional(),
   size_unit: z.string().optional(),
   pricing: Pricing.default({ type: "unknown", currency: "USD" }),
-  conditions: z.array(z.string()).default([]),
-  evidence: z.array(EvidenceRef).default([]),
-  confidence: z.number().min(0).max(1),
+  conditions: z.array(z.string()).catch([]).default([]),
+  evidence: z.array(EvidenceRef).catch([]).default([]),
+  // confidence is clamped to [0,1] downstream; tolerate odd values (e.g. 95)
+  // rather than fail the whole offer.
+  confidence: z.number().catch(0.5),
 });
 export type ExtractedOffer = z.infer<typeof ExtractedOffer>;
 
 export const ExtractionResult = z.object({
-  content_intent: z.object({
-    value: z.string(), // e.g. new_dish, lunch_special, weekly_sale, editorial…
-    confidence: z.number().min(0).max(1),
-  }),
-  business_vertical: z.string(),
+  content_intent: z
+    .object({
+      value: z.string(), // e.g. new_dish, lunch_special, weekly_sale, editorial…
+      confidence: z.number().catch(0),
+    })
+    .catch({ value: "unknown", confidence: 0 }),
+  business_vertical: z.string().catch("restaurant"),
   validity: z
     .object({
       start: z.string().nullable().optional(), // ISO date
       end: z.string().nullable().optional(),
-      confidence: z.number().min(0).max(1).default(0),
+      confidence: z.number().catch(0).default(0),
     })
+    .catch({ confidence: 0 })
     .default({ confidence: 0 }),
   offers: z.array(ExtractedOffer).default([]),
   // model must report contradictions/ambiguity it noticed (guide Appendix C)

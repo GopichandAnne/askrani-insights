@@ -161,8 +161,12 @@ export async function runExtraction(
     intentConfidence = modelOut.result.content_intent.confidence;
     modelVersion = modelOut.modelVersion;
 
-    for (const o of modelOut.result.offers) {
-      const calibrated = clamp01(o.confidence * validation.confidenceAdjustment);
+    const perOffer = validation.offerAdjustments ?? [];
+    for (const [i, o] of modelOut.result.offers.entries()) {
+      if (!o.entity_text?.trim()) continue; // drop items the model left blank
+      const calibrated = clamp01(
+        o.confidence * validation.confidenceAdjustment * (perOffer[i] ?? 1),
+      );
       modelOffers.push({
         entity_text: o.entity_text,
         canonical_entity_id: o.canonical_entity_id ?? null,

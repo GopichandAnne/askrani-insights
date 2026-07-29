@@ -62,51 +62,49 @@ export class RestaurantModule implements VerticalModule {
 
   validate(result: ExtractionResult, ctx: BusinessContext): ValidationResult {
     const issues: ValidationIssue[] = [];
-    let adj = 1;
+    // Per-offer multiplier so one bad offer doesn't penalize its siblings.
+    const offerAdjustments = result.offers.map(() => 1);
 
     for (const [i, offer] of result.offers.entries()) {
       const p = offer.pricing;
-      // Range validation (guide 6.4): plausible restaurant price bounds.
       if (p.amount != null) {
-        if (p.amount <= 0 || p.amount > 1000) {
+        // Range validation (guide 6.4). $0 is legitimate (free/loyalty item);
+        // only negative or absurdly high prices are implausible.
+        if (p.amount < 0 || p.amount > 1000) {
           issues.push(rule(`offers[${i}].pricing.amount`, "price_out_of_range", `implausible price ${p.amount}`, "error"));
-          adj *= 0.4;
+          offerAdjustments[i] *= 0.4;
         }
         // A "sale" must have an original price higher than the sale price.
         if (p.type === "sale" && p.original_amount != null && p.original_amount <= p.amount) {
           issues.push(rule(`offers[${i}].pricing`, "sale_not_cheaper", "sale price not below original", "warn"));
-          adj *= 0.7;
+          offerAdjustments[i] *= 0.7;
         }
       }
       // Priced offers should carry evidence (Appendix D: no observation w/o evidence).
       if (p.amount != null && offer.evidence.length === 0) {
         issues.push(rule(`offers[${i}].evidence`, "missing_evidence", "priced offer has no evidence binding", "warn"));
-        adj *= 0.8;
-      }
-      if (!offer.entity_text?.trim()) {
-        issues.push(rule(`offers[${i}].entity_text`, "empty_entity", "offer has no entity text", "error"));
-        adj *= 0.3;
+        offerAdjustments[i] *= 0.9;
       }
     }
 
-    // Date plausibility (guide 6.4): end not before start; not absurdly far out.
+    // ── result-level checks apply to every offer ──────────────────────────
+    let adj = 1;
     const { start, end } = result.validity ?? {};
     if (start && end && new Date(end) < new Date(start)) {
       issues.push(rule("validity", "end_before_start", "validity end precedes start", "error"));
       adj *= 0.5;
     }
-
-    // Intent sanity: an offer-bearing post classified as editorial is suspicious.
     if ((result.content_intent.value === "editorial" || result.content_intent.value === "regular_menu") &&
         result.offers.some((o) => o.pricing.type !== "regular" && o.pricing.type !== "unknown")) {
       issues.push(rule("content_intent", "intent_offer_mismatch", "promotional pricing under non-promo intent", "warn"));
-      adj *= 0.85;
+      adj *= 0.9;
     }
 
     return {
       ok: !issues.some((x) => x.severity === "error"),
       issues,
       confidenceAdjustment: adj,
+      offerAdjustments,
     };
   }
 }

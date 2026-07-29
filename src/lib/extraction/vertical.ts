@@ -26,8 +26,11 @@ export interface ValidationIssue {
 export interface ValidationResult {
   ok: boolean;
   issues: ValidationIssue[];
-  /** confidence multiplier applied after deterministic checks (guide 6.4). */
+  /** result-level confidence multiplier, applied to every offer (guide 6.4). */
   confidenceAdjustment: number;
+  /** per-offer multipliers, index-aligned to result.offers — so one bad offer
+   *  doesn't drag down the confidence of its clean siblings. */
+  offerAdjustments?: number[];
 }
 
 export interface VerticalModule {
