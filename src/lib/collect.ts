@@ -3,6 +3,7 @@ import { crawlWebsite } from "@/lib/providers/website/crawler";
 import { runExtraction, type PipelineOffer } from "@/lib/extraction/pipeline";
 import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
+import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -154,6 +155,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   };
   const errors: string[] = [];
   let attrsDirty = false;
+  let profileLinks: { platform: string; url: string }[] = [];
 
   // ── 1) WEBSITE (always) ─────────────────────────────────────────────────
   if (biz.website) {
@@ -162,6 +164,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
     try {
       const crawl = await crawlWebsite(biz.website, { maxPages: MAX_PAGES });
       result.pagesFetched = crawl.pagesFetched;
+      profileLinks = crawl.profileLinks;
       for (const obs of crawl.observations) {
         if (!obs.sourceUrl) continue;
         try {
@@ -181,6 +184,34 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   } else {
     errors.push("no website on file");
   }
+
+  // ── profile resolver: persist any platform profiles the site linked to, so
+  //    the social/YouTube/delivery collectors below auto-target them ─────────
+  for (const pl of profileLinks) {
+    const { data: exists } = await svc
+      .from("external_identity")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("platform", pl.platform)
+      .limit(1)
+      .maybeSingle();
+    if (!exists) {
+      await svc
+        .from("external_identity")
+        .insert({ business_id: businessId, platform: pl.platform, url: pl.url, verification_state: "observed" })
+        .then(() => {}, () => {});
+    }
+  }
+
+  // load all known identities for this business (from OSM discovery + resolver)
+  const { data: identRows } = await svc
+    .from("external_identity")
+    .select("platform,url,handle")
+    .eq("business_id", businessId);
+  const identityUrl = (platform: string): string | undefined => {
+    const row = (identRows ?? []).find((i: any) => i.platform === platform);
+    return row?.url ?? (row?.handle ? row.handle : undefined);
+  };
 
   // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");
@@ -244,45 +275,60 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
     await finishRun(svc, run, n);
   }
 
-  // ── 4) SOCIAL via Apify (from a captured handle; with offer extraction) ──
-  const apify = getProvider("apify");
-  if (apify?.isConfigured()) {
-    const { data: idents } = await svc
-      .from("external_identity")
-      .select("platform,url,handle")
-      .eq("business_id", businessId)
-      .in("platform", ["instagram", "facebook"]);
-    const ig = (idents ?? []).find((i: any) => i.platform === "instagram");
-    const handleUrl = ig?.url ?? (ig?.handle ? `https://www.instagram.com/${ig.handle}/` : undefined);
-    if (handleUrl) {
-      const run = await startRun(svc, "apify", businessId);
-      let posts = 0;
-      let offers = 0;
-      try {
-        const job = await apify.collectContent({ urls: [handleUrl], resultsLimit: 12 });
-        const st = await pollJob(apify, job.jobId, 75000); // Apify runs are slower
-        if (st.status === "succeeded") {
-          for await (const post of apify.fetchResults(job.jobId)) {
-            const ci = await upsertObsContentItem(svc, businessId, post, nowIso);
-            posts++;
-            try {
-              const out = await runExtraction(post, { vertical, name: biz.canonical_name });
-              offers += await insertOffers(svc, businessId, ci, out.offers, nowIso);
-            } catch {
-              /* extraction best-effort on social captions */
-            }
-          }
-          if (posts > 0) result.sources.push("social");
-        } else {
-          errors.push(`apify: run ${st.status}`);
+  // ── 4) YOUTUBE (official API): recent uploads → content + extraction ─────
+  const youtube = getProvider("youtube");
+  const ytUrl = identityUrl("youtube");
+  if (youtube?.isConfigured() && ytUrl) {
+    const run = await startRun(svc, "youtube", businessId);
+    let n = 0;
+    try {
+      const job = await youtube.collectContent({ urls: [ytUrl], resultsLimit: 12 });
+      await pollJob(youtube, job.jobId, 25000);
+      for await (const vid of youtube.fetchResults(job.jobId)) {
+        const ci = await upsertObsContentItem(svc, businessId, vid, nowIso);
+        try {
+          const out = await runExtraction(vid, { vertical, name: biz.canonical_name });
+          result.offersWritten += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+        } catch {
+          /* best-effort */
         }
-      } catch (e) {
-        errors.push(`apify: ${(e as Error).message}`);
+        n++;
       }
-      result.socialPosts += posts;
-      result.offersWritten += offers;
-      await finishRun(svc, run, posts + offers);
+      if (n > 0) result.sources.push("youtube");
+    } catch (e) {
+      errors.push(`youtube: ${(e as Error).message}`);
     }
+    await finishRun(svc, run, n);
+  }
+
+  // ── 5) SOCIAL + DELIVERY via Apify (dormant unless APIFY_TOKEN + Actor) ──
+  //    Iterates every platform we have a link for; offer extraction runs on
+  //    captions/menus. Against those platforms' ToS — user-gated by keys.
+  for (const platform of APIFY_PLATFORMS) {
+    const url = identityUrl(platform);
+    if (!url || !platformActorConfigured(platform)) continue;
+    const run = await startRun(svc, `apify:${platform}`, businessId);
+    let posts = 0;
+    let offers = 0;
+    try {
+      const items = await collectApifyPlatform(platform, url, { maxMs: 75000 });
+      for (const post of items) {
+        const ci = await upsertObsContentItem(svc, businessId, post, nowIso);
+        posts++;
+        try {
+          const out = await runExtraction(post, { vertical, name: biz.canonical_name });
+          offers += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+        } catch {
+          /* extraction best-effort */
+        }
+      }
+      if (posts > 0) result.sources.push(platform);
+    } catch (e) {
+      errors.push(`apify:${platform}: ${(e as Error).message}`);
+    }
+    result.socialPosts += posts;
+    result.offersWritten += offers;
+    await finishRun(svc, run, posts + offers);
   }
 
   // stamp last_collected_at (+ any resolved ids)

@@ -7,6 +7,7 @@ import {
   type JsonLdFacts,
 } from "./jsonld";
 import { renderHtml } from "./render";
+import { extractProfileLinks, type ProfileLink } from "./profiles";
 
 /**
  * Website crawler — guide 5.4 strategy. The most controllable competitive
@@ -44,6 +45,8 @@ export interface CrawlResult {
   pagesSkippedUnchanged: number;
   robotsPolicy: "allowed" | "partial" | "unknown";
   errors: string[];
+  // platform profiles discovered from the site's own links (§ profile resolver)
+  profileLinks: ProfileLink[];
 }
 
 const DEFAULT_UA =
@@ -186,7 +189,9 @@ export async function crawlWebsite(
     pagesSkippedUnchanged: 0,
     robotsPolicy: "unknown",
     errors: [],
+    profileLinks: [],
   };
+  const profiles = new Map<string, string>(); // platform → url, deduped across pages
 
   let root: URL;
   try {
@@ -296,6 +301,12 @@ export async function crawlWebsite(
       }
     }
 
+    // harvest the business's own platform profiles from this page (§ resolver)
+    for (const pl of extractProfileLinks(effectiveHtml, url)) {
+      const existing = profiles.get(pl.platform);
+      if (!existing || pl.url.length < existing.length) profiles.set(pl.platform, pl.url);
+    }
+
     const docLinks = extractDocumentLinks(effectiveHtml, url);
     const isMenuLike =
       facts.menuItems.length > 0 || /menu|specials|offers|deals/i.test(url);
@@ -333,6 +344,8 @@ export async function crawlWebsite(
       }
     }
   }
+
+  result.profileLinks = [...profiles.entries()].map(([platform, url]) => ({ platform, url }));
 
   // NOTE (guide 5.4 step 5): when a page yields no meaningful text/JSON-LD but
   // clearly relies on JS, route it to a Playwright rendering fallback here and
