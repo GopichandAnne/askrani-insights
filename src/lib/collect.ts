@@ -139,9 +139,19 @@ async function pollJob(provider: any, jobId: string, maxMs: number) {
   return provider.getJob(jobId);
 }
 
-export async function collectBusiness(businessId: string): Promise<CollectResult> {
+export async function collectBusiness(
+  businessId: string,
+  opts: { budgetMs?: number; only?: string[] } = {},
+): Promise<CollectResult> {
   const svc = createServiceClient();
   const nowIso = new Date().toISOString();
+  // Time-box the whole pass so a many-source business never exceeds the
+  // function limit (~300s). Slow sources beyond the budget are skipped this
+  // run and picked up on the next scan. `only` restricts to named sources.
+  const started = Date.now();
+  const budgetMs = opts.budgetMs ?? 250_000;
+  const wants = (s: string) => !opts.only || opts.only.includes(s);
+  const hasTime = () => Date.now() - started < budgetMs;
 
   const { data: biz, error: bErr } = await svc
     .from("business")
@@ -171,7 +181,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   let profileLinks: { platform: string; url: string }[] = [];
 
   // ── 1) WEBSITE (always) ─────────────────────────────────────────────────
-  if (biz.website) {
+  if (biz.website && wants("website")) {
     const run = await startRun(svc, "website", businessId);
     let n = 0;
     try {
@@ -228,7 +238,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
 
   // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");
-  if (google?.isConfigured()) {
+  if (google?.isConfigured() && wants("google") && hasTime()) {
     const run = await startRun(svc, "google", businessId);
     let n = 0;
     try {
@@ -259,7 +269,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
 
   // ── 3) YELP reviews (resolve+store yelp id first) ────────────────────────
   const yelp = getProvider("yelp");
-  if (yelp?.isConfigured()) {
+  if (yelp?.isConfigured() && wants("yelp") && hasTime()) {
     const run = await startRun(svc, "yelp", businessId);
     let n = 0;
     try {
@@ -291,7 +301,7 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   // ── 4) YOUTUBE (official API): recent uploads → content + extraction ─────
   const youtube = getProvider("youtube");
   const ytUrl = identityUrl("youtube");
-  if (youtube?.isConfigured() && ytUrl) {
+  if (youtube?.isConfigured() && ytUrl && wants("youtube") && hasTime()) {
     const run = await startRun(svc, "youtube", businessId);
     let n = 0;
     try {
@@ -320,7 +330,8 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   //    Against those platforms' ToS — user-gated by keys.
   const DELIVERY = new Set(["doordash", "ubereats"]);
   for (const platform of APIFY_PLATFORMS) {
-    if (!platformActorConfigured(platform)) continue;
+    if (!platformActorConfigured(platform) || !wants(platform)) continue;
+    if (!hasTime()) break; // out of time budget — remaining sources next scan
     const url = identityUrl(platform);
     const isDelivery = DELIVERY.has(platform);
 
