@@ -66,12 +66,15 @@ const CONFIG: Record<string, PlatformConfig> = {
     platform: "doordash",
   },
   // memo23/uber-eats-scraper: startUrls (store URL) OR searchQuery+address.
+  // maxItems = number of STORES to scrape. For a linked store URL that's 1
+  // (full menu). For a search it returns loosely-ranked stores, so scrape a
+  // handful and let the name-match guard pick the business (may miss).
   ubereats: {
     actor: () => env("APIFY_UBEREATS_ACTOR"),
     input: (t, ctx) =>
       t
-        ? { startUrls: [{ url: t }], maxItems: 40 }
-        : { searchQuery: ctx?.searchQuery ?? "", address: ctx?.address ?? "", maxItems: 40 },
+        ? { startUrls: [{ url: t }], maxItems: 1 }
+        : { searchQuery: ctx?.searchQuery ?? "", address: ctx?.address ?? "", maxItems: 5 },
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
     contentKind: "menu",
     platform: "ubereats",
