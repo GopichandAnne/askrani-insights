@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ScreenState } from "@/lib/workspace";
+import { RaniMark } from "@/components/RaniSpinner";
 
 /** Consistent messaging for the non-ok workspace states across data screens. */
 export function ScreenNotReady({
@@ -21,11 +22,12 @@ export function ScreenNotReady({
       : { href: "/onboarding", label: "Run a market analysis →" };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in">
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      <div className="rounded-xl border border-dashed border-line bg-surface p-6 text-sm text-ink-soft">
-        <p>{body}</p>
-        <Link href={cta.href} className="mt-3 inline-flex text-brand hover:underline">
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-line bg-surface p-10 text-center">
+        <RaniMark size={44} />
+        <p className="max-w-sm text-sm text-ink-soft">{body}</p>
+        <Link href={cta.href} className="btn btn-primary">
           {cta.label}
         </Link>
       </div>

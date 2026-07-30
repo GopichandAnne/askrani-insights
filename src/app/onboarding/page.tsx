@@ -1,23 +1,44 @@
 import { SearchFlow } from "./SearchFlow";
 import { getUser, isSupabaseConfigured } from "@/lib/auth";
 import Link from "next/link";
+import { RaniMark } from "@/components/RaniSpinner";
 
-export const metadata = { title: "Set up your workspace — local-intel" };
+export const metadata = { title: "Set up your workspace — Ask Rani Insights" };
 export const dynamic = "force-dynamic";
+
+const STEPS = [
+  ["1", "Find your business", "Search by name — we resolve the canonical listing."],
+  ["2", "Meet your competitors", "We auto-discover & rank nearby rivals; edit the set."],
+  ["3", "We collect it all", "Websites, menus, offers, reviews, social — on their own."],
+];
 
 export default async function OnboardingPage() {
   const configured = isSupabaseConfigured();
   const user = configured ? await getUser() : null;
 
   return (
-    <div className="space-y-6">
-      <section>
-        <h1 className="text-2xl font-semibold tracking-tight">Set up your workspace</h1>
-        <p className="mt-1 max-w-2xl text-ink-soft">
-          Search for your business, we auto-find your local competitors, and then
-          collect everything available — websites, menus, offers, reviews — on its
-          own. Every fact keeps its source and confidence.
+    <div className="space-y-6 animate-fade-in">
+      <section className="overflow-hidden rounded-xl bg-brand-hero p-8 text-white shadow-brand">
+        <div className="flex items-center gap-3">
+          <RaniMark size={40} />
+          <h1 className="font-display text-3xl font-extrabold italic">Set up your workspace</h1>
+        </div>
+        <p className="mt-2 max-w-2xl text-white/85">
+          Search your business, we auto-find your local competitors, then collect everything
+          available — websites, menus, offers, reviews — autonomously. Every fact keeps its source
+          and confidence.
         </p>
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          {STEPS.map(([n, t, d]) => (
+            <div key={n} className="rounded-lg bg-white/10 p-3 backdrop-blur">
+              <div className="flex items-center gap-2">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-white/20 text-xs font-bold">{n}</span>
+                <span className="text-sm font-semibold">{t}</span>
+              </div>
+              <p className="mt-1 text-xs text-white/80">{d}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
       {!configured ? (
