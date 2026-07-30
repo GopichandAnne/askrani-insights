@@ -311,7 +311,8 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
     let posts = 0;
     let offers = 0;
     try {
-      const items = await collectApifyPlatform(platform, url, { maxMs: 75000 });
+      // Delivery actors need a delivery address (city/street) for the store.
+      const items = await collectApifyPlatform(platform, url, { maxMs: 120000, address: attrs.address });
       for (const post of items) {
         const ci = await upsertObsContentItem(svc, businessId, post, nowIso);
         posts++;

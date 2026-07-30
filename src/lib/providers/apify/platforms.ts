@@ -15,7 +15,7 @@ import type { RawObservation, Provenance, ContentKind } from "../types";
 
 interface PlatformConfig {
   actor: () => string | undefined; // undefined = not configured → skip
-  input: (target: string) => Record<string, unknown>;
+  input: (target: string, ctx?: { address?: string }) => Record<string, unknown>;
   provenance: Provenance;
   contentKind: ContentKind;
   platform: string;
@@ -50,21 +50,71 @@ const CONFIG: Record<string, PlatformConfig> = {
     platform: "tiktok",
   },
   // Delivery Actors vary a lot; require an explicit env Actor id (no default).
+  // dz_omar/doordash-scraper requires `address` + `startUrls`.
   doordash: {
     actor: () => env("APIFY_DOORDASH_ACTOR"),
-    input: (t) => ({ startUrls: [{ url: t }] }),
+    input: (t, ctx) => ({ startUrls: [{ url: t }], address: ctx?.address ?? "", maxResults: 1, fetchReviews: false }),
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
     contentKind: "menu",
     platform: "doordash",
   },
   ubereats: {
     actor: () => env("APIFY_UBEREATS_ACTOR"),
-    input: (t) => ({ startUrls: [{ url: t }] }),
+    input: (t, ctx) => ({ startUrls: [{ url: t }], address: ctx?.address ?? "" }),
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
     contentKind: "menu",
     platform: "ubereats",
   },
 };
+
+function parsePrice(s: any): number | undefined {
+  if (s == null) return undefined;
+  const n = Number(String(s).replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Map a DoorDash store record (dz_omar/doordash-scraper) into a rich menu
+ * observation: menu items become structured offers (via structuredHints.jsonld,
+ * reusing the pipeline's no-model offer path), promo items become sale offers,
+ * and the store rating/delivery info rides in the text + hints.
+ */
+function mapDoorDashStore(r: any): RawObservation {
+  const menuItems: any[] = [];
+  const offers: any[] = [];
+  const currency = r.currency ?? "USD";
+  for (const cat of r.menu_categories ?? []) {
+    for (const it of cat.items ?? []) {
+      const current = parsePrice(it.price_display) ?? (it.price_cents != null ? it.price_cents / 100 : undefined);
+      if (!it.name) continue;
+      const entry = { name: it.name, price: current, currency, section: cat.category_name };
+      const hasPromo = Array.isArray(it.badges) && it.badges.length > 0;
+      if (hasPromo) offers.push(entry);
+      else menuItems.push(entry);
+    }
+  }
+  const itemCount = menuItems.length + offers.length;
+  const text =
+    `${r.name} on DoorDash - ${r.rating ?? "?"} stars (${r.num_ratings ?? "?"} ratings) | ` +
+    `${r.price_range_display ?? ""} | ${r.delivery_fee_display ?? ""} | ~${r.asap_minutes ?? "?"} min | ${itemCount} menu items.`;
+  return {
+    provider: "apify",
+    provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
+    platform: "doordash",
+    contentKind: "menu",
+    externalRef: `doordash:${r.store_id}`,
+    sourceUrl: r.url,
+    text,
+    media: r.cover_image ? [{ type: "image", url: r.cover_image }] : [],
+    observedAt: new Date().toISOString(),
+    contentHash: createHash("sha256").update(`${r.store_id}|${itemCount}|${r.rating}`).digest("hex"),
+    raw: { store_id: r.store_id, rating: r.rating, num_ratings: r.num_ratings, delivery_fee: r.delivery_fee_display, asap_minutes: r.asap_minutes },
+    structuredHints: {
+      jsonld: { businessName: r.name, menuItems, offers },
+      store: { rating: r.rating, num_ratings: r.num_ratings, delivery_fee: r.delivery_fee_display, asap_minutes: r.asap_minutes, price_range: r.price_range_display },
+    },
+  };
+}
 
 export function apifyConfigured(): boolean {
   return !!process.env.APIFY_TOKEN;
@@ -104,20 +154,22 @@ function mapItem(cfg: PlatformConfig, it: any): RawObservation {
 export async function collectApifyPlatform(
   platform: string,
   target: string,
-  opts: { maxMs?: number } = {},
+  opts: { maxMs?: number; address?: string } = {},
 ): Promise<RawObservation[]> {
   const token = process.env.APIFY_TOKEN;
   const cfg = CONFIG[platform];
   if (!token || !cfg) return [];
   const actor = cfg.actor();
   if (!actor) return []; // no Actor configured for this platform
+  // DoorDash actor requires an address; skip cleanly without one.
+  if (platform === "doordash" && !opts.address) return [];
 
   const maxMs = opts.maxMs ?? 75000;
   try {
     const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(cfg.input(target)),
+      body: JSON.stringify(cfg.input(target, { address: opts.address })),
     });
     if (!runRes.ok) return [];
     const run = (await runRes.json()) as any;
@@ -141,6 +193,9 @@ export async function collectApifyPlatform(
     const items = (await fetch(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`,
     ).then((r) => r.json())) as any[];
+    if (platform === "doordash") {
+      return items.filter((it) => it?.record_type === "store" || it?.menu_categories).map(mapDoorDashStore);
+    }
     return items.map((it) => mapItem(cfg, it));
   } catch {
     return [];
