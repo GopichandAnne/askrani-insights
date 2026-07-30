@@ -113,19 +113,24 @@ async function startRun(svc: Svc, provider: string, businessId: string): Promise
     .single();
   return data?.id as string | undefined;
 }
-async function finishRun(svc: Svc, runId: string | undefined, count: number, error?: string) {
+async function finishRun(svc: Svc, runId: string | undefined, count: number, error?: string, costUsd = 0) {
   if (!runId) return;
   await svc
     .from("provider_run")
     .update({
       status: error && count === 0 ? "partial" : "succeeded",
       result_count: count,
-      cost_usd: 0,
+      cost_usd: Number(costUsd.toFixed(4)),
       finished_at: new Date().toISOString(),
       error: error ?? null,
     })
     .eq("id", runId);
 }
+
+// Per-request cost estimates for metered sources (guide §16.1; Apify uses the
+// Actor's real usageTotalUsd, these are best-effort estimates for the rest).
+const GOOGLE_CALL_USD = 0.017; // Places API (New) SKU, approx
+const AI_PER_ITEM_USD = 0.004; // rough Claude cost per extracted content item
 
 /** Bounded poll of a provider job to a terminal state. */
 async function pollJob(provider: any, jobId: string, maxMs: number) {
@@ -179,6 +184,7 @@ export async function collectBusiness(
   const errors: string[] = [];
   let attrsDirty = false;
   let profileLinks: { platform: string; url: string }[] = [];
+  let aiItems = 0; // count of content items sent through Claude extraction (for AI cost)
 
   // ── 1) WEBSITE (always) ─────────────────────────────────────────────────
   if (biz.website && wants("website")) {
@@ -193,6 +199,7 @@ export async function collectBusiness(
         try {
           const ci = await upsertObsContentItem(svc, businessId, obs, nowIso);
           const out = await runExtraction(obs, { vertical, name: biz.canonical_name });
+          aiItems++;
           n += await insertOffers(svc, businessId, ci, out.offers, nowIso);
         } catch (e) {
           errors.push(`website ${obs.sourceUrl}: ${(e as Error).message}`);
@@ -241,10 +248,12 @@ export async function collectBusiness(
   if (google?.isConfigured() && wants("google") && hasTime()) {
     const run = await startRun(svc, "google", businessId);
     let n = 0;
+    let gCalls = 0; // billable Places API calls this run
     try {
       let placeId = attrs.place_id as string | undefined;
       if (!placeId) {
         const cands = await google.discoverProfiles({ query: `${biz.canonical_name}`, near: geo, limit: 1 });
+        gCalls++; // Text Search
         placeId = cands[0]?.externalId;
         if (placeId) {
           attrs.place_id = placeId;
@@ -253,6 +262,7 @@ export async function collectBusiness(
       }
       if (placeId) {
         const job = await google.collectContent({ urls: [placeId] });
+        gCalls++; // Place Details (reviews + photos)
         await pollJob(google, job.jobId, 30000);
         for await (const rev of google.fetchResults(job.jobId)) {
           await upsertObsContentItem(svc, businessId, rev, nowIso);
@@ -264,7 +274,7 @@ export async function collectBusiness(
       errors.push(`google: ${(e as Error).message}`);
     }
     result.reviews += n;
-    await finishRun(svc, run, n);
+    await finishRun(svc, run, n, undefined, gCalls * GOOGLE_CALL_USD);
   }
 
   // ── 3) YELP reviews (resolve+store yelp id first) ────────────────────────
@@ -311,6 +321,7 @@ export async function collectBusiness(
         const ci = await upsertObsContentItem(svc, businessId, vid, nowIso);
         try {
           const out = await runExtraction(vid, { vertical, name: biz.canonical_name });
+          aiItems++;
           result.offersWritten += await insertOffers(svc, businessId, ci, out.offers, nowIso);
         } catch {
           /* best-effort */
@@ -345,9 +356,11 @@ export async function collectBusiness(
     const run = await startRun(svc, `apify:${platform}`, businessId);
     let posts = 0;
     let offers = 0;
+    let apifyCost = 0;
     try {
-      const items = await collectApifyPlatform(platform, target, { maxMs: 150000, address: attrs.address, searchQuery });
-      for (const post of items) {
+      const res = await collectApifyPlatform(platform, target, { maxMs: 150000, address: attrs.address, searchQuery });
+      apifyCost = res.costUsd;
+      for (const post of res.items) {
         // guard the search fallback: don't attach a store that isn't this business
         if (isDelivery && searchQuery) {
           const storeName = (post.structuredHints as any)?.jsonld?.businessName ?? "";
@@ -357,6 +370,7 @@ export async function collectBusiness(
         posts++;
         try {
           const out = await runExtraction(post, { vertical, name: biz.canonical_name });
+          aiItems++;
           offers += await insertOffers(svc, businessId, ci, out.offers, nowIso);
         } catch {
           /* extraction best-effort */
@@ -368,7 +382,13 @@ export async function collectBusiness(
     }
     result.socialPosts += posts;
     result.offersWritten += offers;
-    await finishRun(svc, run, posts + offers);
+    await finishRun(svc, run, posts + offers, undefined, apifyCost);
+  }
+
+  // ── AI extraction cost (Claude): one estimated run for all items this pass ──
+  if (aiItems > 0) {
+    const aiRun = await startRun(svc, "ai", businessId);
+    await finishRun(svc, aiRun, aiItems, undefined, aiItems * AI_PER_ITEM_USD);
   }
 
   // stamp last_collected_at (+ any resolved ids)

@@ -123,3 +123,26 @@ h2,
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ── Print / Save-as-PDF: strip chrome, keep the report clean ────────────── */
+@media print {
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .print-card {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+  a[href]::after {
+    content: "";
+  }
+}

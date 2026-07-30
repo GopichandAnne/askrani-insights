@@ -204,20 +204,26 @@ function mapUberEatsStore(r: any): RawObservation {
  * normalized observations. Returns [] (never throws) when not configured, so the
  * collection worker degrades cleanly.
  */
+export interface ApifyResult {
+  items: RawObservation[];
+  costUsd: number; // the Actor run's real usage cost (guide §16.1)
+}
+
 export async function collectApifyPlatform(
   platform: string,
   target: string,
   opts: { maxMs?: number; address?: string; searchQuery?: string } = {},
-): Promise<RawObservation[]> {
+): Promise<ApifyResult> {
+  const empty: ApifyResult = { items: [], costUsd: 0 };
   const token = process.env.APIFY_TOKEN;
   const cfg = CONFIG[platform];
-  if (!token || !cfg) return [];
+  if (!token || !cfg) return empty;
   const actor = cfg.actor();
-  if (!actor) return []; // no Actor configured for this platform
+  if (!actor) return empty; // no Actor configured for this platform
   // Delivery actors need an address, and either a store URL or a search query.
   if ((platform === "doordash" || platform === "ubereats")) {
-    if (!opts.address) return [];
-    if (!target && !opts.searchQuery) return [];
+    if (!opts.address) return empty;
+    if (!target && !opts.searchQuery) return empty;
   }
 
   const maxMs = opts.maxMs ?? 75000;
@@ -227,37 +233,41 @@ export async function collectApifyPlatform(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(cfg.input(target, { address: opts.address, searchQuery: opts.searchQuery })),
     });
-    if (!runRes.ok) return [];
+    if (!runRes.ok) return empty;
     const run = (await runRes.json()) as any;
     const runId = run.data?.id;
-    if (!runId) return [];
+    if (!runId) return empty;
 
     const deadline = Date.now() + maxMs;
     let datasetId: string | undefined;
+    let costUsd = 0;
     while (Date.now() < deadline) {
       const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
       const s = st.data?.status;
+      costUsd = st.data?.usageTotalUsd ?? costUsd;
       if (s === "SUCCEEDED") {
         datasetId = st.data?.defaultDatasetId;
         break;
       }
-      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return [];
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return []; // still running past our budget — skip this pass
+    if (!datasetId) return { items: [], costUsd }; // still running past our budget
 
-    const items = (await fetch(
+    const raw = (await fetch(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`,
     ).then((r) => r.json())) as any[];
+    let items: RawObservation[];
     if (platform === "doordash") {
-      return items.filter((it) => it?.record_type === "store" || it?.menu_categories).map(mapDoorDashStore);
+      items = raw.filter((it) => it?.record_type === "store" || it?.menu_categories).map(mapDoorDashStore);
+    } else if (platform === "ubereats") {
+      items = raw.filter((it) => it?.shopName || it?.menuItems).map(mapUberEatsStore);
+    } else {
+      items = raw.map((it) => mapItem(cfg, it));
     }
-    if (platform === "ubereats") {
-      return items.filter((it) => it?.shopName || it?.menuItems).map(mapUberEatsStore);
-    }
-    return items.map((it) => mapItem(cfg, it));
+    return { items, costUsd };
   } catch {
-    return [];
+    return empty;
   }
 }
 
