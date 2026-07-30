@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const svc = createServiceClient();
     const { data: ws } = await svc
       .from("workspace")
-      .select("target_business_id")
+      .select("target_business_id,vertical")
       .eq("id", workspaceId)
       .single();
     let geo, category: string | undefined;
@@ -37,6 +37,7 @@ export async function POST(req: Request) {
       workspaceId,
       { businessId: ws?.target_business_id, geo, category },
       candidate,
+      ws?.vertical ?? "restaurant",
     );
     // queue the new competitor for background collection + kick the worker
     await enqueueOne(svc, workspaceId, competitor.businessId, 0);

@@ -15,3 +15,14 @@ insert into canonical_entity (vertical, kind, name, aliases, attributes) values
   ('restaurant','event','Happy Hour',          array['happyhour'],           '{"daypart":"evening"}'),
   ('restaurant','event','Weekend Brunch',      array['brunch'],              '{"daypart":"morning"}')
 on conflict do nothing;
+
+-- Starter grocery catalog (guide 7.2). Names + aliases bootstrap fuzzy linking.
+insert into canonical_entity (vertical, kind, name, aliases, attributes) values
+  ('grocery','product','Aashirvaad Atta',       array['aashirvaad chakki atta','whole wheat flour'], '{"brand":"Aashirvaad","category":"flour"}'),
+  ('grocery','product','Basmati Rice',           array['basmati'],                     '{"category":"rice"}'),
+  ('grocery','product','Toor Dal',               array['toor dhal','arhar dal'],       '{"category":"lentils"}'),
+  ('grocery','product','Paneer',                 array['cottage cheese'],              '{"category":"dairy"}'),
+  ('grocery','product','Maggi Noodles',          array['maggi'],                       '{"brand":"Nestlé","category":"instant"}'),
+  ('grocery','product','Amul Butter',            array['amul'],                        '{"brand":"Amul","category":"dairy"}'),
+  ('grocery','product','Mango Pulp',             array['kesar mango pulp'],            '{"category":"canned"}')
+on conflict do nothing;

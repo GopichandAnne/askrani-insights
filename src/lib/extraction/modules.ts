@@ -1,13 +1,14 @@
 import type { VerticalModule } from "./vertical";
 import { RestaurantModule } from "./restaurant";
+import { GroceryModule } from "./grocery";
 
 /**
- * Vertical module registry. Restaurant is implemented; the others are declared
- * so the pipeline resolves a module for any workspace vertical. Grocery is next
- * (guide roadmap Phase 1/2); the expansion verticals (7.4) slot in here.
+ * Vertical module registry. Restaurant and grocery are implemented; expansion
+ * verticals (§7.4) slot in here behind the same VerticalModule interface.
  */
 const MODULES: Record<string, VerticalModule> = {
   restaurant: new RestaurantModule(),
+  grocery: new GroceryModule(),
 };
 
 export function moduleFor(vertical: string): VerticalModule {

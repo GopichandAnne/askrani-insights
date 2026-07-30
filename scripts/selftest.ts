@@ -84,6 +84,24 @@ async function main() {
   assert(recs.every((r) => r.evidence.length > 0), "every recommendation carries evidence");
   console.log("\n   top rec:", recs[0]?.title, "→ priority", recs[0]?.priority);
 
+  console.log("4) Grocery vertical (module + grocery-aware recommendations)");
+  const { moduleFor } = await import("../src/lib/extraction/modules");
+  assert(moduleFor("grocery").vertical === "grocery", "grocery module registered");
+  const gTarget: BusinessOffers = {
+    businessId: "g",
+    name: "Rani Grocery",
+    offers: [
+      { entity_text: "Basmati Rice", offer_type: "regular", pricing: { type: "regular", amount: 19.99 }, canonical_entity_id: null, conditions: [], validity_start: null, validity_end: null, confidence: 0.9, provenance: "PUBLIC_WEBSITE_HTTP", evidence: [] } as any,
+    ],
+  };
+  const gPeers: BusinessOffers[] = [
+    { businessId: "gp1", name: "Desi Mart", offers: [{ entity_text: "Basmati Rice", offer_type: "sale", pricing: { type: "sale", amount: 14.99 }, canonical_entity_id: null, conditions: [], validity_start: null, validity_end: null, confidence: 0.9, provenance: "PUBLIC_WEBSITE_HTTP", evidence: [] } as any] },
+    { businessId: "gp2", name: "India Bazaar", offers: [{ entity_text: "Basmati Rice", offer_type: "multi_buy", pricing: { type: "multi_buy", amount: 13.99 }, canonical_entity_id: null, conditions: [], validity_start: null, validity_end: null, confidence: 0.9, provenance: "PUBLIC_WEBSITE_HTTP", evidence: [] } as any] },
+  ];
+  const gRecs = generateRecommendations(gTarget, gPeers, "grocery");
+  assert(gRecs.some((r) => /discount/i.test(r.title)), "detects rivals discounting a staple you sell full-price");
+  assert(!gRecs.some((r) => /lunch/i.test(r.title)), "does NOT emit the restaurant lunch rule for grocery");
+
   console.log(failures === 0 ? "\nALL PASSED ✓" : `\n${failures} FAILED ✗`);
   process.exit(failures === 0 ? 0 : 1);
 }

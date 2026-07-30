@@ -43,6 +43,7 @@ interface Job {
 
 export function SearchFlow() {
   const [phase, setPhase] = useState<"search" | "workspace">("search");
+  const [vertical, setVertical] = useState<"restaurant" | "grocery">("restaurant");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Candidate[]>([]);
   const [searching, setSearching] = useState(false);
@@ -108,7 +109,7 @@ export function SearchFlow() {
       const res = await fetch("/api/workspace/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ candidate: cand }),
+        body: JSON.stringify({ candidate: cand, vertical }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "could not create workspace");
@@ -138,8 +139,27 @@ export function SearchFlow() {
     return (
       <div className="space-y-5">
         <form onSubmit={onSearch} className="rounded-xl border border-line bg-surface p-6">
+          <div className="mb-4">
+            <span className="block text-sm font-medium">What kind of business is it?</span>
+            <div className="mt-2 inline-flex rounded-lg border border-line p-0.5">
+              {(["restaurant", "grocery"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setVertical(v)}
+                  className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
+                    vertical === v ? "bg-brand-gradient text-white shadow-brand" : "text-ink-faint hover:text-ink"
+                  }`}
+                >
+                  {v === "restaurant" ? "🍽️ Restaurant" : "🛒 Grocery"}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="block text-sm font-medium">Find your business</label>
-          <p className="mb-3 text-sm text-ink-faint">Search by name and city — e.g. “Katz’s Delicatessen New York”.</p>
+          <p className="mb-3 text-sm text-ink-faint">
+            Search by name and city — e.g. {vertical === "grocery" ? "“Patel Brothers Edison NJ”" : "“Katz’s Delicatessen New York”"}.
+          </p>
           <div className="flex gap-2">
             <input
               value={query}

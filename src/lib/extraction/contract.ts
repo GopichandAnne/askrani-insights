@@ -37,6 +37,8 @@ export const Pricing = z.object({
       "multi_buy",
       "bogo",
       "catering",
+      "member_price",
+      "clearance",
       "unknown",
     ])
     .catch("unknown")

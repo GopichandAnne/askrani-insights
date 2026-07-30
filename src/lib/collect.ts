@@ -354,7 +354,7 @@ export async function refreshRecommendations(workspaceId: string): Promise<numbe
   const svc = createServiceClient();
   const { data: ws } = await svc
     .from("workspace")
-    .select("id,target_business_id")
+    .select("id,target_business_id,vertical")
     .eq("id", workspaceId)
     .single();
   if (!ws?.target_business_id) return 0;
@@ -409,7 +409,7 @@ export async function refreshRecommendations(workspaceId: string): Promise<numbe
     offers: byBiz.get(id) ?? [],
   }));
 
-  const recs = generateRecommendations(target, competitors);
+  const recs = generateRecommendations(target, competitors, ws.vertical ?? "restaurant");
 
   await svc.from("recommendation").delete().eq("workspace_id", workspaceId).eq("status", "proposed");
   if (recs.length) {

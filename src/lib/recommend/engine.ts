@@ -58,14 +58,16 @@ function isLunch(o: PipelineOffer) {
 export function generateRecommendations(
   target: BusinessOffers,
   competitors: BusinessOffers[],
+  vertical: string = "restaurant",
 ): Recommendation[] {
   const recs: Omit<Recommendation, "priority">[] = [];
   const peerCount = Math.max(1, competitors.length);
+  const isGrocery = vertical === "grocery";
 
-  // 1) Weekday-lunch daypart gap (guide 10.3 canonical example).
+  // 1) Weekday-lunch daypart gap — restaurant-only (guide 10.3 canonical example).
   const peersWithLunch = competitors.filter((c) => c.offers.some(isLunch)).length;
   const targetHasLunch = target.offers.some(isLunch);
-  if (!targetHasLunch && peersWithLunch >= Math.ceil(peerCount / 2)) {
+  if (!isGrocery && !targetHasLunch && peersWithLunch >= Math.ceil(peerCount / 2)) {
     recs.push({
       category: "promotion",
       title: "Own the weekday lunch gap",
@@ -146,16 +148,51 @@ export function generateRecommendations(
     .sort((a, b) => b[1].count - a[1].count)
     .slice(0, 3);
   if (gaps.length) {
+    const where = isGrocery ? "peer stores stock" : "peer menus";
     recs.push({
       category: "menu",
-      title: "Popular local dishes missing from your menu",
-      action: `Evaluate adding or featuring: ${gaps.map(([, v]) => v.example).join(", ")}.`,
-      why_now: gaps.map(([, v]) => `${v.example} appears on ${v.count} of ${peerCount} peer menus.`),
+      title: isGrocery ? "Popular products your rivals carry that you don't" : "Popular local dishes missing from your menu",
+      action: `Evaluate ${isGrocery ? "stocking" : "adding or featuring"}: ${gaps.map(([, v]) => v.example).join(", ")}.`,
+      why_now: gaps.map(([, v]) => `${v.example} appears on ${v.count} of ${peerCount} ${where}.`),
       evidence: gaps.map(([, v]) => `${v.example} (${v.count} peers)`),
-      expected_impact: { metric: "menu_coverage", range_pct: [3, 8], confidence: 0.45 },
+      expected_impact: { metric: isGrocery ? "basket_coverage" : "menu_coverage", range_pct: [3, 8], confidence: 0.45 },
       effort: "high",
       urgency: "this_month",
     });
+  }
+
+  // 5) Grocery: rivals discounting staples you carry at full price (§7.2:
+  //    overlapping discounted products / loss-leader awareness).
+  if (isGrocery) {
+    const targetFull = new Set(
+      target.offers.filter((o) => !PROMO_TYPES.has(o.offer_type)).map((o) => normalize(o.entity_text)),
+    );
+    const discounted = new Map<string, { count: number; example: string }>();
+    for (const c of competitors) {
+      const seen = new Set<string>();
+      for (const o of c.offers) {
+        if (!PROMO_TYPES.has(o.offer_type)) continue;
+        const key = normalize(o.entity_text);
+        if (!key || seen.has(key) || !targetFull.has(key)) continue;
+        seen.add(key);
+        const cur = discounted.get(key) ?? { count: 0, example: o.entity_text };
+        cur.count++;
+        discounted.set(key, cur);
+      }
+    }
+    const hot = [...discounted.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 3);
+    if (hot.length) {
+      recs.push({
+        category: "promotion",
+        title: "Rivals are discounting staples you sell at full price",
+        action: `Consider a promotion or price-check on: ${hot.map(([, v]) => v.example).join(", ")} — shoppers comparison-shop these.`,
+        why_now: hot.map(([, v]) => `${v.example} is on promotion at ${v.count} of ${peerCount} nearby stores; you list it at regular price.`),
+        evidence: hot.map(([, v]) => `${v.example} discounted by ${v.count} peers`),
+        expected_impact: { metric: "basket_traffic", range_pct: [3, 9], confidence: 0.5 },
+        effort: "medium",
+        urgency: "this_week",
+      });
+    }
   }
 
   return recs

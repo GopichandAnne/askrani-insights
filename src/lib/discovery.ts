@@ -180,9 +180,9 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
 export async function createWorkspaceFromCandidate(
   orgId: string,
   cand: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; raw?: any },
-): Promise<{ workspaceId: string; businessId: string; geo?: { lat: number; lng: number } }> {
+  vertical: string = "restaurant",
+): Promise<{ workspaceId: string; businessId: string; geo?: { lat: number; lng: number }; vertical: string }> {
   const svc = createServiceClient();
-  const vertical = "restaurant";
   const businessId = await upsertBusiness(svc, cand, vertical);
 
   const { data: existingWs } = await svc
@@ -203,21 +203,22 @@ export async function createWorkspaceFromCandidate(
     if (error) throw new Error(`workspace insert: ${error.message}`);
     workspaceId = data.id as string;
   }
-  return { workspaceId, businessId, geo: cand.geo };
+  return { workspaceId, businessId, geo: cand.geo, vertical };
 }
 
 /** Auto-discover, rank and persist competitors near the target business. */
 export async function autoDiscoverCompetitors(
   workspaceId: string,
   target: { businessId: string; name: string; geo?: { lat: number; lng: number }; category?: string },
-  opts: { radiusKm?: number; limit?: number } = {},
+  opts: { radiusKm?: number; limit?: number; vertical?: string } = {},
 ): Promise<CompetitorRow[]> {
   if (!target.geo) return [];
   const radiusKm = opts.radiusKm ?? 3;
   const limit = opts.limit ?? 12;
+  const vertical = opts.vertical ?? "restaurant";
   const svc = createServiceClient();
 
-  const cands = await discoverCandidates({ near: { ...target.geo, radiusKm }, vertical: "restaurant", limit: 40 });
+  const cands = await discoverCandidates({ near: { ...target.geo, radiusKm }, vertical, limit: 40 });
   const targetName = target.name.toLowerCase().trim();
 
   const scored = cands
@@ -231,7 +232,7 @@ export async function autoDiscoverCompetitors(
     const compId = await upsertBusiness(
       svc,
       { name: s.cand.name, website: s.cand.website, geo: s.cand.geo, category: s.cand.category, raw: s.cand.raw },
-      "restaurant",
+      vertical,
     );
     if (compId === target.businessId) continue;
     const relation = i < 5 ? "primary" : "secondary";
@@ -271,9 +272,10 @@ export async function addCompetitor(
   workspaceId: string,
   target: { businessId: string; geo?: { lat: number; lng: number }; category?: string },
   cand: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; raw?: any },
+  vertical: string = "restaurant",
 ): Promise<CompetitorRow> {
   const svc = createServiceClient();
-  const compId = await upsertBusiness(svc, cand, "restaurant");
+  const compId = await upsertBusiness(svc, cand, vertical);
   const radiusKm = 5;
   const withDist =
     target.geo && cand.geo
