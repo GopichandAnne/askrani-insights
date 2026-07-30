@@ -59,7 +59,9 @@ export class YelpProvider implements PublicContentProvider {
     return (data.businesses ?? []).map((b: any): ProfileCandidate => ({
       name: b.name,
       platform: "yelp",
-      externalId: b.id, // yelp alias/id used for the reviews endpoint
+      // the reviews endpoint is reliable with the business ALIAS (slug), not the
+      // encoded id — prefer alias, fall back to id.
+      externalId: b.alias ?? b.id,
       url: b.url,
       website: undefined, // Yelp doesn't return the business's own site
       geo: b.coordinates ? { lat: b.coordinates.latitude, lng: b.coordinates.longitude } : undefined,
@@ -86,11 +88,41 @@ export class YelpProvider implements PublicContentProvider {
       const now = new Date().toISOString();
       for (const id of input.urls) {
         try {
-          const res = await fetch(`https://api.yelp.com/v3/businesses/${encodeURIComponent(id)}/reviews?limit=20&sort_by=yelp_sort`, {
+          // 1) Business details (free tier) → emit the reputation summary
+          //    (overall rating + review count) as a review-type observation.
+          const detRes = await fetch(`https://api.yelp.com/v3/businesses/${encodeURIComponent(id)}`, {
+            headers: this.headers(),
+          });
+          if (detRes.ok) {
+            const b = (await detRes.json()) as any;
+            if (b.rating != null) {
+              const text = `Rated ${b.rating}★ on Yelp from ${b.review_count ?? 0} reviews${b.price ? ` · price ${b.price}` : ""}.`;
+              out.push({
+                provider: this.name,
+                provenance: "OFFICIAL_PUBLIC_API",
+                platform: "yelp",
+                contentKind: "review",
+                externalRef: `${id}#yelp-rating`,
+                sourceUrl: b.url,
+                text,
+                media: [],
+                observedAt: now,
+                contentHash: createHash("sha256").update(`${id}|${b.rating}|${b.review_count}`).digest("hex"),
+                raw: { rating: b.rating, review_count: b.review_count, price: b.price },
+                structuredHints: { kind: "rating_summary", rating: b.rating, review_count: b.review_count, price: b.price },
+              });
+            }
+          } else {
+            errors.push(`${id} details: ${detRes.status}`);
+          }
+
+          // 2) Individual review text (paid Yelp plan). Free/Starter keys 404
+          //    here — that's fine, the rating summary above still lands.
+          const res = await fetch(`https://api.yelp.com/v3/businesses/${encodeURIComponent(id)}/reviews?limit=3`, {
             headers: this.headers(),
           });
           if (!res.ok) {
-            errors.push(`${id}: ${res.status}`);
+            // plan-limited (404) or none — not fatal
             continue;
           }
           const data = (await res.json()) as any;
