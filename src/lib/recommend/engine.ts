@@ -17,6 +17,8 @@ export interface BusinessOffers {
   businessId: string;
   name: string;
   offers: PipelineOffer[];
+  rating?: number | null; // latest observed review rating (0–5), if any
+  reviewCount?: number | null; // review volume behind that rating
 }
 
 export interface Recommendation {
@@ -191,6 +193,33 @@ export function generateRecommendations(
         expected_impact: { metric: "basket_traffic", range_pct: [3, 9], confidence: 0.5 },
         effort: "medium",
         urgency: "this_week",
+      });
+    }
+  }
+
+  // 6) Reputation gap — higher-rated rivals nearby (guide 7.3 reputation; works
+  //    from review ratings alone, so it fires even when peers publish no menu).
+  if (typeof target.rating === "number" && target.rating > 0) {
+    const better = competitors.filter(
+      (c) => typeof c.rating === "number" && (c.rating as number) >= target.rating! + 0.3,
+    );
+    if (better.length >= 2) {
+      const top = [...better].sort((a, b) => (b.rating as number) - (a.rating as number)).slice(0, 3);
+      recs.push({
+        category: "reputation",
+        title: "Higher-rated rivals are nearby",
+        action:
+          "Close the review gap: ask happy customers for a review, respond to recent critical ones, and study what the top-rated peers are praised for.",
+        why_now: [
+          `${better.length} nearby peers are rated ≥0.3★ above you (you: ${target.rating.toFixed(1)}★).`,
+          `Top local ratings: ${top.map((c) => `${c.name} ${(c.rating as number).toFixed(1)}★`).join(", ")}.`,
+        ],
+        evidence: top.map(
+          (c) => `${c.name}: ${(c.rating as number).toFixed(1)}★${c.reviewCount ? ` (${c.reviewCount} reviews)` : ""}`,
+        ),
+        expected_impact: { metric: "rating_and_conversion", range_pct: [2, 6], confidence: 0.45 },
+        effort: "medium",
+        urgency: "this_month",
       });
     }
   }

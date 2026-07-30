@@ -458,15 +458,37 @@ export async function refreshRecommendations(workspaceId: string): Promise<numbe
   const { data: names } = await svc.from("business").select("id,canonical_name").in("id", allIds);
   const nameOf = new Map<string, string>((names ?? []).map((n: any) => [n.id, n.canonical_name]));
 
+  // latest observed rating per business (from the Yelp/Google rating-summary
+  // content items) so the engine's reputation rule can compare peers.
+  const ratingOf = new Map<string, { rating: number; reviewCount: number | null }>();
+  const { data: revs } = await svc
+    .from("content_item")
+    .select("business_id,text,observed_at")
+    .in("business_id", allIds)
+    .in("platform", ["yelp", "google"])
+    .order("observed_at", { ascending: false })
+    .limit(2000);
+  const ratingRe = /Rated\s+([\d.]+)\s*★.*?from\s+([\d,]+)\s+review/i;
+  for (const rv of revs ?? []) {
+    const bid = (rv as any).business_id as string;
+    if (ratingOf.has(bid)) continue;
+    const m = ratingRe.exec(String((rv as any).text ?? ""));
+    if (m) ratingOf.set(bid, { rating: Number(m[1]), reviewCount: Number(m[2].replace(/,/g, "")) });
+  }
+
   const target: BusinessOffers = {
     businessId: ws.target_business_id,
     name: nameOf.get(ws.target_business_id) ?? "You",
     offers: byBiz.get(ws.target_business_id) ?? [],
+    rating: ratingOf.get(ws.target_business_id)?.rating ?? null,
+    reviewCount: ratingOf.get(ws.target_business_id)?.reviewCount ?? null,
   };
   const competitors: BusinessOffers[] = competitorIds.map((id: string) => ({
     businessId: id,
     name: nameOf.get(id) ?? "Competitor",
     offers: byBiz.get(id) ?? [],
+    rating: ratingOf.get(id)?.rating ?? null,
+    reviewCount: ratingOf.get(id)?.reviewCount ?? null,
   }));
 
   const recs = generateRecommendations(target, competitors, ws.vertical ?? "restaurant");
