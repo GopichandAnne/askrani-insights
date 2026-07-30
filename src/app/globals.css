@@ -2,16 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Ask Rani Insights — brand tokens (verbatim from the Ask Rani platform).
+   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
+  --teal: #14b8a6;
+  --teal-dark: #0d9488;
+  --teal-deep: #0f766e;
+  --teal-light: #5eead4;
+  --teal-mist: #f0fdfa;
+  --coral: #fb923c;
+  --coral-dark: #f97316;
+  --navy: #0c1222;
+  --cream: #fafaf8;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --gradient-primary: linear-gradient(135deg, var(--teal), var(--teal-dark));
+  --shadow-primary: 0 4px 14px rgba(20, 184, 166, 0.3);
   color-scheme: light;
 }
 
 body {
   @apply bg-surface-sunken text-ink antialiased;
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+/* Editorial display face for titles, matching the Ask Rani look */
+h1,
+h2,
+.font-display {
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+/* ── Buttons (ported from the platform) ─────────────────────────────────── */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all;
+}
+.btn-primary {
+  background: var(--gradient-primary);
+  color: #fff;
+  box-shadow: var(--shadow-primary);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(20, 184, 166, 0.4);
+}
+.btn-secondary {
+  @apply border-2 border-brand bg-white text-brand-deep;
+}
+.btn-secondary:hover {
+  @apply bg-brand-soft;
+}
+
+/* ── Card ────────────────────────────────────────────────────────────────── */
+.card {
+  @apply rounded-lg border border-line bg-surface p-5 transition-all;
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  @apply border-brand shadow-card;
 }
 
 /* Confidence chip — reused wherever an observation is shown so trust is
    never hidden (guide Final Build Principle: "Never hide uncertainty"). */
 .chip {
   @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+}
+
+/* ── Signature loader: three bouncing teal dots (Ask Rani's motif) ──────── */
+.rani-dots {
+  @apply inline-flex items-center gap-1.5;
+}
+.rani-dots > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--teal);
+  animation: rani-bounce 1.4s infinite ease-in-out both;
+}
+.rani-dots > span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.rani-dots > span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes rani-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+@keyframes rani-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: rani-fade-in 0.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }

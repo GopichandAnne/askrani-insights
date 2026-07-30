@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import { RaniSpinner } from "@/components/RaniSpinner";
 
 /**
  * Search-first onboarding (guide §2.2): find your business → auto-discover &
@@ -146,11 +147,7 @@ export function SearchFlow() {
               placeholder="Business name and location"
               className="w-full rounded-lg border border-line px-3 py-2 text-sm"
             />
-            <button
-              type="submit"
-              disabled={searching || query.trim().length < 2}
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-            >
+            <button type="submit" disabled={searching || query.trim().length < 2} className="btn btn-primary disabled:opacity-60">
               {searching ? "Searching…" : "Search"}
             </button>
           </div>
@@ -177,7 +174,7 @@ export function SearchFlow() {
             ))}
           </div>
         )}
-        {searching && <p className="text-sm text-ink-faint">Searching OpenStreetMap…</p>}
+        {searching && <RaniSpinner label="Searching OpenStreetMap…" />}
       </div>
     );
   }

@@ -1,6 +1,16 @@
 import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 
+/** Platform super-admins (comma-separated emails in SUPERADMIN_EMAILS). */
+export function isSuperAdmin(user: { email?: string | null } | null | undefined): boolean {
+  if (!user?.email) return false;
+  const list = (process.env.SUPERADMIN_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(user.email.toLowerCase());
+}
+
 export function isSupabaseConfigured(): boolean {
   return (
     !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
