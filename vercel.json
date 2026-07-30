@@ -3,12 +3,12 @@
   "crons": [
     {
       "path": "/api/worker/tick",
-      "schedule": "*/2 * * * *"
+      "schedule": "0 6 * * *"
     }
   ],
   "functions": {
-    "src/app/api/worker/tick/route.ts": { "maxDuration": 300 },
-    "src/app/api/collect/route.ts": { "maxDuration": 300 },
-    "src/app/api/workspace/create/route.ts": { "maxDuration": 120 }
+    "src/app/api/worker/tick/route.ts": { "maxDuration": 60 },
+    "src/app/api/collect/route.ts": { "maxDuration": 60 },
+    "src/app/api/workspace/create/route.ts": { "maxDuration": 60 }
   }
 }
