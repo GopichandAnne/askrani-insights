@@ -1,29 +1,34 @@
 import Link from "next/link";
 import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
+import { Landing } from "@/components/Landing";
 
 export const dynamic = "force-dynamic";
 
 /**
- * "Today" — the guide's primary screen (12.1): prioritized changes and actions.
- * Shows recent detected changes + the top recommendations for the active
- * workspace; falls back to a getting-started state otherwise.
+ * Root. Signed-out visitors get the marketing Landing (the product front door).
+ * Signed-in users get "Today" — the guide's primary screen (12.1): what changed
+ * + what to do. A brand-new signed-in user is walked to setup.
  */
 export default async function TodayPage() {
   const state = await activeWorkspace();
+
+  // Front door for anyone not signed in (or before Supabase is set up).
+  if (state.status === "signedout" || state.status === "unconfigured") {
+    return <Landing />;
+  }
 
   return (
     <div className="space-y-8">
       <section>
         <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
         <p className="mt-1 max-w-2xl text-ink-soft">
-          What changed in your local market, why it matters, and what to do next —
-          every item carries its source and confidence.
+          What changed in your local market, and what to do about it.
         </p>
       </section>
 
-      {state.status !== "ok" ? (
-        <FirstRun reason={state.status} />
+      {state.status === "empty" ? (
+        <SetUpCta />
       ) : (
         <Dashboard workspaceId={state.workspace.id} name={state.workspace.name} />
       )}
@@ -31,19 +36,16 @@ export default async function TodayPage() {
   );
 }
 
-function FirstRun({ reason }: { reason: "unconfigured" | "signedout" | "empty" }) {
-  const msg =
-    reason === "unconfigured"
-      ? "Add your Supabase keys to .env.local to get started."
-      : reason === "signedout"
-        ? "Sign in to set up your workspace."
-        : "Set up your business and we'll start monitoring your local market.";
-  const cta = reason === "signedout" ? { href: "/login", label: "Sign in" } : { href: "/onboarding", label: "Set up your workspace" };
+function SetUpCta() {
   return (
-    <section className="rounded-xl border border-line bg-surface p-6">
-      <p className="text-ink-soft">{msg}</p>
-      <Link href={cta.href} className="mt-4 inline-flex rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white">
-        {cta.label}
+    <section className="flex flex-col items-center gap-4 rounded-xl bg-brand-hero p-10 text-center text-white shadow-brand">
+      <h2 className="font-display text-2xl font-extrabold">Let&apos;s set up your business</h2>
+      <p className="max-w-md text-white/90">
+        Search your business, we&apos;ll find your local competitors and start gathering everything
+        about your market — automatically. Takes about two minutes.
+      </p>
+      <Link href="/onboarding" className="btn bg-white px-6 py-3 font-semibold text-brand-deep hover:-translate-y-0.5">
+        Get started
       </Link>
     </section>
   );

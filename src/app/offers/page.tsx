@@ -37,8 +37,8 @@ export default async function OffersPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Offers &amp; pricing</h1>
         <p className="mt-1 text-sm text-ink-soft">
-          Structured offers across {state.workspace.name} and its competitor set. Each offer keeps its
-          source and confidence; re-running analysis appends new observations (price history preserved).
+          Menu items and prices for {state.workspace.name} and your competitors, side by side. Each
+          one shows where we found it and how sure we are.
         </p>
       </div>
 

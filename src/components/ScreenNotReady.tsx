@@ -12,14 +12,14 @@ export function ScreenNotReady({
 }) {
   const body =
     state.status === "unconfigured"
-      ? "Supabase isn't configured yet. Add the Supabase keys to .env.local to enable saving and these screens."
+      ? "This site isn't fully set up yet. Please check back shortly."
       : state.status === "signedout"
-        ? "Sign in to see your saved workspace intelligence."
-        : "No saved workspace yet. Run a market analysis and it will be saved here.";
+        ? "Sign in to see your market insights."
+        : "You haven't set up your business yet — let's do that. It takes about two minutes.";
   const cta =
     state.status === "signedout"
-      ? { href: "/login", label: "Sign in →" }
-      : { href: "/onboarding", label: "Run a market analysis →" };
+      ? { href: "/login", label: "Sign in" }
+      : { href: "/onboarding", label: "Set up my business" };
 
   return (
     <div className="space-y-4 animate-fade-in">

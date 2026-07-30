@@ -20,8 +20,8 @@ export default async function CompetitorsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Competitors</h1>
         <p className="mt-1 text-sm text-ink-soft">
-          Your competitor set for {state.workspace.name}, with the component scores behind each edge
-          (guide §9 — explainable and editable).
+          The local rivals we&apos;re watching for {state.workspace.name}, ranked by how close a match
+          they are. You can add or remove any of them.
         </p>
       </div>
 

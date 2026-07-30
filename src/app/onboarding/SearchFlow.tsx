@@ -211,8 +211,9 @@ export function SearchFlow() {
         </div>
         {!allDone ? (
           <p className="mt-2 text-xs text-ink-faint">
-            A background worker crawls each site and extracts offers — you can leave this page.
-            Make sure it’s running: <code>npm run worker</code>.
+            We&apos;re gathering everything about your market in the background — menus, prices,
+            offers and reviews. This can take a few minutes. Feel free to leave this page; we&apos;ll
+            keep working and it&apos;ll be ready when you come back.
           </p>
         ) : (
           <div className="mt-3 flex flex-wrap gap-3 text-sm">
@@ -230,7 +231,8 @@ export function SearchFlow() {
         </div>
         {competitors.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-faint">
-            No competitors auto-found (OpenStreetMap coverage varies). Add some manually above, or connect Google for better coverage.
+            We couldn&apos;t find competitors automatically for this spot. No problem — add them
+            yourself with the “Add competitor” button above (just search their name).
           </p>
         ) : (
           <ul className="space-y-1.5">
