@@ -68,10 +68,42 @@ export interface TickResult {
   remaining: number;
 }
 
+/** Requeue jobs left 'running' by an interrupted function (self-healing). */
+export async function requeueStaleJobs(staleMinutes = 8): Promise<void> {
+  const svc = createServiceClient();
+  const cutoff = new Date(Date.now() - staleMinutes * 60_000).toISOString();
+  await svc
+    .from("collection_job")
+    .update({ status: "pending", error: "requeued after stall" })
+    .eq("status", "running")
+    .lt("claimed_at", cutoff);
+}
+
+/**
+ * Fire-and-forget nudge so collection starts immediately after enqueue instead
+ * of waiting for the next cron tick. Best-effort: we kick the batch-drain
+ * endpoint and don't block on it (the tick keeps running server-side).
+ */
+export async function nudgeWorker(): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  const secret = process.env.WORKER_SECRET;
+  if (!base || !secret) return;
+  try {
+    await fetch(`${base}/api/worker/tick`, {
+      method: "GET",
+      headers: { "x-worker-secret": secret },
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // aborting our wait is expected — the tick function continues on its own
+  }
+}
+
 /** Claim and process one job. Returns processed:false when the queue is empty. */
 export async function processOneJob(): Promise<TickResult> {
   const svc = createServiceClient();
 
+  await requeueStaleJobs();
   const { data: job, error } = await svc.rpc("claim_collection_job");
   if (error) throw new Error(`claim: ${error.message}`);
   if (!job || !job.id) return { processed: false, remaining: await pendingCount(svc) };

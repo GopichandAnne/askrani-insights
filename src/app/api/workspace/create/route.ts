@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createWorkspaceFromCandidate, autoDiscoverCompetitors } from "@/lib/discovery";
-import { enqueueWorkspaceCollection } from "@/lib/jobs";
+import { enqueueWorkspaceCollection, nudgeWorker } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -22,6 +22,8 @@ export async function POST(req: Request) {
 
     // Kick off background collection for the target + competitors immediately.
     const enqueued = await enqueueWorkspaceCollection(ws.workspaceId);
+    // Nudge the worker so collection starts within seconds (not next cron tick).
+    after(() => nudgeWorker());
 
     return NextResponse.json({
       workspaceId: ws.workspaceId,

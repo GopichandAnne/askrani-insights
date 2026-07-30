@@ -49,14 +49,16 @@ Then **Deploy**.
 - **Auth → URL Configuration**: set Site URL to `https://insights.askrani.ai` and
   add it to Redirect URLs. Re-enable "Confirm email" for production.
 
-## 6. The background worker (automatic)
-`vercel.json` registers a cron hitting `/api/worker/tick`; each tick drains
-collection jobs within the function time budget. Authenticated by `CRON_SECRET`.
-- **Committed config is Hobby-safe:** cron runs **once daily** (`0 6 * * *`) and
-  functions cap at **60s** (Hobby limits).
-- **On Vercel Pro**, change `vercel.json` to `"schedule": "*/5 * * * *"` and the
-  worker/collect `maxDuration` to `300`, then redeploy — that's when collection
-  actually keeps up in near-real-time. Until then collection is slow.
+## 6. The background worker (real-time, automatic — Pro)
+Collection runs autonomously with two triggers:
+- **Instant kick:** creating a workspace / adding a competitor immediately nudges
+  `/api/worker/tick` (via Next `after()`), so collection starts within seconds.
+- **Cron sweep:** `vercel.json` runs `/api/worker/tick` every **2 minutes**
+  (`*/2 * * * *`); each tick batch-drains pending jobs (functions up to **300s**),
+  authenticated by `CRON_SECRET`. Requires **Vercel Pro** (Hobby caps at 60s /
+  daily cron).
+- **Self-healing:** jobs left `running` by an interrupted function are requeued
+  automatically after 8 minutes (`requeueStaleJobs`).
 
 ## Caveats (known, by design)
 - **Playwright rendering** (JS-only sites) is **disabled on Vercel** — serverless

@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api";
 import { addCompetitor } from "@/lib/discovery";
-import { enqueueOne } from "@/lib/jobs";
+import { enqueueOne, nudgeWorker } from "@/lib/jobs";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +38,9 @@ export async function POST(req: Request) {
       { businessId: ws?.target_business_id, geo, category },
       candidate,
     );
-    // queue the new competitor for background collection
+    // queue the new competitor for background collection + kick the worker
     await enqueueOne(svc, workspaceId, competitor.businessId, 0);
+    after(() => nudgeWorker());
     return NextResponse.json({ competitor });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

@@ -36,8 +36,9 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  // Drain a batch, bounded by wall-clock so we stay under the function limit.
-  const budgetMs = 240_000;
+  // Drain a batch, but stop starting new jobs with enough headroom that the
+  // in-flight one finishes before maxDuration (300s). One business can take ~2m.
+  const budgetMs = 180_000;
   const started = Date.now();
   let processed = 0;
   let remaining = 0;
