@@ -63,3 +63,47 @@ BRIGHTDATA_API_TOKEN=         # enterprise
 - **Rough cost** at ~100 monitored businesses (guide §16.1): social $200–1,000/mo,
   AI $200–1,000, website/crawl $100–400 — the app records real per-run cost in
   `provider_run`, visible in /admin.
+
+---
+
+# Getting each key — click by click
+
+> After getting a key, add it in **Vercel → askrani-insights → Settings →
+> Environment Variables**, Environment = **Production**, then tell me to redeploy.
+> Paste the value exactly (no quotes, no spaces).
+
+## 1) Yelp — free (~2 min)  → `YELP_API_KEY`
+1. Go to **https://www.yelp.com/developers/v3/manage_app** and sign in (create a Yelp account if needed).
+2. Click **Create New App**.
+3. Fill: **App Name** = `Ask Rani Insights`, **Industry** = pick any (e.g. "Other"), **Contact Email** = yours, **Description** = "market intelligence". Tick the **API Terms** checkbox.
+4. Click **Create**. On the app page, copy the **API Key** (a long string). *(Ignore Client ID / Client Secret.)*
+5. Vercel env: `YELP_API_KEY` = that key.
+
+## 2) YouTube — free (~5 min)  → `YOUTUBE_API_KEY`
+1. Go to **https://console.cloud.google.com** and sign in with Google.
+2. Top bar **project dropdown → New Project** → name `askrani-insights` → **Create**, then select it.
+3. Left menu **APIs & Services → Library** → search **YouTube Data API v3** → open it → **Enable**.
+4. **APIs & Services → Credentials → + Create Credentials → API key**. Copy the key.
+5. (Recommended) Click the key → **API restrictions → Restrict key → YouTube Data API v3 → Save**.
+6. Vercel env: `YOUTUBE_API_KEY` = that key.
+
+## 3) Google Places — needs billing (~15 min)  → `GOOGLE_MAPS_API_KEY`
+1. In the same **console.cloud.google.com** project.
+2. **Billing** (left menu) → **Link a billing account** → add a card. *(Google gives ~$200/mo Maps free credit; you won't be charged under that.)*
+3. **APIs & Services → Library** → enable **Places API (New)**. *(Optionally also enable "Geocoding API".)*
+4. **APIs & Services → Credentials → + Create Credentials → API key** → copy. *(Make a separate key from the YouTube one so you can restrict each.)*
+5. (Recommended) On the key → **API restrictions → Restrict key → Places API (New) → Save**.
+6. Vercel env: `GOOGLE_MAPS_API_KEY` = that key.
+
+## 4) Apify — paid, unlocks IG/FB/TikTok/delivery (~15 min)  → `APIFY_TOKEN`
+1. Go to **https://apify.com** → **Sign up** (free to start; pay-as-you-go for volume).
+2. Once in the Console: **Settings → Integrations** (or your avatar → "API & Integrations") → copy your **Personal API token**.
+3. Vercel env: `APIFY_TOKEN` = that token.
+4. Instagram / Facebook / TikTok already use built-in default actors — nothing else needed.
+5. For **delivery**: open **Apify Store**, search "DoorDash" / "UberEats", pick an actor, copy its **actor id** (looks like `username~actor-name`), and set `APIFY_DOORDASH_ACTOR` / `APIFY_UBEREATS_ACTOR`.
+6. Add a payment method in Apify **Billing** for real volume (actors have per-result pricing).
+
+## Do it in one sitting
+Get the two free keys first (Yelp, YouTube), then Google, then Apify if you want
+social/delivery. Add them all in Vercel Production, then ping me — I redeploy,
+`/admin` shows each **green**, and I verify every source live in one pass.
