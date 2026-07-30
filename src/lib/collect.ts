@@ -35,6 +35,19 @@ export interface CollectResult {
 
 type Svc = ReturnType<typeof createServiceClient>;
 
+/** Loose match for the delivery search fallback — a distinctive token of the
+ *  business name (len ≥ 4) must appear in the returned store name, or vice
+ *  versa. Prevents attaching the wrong store when searching by name. */
+function nameMatches(storeName: string, bizName: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const a = norm(storeName);
+  const b = norm(bizName);
+  if (!a || !b) return false;
+  const bTokens = b.split(" ").filter((t) => t.length >= 4);
+  const aTokens = a.split(" ").filter((t) => t.length >= 4);
+  return bTokens.some((t) => a.includes(t)) || aTokens.some((t) => b.includes(t));
+}
+
 async function insertOffers(
   svc: Svc,
   businessId: string,
@@ -302,18 +315,33 @@ export async function collectBusiness(businessId: string): Promise<CollectResult
   }
 
   // ── 5) SOCIAL + DELIVERY via Apify (dormant unless APIFY_TOKEN + Actor) ──
-  //    Iterates every platform we have a link for; offer extraction runs on
-  //    captions/menus. Against those platforms' ToS — user-gated by keys.
+  //    Social needs a linked handle. Delivery uses the linked store URL if the
+  //    business publishes one, else falls back to searching by name + address.
+  //    Against those platforms' ToS — user-gated by keys.
+  const DELIVERY = new Set(["doordash", "ubereats"]);
   for (const platform of APIFY_PLATFORMS) {
+    if (!platformActorConfigured(platform)) continue;
     const url = identityUrl(platform);
-    if (!url || !platformActorConfigured(platform)) continue;
+    const isDelivery = DELIVERY.has(platform);
+
+    let target = url ?? "";
+    let searchQuery: string | undefined;
+    if (!url) {
+      if (isDelivery && attrs.address) searchQuery = biz.canonical_name; // fallback: search by name
+      else continue; // social w/o handle, or delivery w/o address → skip
+    }
+
     const run = await startRun(svc, `apify:${platform}`, businessId);
     let posts = 0;
     let offers = 0;
     try {
-      // Delivery actors need a delivery address (city/street) for the store.
-      const items = await collectApifyPlatform(platform, url, { maxMs: 120000, address: attrs.address });
+      const items = await collectApifyPlatform(platform, target, { maxMs: 150000, address: attrs.address, searchQuery });
       for (const post of items) {
+        // guard the search fallback: don't attach a store that isn't this business
+        if (isDelivery && searchQuery) {
+          const storeName = (post.structuredHints as any)?.jsonld?.businessName ?? "";
+          if (!nameMatches(storeName, biz.canonical_name)) continue;
+        }
         const ci = await upsertObsContentItem(svc, businessId, post, nowIso);
         posts++;
         try {

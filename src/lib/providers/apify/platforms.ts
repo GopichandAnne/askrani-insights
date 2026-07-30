@@ -13,9 +13,13 @@ import type { RawObservation, Provenance, ContentKind } from "../types";
  * best-known-good starting points to be verified per the guide's Actor registry.
  */
 
+interface DeliveryCtx {
+  address?: string;
+  searchQuery?: string;
+}
 interface PlatformConfig {
   actor: () => string | undefined; // undefined = not configured → skip
-  input: (target: string, ctx?: { address?: string }) => Record<string, unknown>;
+  input: (target: string, ctx?: DeliveryCtx) => Record<string, unknown>;
   provenance: Provenance;
   contentKind: ContentKind;
   platform: string;
@@ -50,17 +54,24 @@ const CONFIG: Record<string, PlatformConfig> = {
     platform: "tiktok",
   },
   // Delivery Actors vary a lot; require an explicit env Actor id (no default).
-  // dz_omar/doordash-scraper requires `address` + `startUrls`.
+  // dz_omar/doordash-scraper requires `address` + `startUrls` (a store OR search URL).
   doordash: {
     actor: () => env("APIFY_DOORDASH_ACTOR"),
-    input: (t, ctx) => ({ startUrls: [{ url: t }], address: ctx?.address ?? "", maxResults: 1, fetchReviews: false }),
+    input: (t, ctx) => {
+      const url = t || (ctx?.searchQuery ? `https://www.doordash.com/search/store/${encodeURIComponent(ctx.searchQuery)}` : "");
+      return { startUrls: [{ url }], address: ctx?.address ?? "", maxResults: 1, fetchReviews: false };
+    },
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
     contentKind: "menu",
     platform: "doordash",
   },
+  // memo23/uber-eats-scraper: startUrls (store URL) OR searchQuery+address.
   ubereats: {
     actor: () => env("APIFY_UBEREATS_ACTOR"),
-    input: (t, ctx) => ({ startUrls: [{ url: t }], address: ctx?.address ?? "" }),
+    input: (t, ctx) =>
+      t
+        ? { startUrls: [{ url: t }], maxItems: 40 }
+        : { searchQuery: ctx?.searchQuery ?? "", address: ctx?.address ?? "", maxItems: 40 },
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
     contentKind: "menu",
     platform: "ubereats",
@@ -147,6 +158,45 @@ function mapItem(cfg: PlatformConfig, it: any): RawObservation {
 }
 
 /**
+ * Map an Uber Eats store record (memo23/uber-eats-scraper) into a menu
+ * observation. Item field names vary, so price/name are read defensively.
+ */
+function mapUberEatsStore(r: any): RawObservation {
+  const currency = r.currencyCode ?? "USD";
+  const menuItems: any[] = [];
+  for (const it of r.menuItems ?? []) {
+    const name = it.name ?? it.title ?? it.itemName;
+    if (!name) continue;
+    const price =
+      parsePrice(it.price ?? it.priceString ?? it.priceTagline ?? it.itemPrice ?? it.priceText) ??
+      (it.priceInCents != null ? it.priceInCents / 100 : it.priceCents != null ? it.priceCents / 100 : undefined);
+    menuItems.push({ name, price, currency, section: it.section ?? it.sectionName ?? it.categoryName });
+  }
+  const name = r.shopName ?? r.title ?? r.seoTitle ?? "Store";
+  const text =
+    `${name} on Uber Eats - ${r.ratingValue ?? "?"} stars (${r.reviewCount ?? "?"} reviews) | ` +
+    `${r.priceBucket ?? ""} | ${r.deliveryFeeText ?? ""} | ${r.etaRange ?? ""} | ${menuItems.length} menu items.`;
+  const url = r.canonicalUrl ?? r.url ?? r.restaurantUrl;
+  return {
+    provider: "apify",
+    provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
+    platform: "ubereats",
+    contentKind: "menu",
+    externalRef: `ubereats:${r.storeId ?? r.storeUuid ?? url}`,
+    sourceUrl: url,
+    text,
+    media: r.image ? [{ type: "image", url: r.image }] : [],
+    observedAt: new Date().toISOString(),
+    contentHash: createHash("sha256").update(`${r.storeId ?? url}|${menuItems.length}|${r.ratingValue}`).digest("hex"),
+    raw: { storeId: r.storeId, rating: r.ratingValue, reviews: r.reviewCount, deliveryFee: r.deliveryFeeText, eta: r.etaRange, promos: r.promos?.length },
+    structuredHints: {
+      jsonld: { businessName: name, menuItems, offers: [] },
+      store: { rating: r.ratingValue, num_ratings: r.reviewCount, delivery_fee: r.deliveryFeeText, eta: r.etaRange, price_range: r.priceBucket },
+    },
+  };
+}
+
+/**
  * Run the platform's Actor for one target (profile/page/store URL) and return
  * normalized observations. Returns [] (never throws) when not configured, so the
  * collection worker degrades cleanly.
@@ -154,22 +204,25 @@ function mapItem(cfg: PlatformConfig, it: any): RawObservation {
 export async function collectApifyPlatform(
   platform: string,
   target: string,
-  opts: { maxMs?: number; address?: string } = {},
+  opts: { maxMs?: number; address?: string; searchQuery?: string } = {},
 ): Promise<RawObservation[]> {
   const token = process.env.APIFY_TOKEN;
   const cfg = CONFIG[platform];
   if (!token || !cfg) return [];
   const actor = cfg.actor();
   if (!actor) return []; // no Actor configured for this platform
-  // DoorDash actor requires an address; skip cleanly without one.
-  if (platform === "doordash" && !opts.address) return [];
+  // Delivery actors need an address, and either a store URL or a search query.
+  if ((platform === "doordash" || platform === "ubereats")) {
+    if (!opts.address) return [];
+    if (!target && !opts.searchQuery) return [];
+  }
 
   const maxMs = opts.maxMs ?? 75000;
   try {
     const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(cfg.input(target, { address: opts.address })),
+      body: JSON.stringify(cfg.input(target, { address: opts.address, searchQuery: opts.searchQuery })),
     });
     if (!runRes.ok) return [];
     const run = (await runRes.json()) as any;
@@ -195,6 +248,9 @@ export async function collectApifyPlatform(
     ).then((r) => r.json())) as any[];
     if (platform === "doordash") {
       return items.filter((it) => it?.record_type === "store" || it?.menu_categories).map(mapDoorDashStore);
+    }
+    if (platform === "ubereats") {
+      return items.filter((it) => it?.shopName || it?.menuItems).map(mapUberEatsStore);
     }
     return items.map((it) => mapItem(cfg, it));
   } catch {
