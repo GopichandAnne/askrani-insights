@@ -50,11 +50,13 @@ Then **Deploy**.
   add it to Redirect URLs. Re-enable "Confirm email" for production.
 
 ## 6. The background worker (automatic)
-`vercel.json` registers a cron hitting `/api/worker/tick` every 5 minutes; each
-tick drains a batch of collection jobs. Authenticated by `CRON_SECRET`.
-- **Plan note:** frequent crons + the 300s function duration need **Vercel Pro**.
-  On Hobby, crons run **once/day** and functions cap at **60s** — fine to trial,
-  but collection will be slow. For real use, Pro.
+`vercel.json` registers a cron hitting `/api/worker/tick`; each tick drains
+collection jobs within the function time budget. Authenticated by `CRON_SECRET`.
+- **Committed config is Hobby-safe:** cron runs **once daily** (`0 6 * * *`) and
+  functions cap at **60s** (Hobby limits).
+- **On Vercel Pro**, change `vercel.json` to `"schedule": "*/5 * * * *"` and the
+  worker/collect `maxDuration` to `300`, then redeploy — that's when collection
+  actually keeps up in near-real-time. Until then collection is slow.
 
 ## Caveats (known, by design)
 - **Playwright rendering** (JS-only sites) is **disabled on Vercel** — serverless
