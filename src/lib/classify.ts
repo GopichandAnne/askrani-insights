@@ -29,27 +29,53 @@ const RESTAURANT_AMENITY = new Set([
 const GROCERY_NAME = /\b(grocer(y|ies|s)?|supermarket|market|bazaar|mart|foods?|provisions?|spices?|halal meat|butcher|deli|bakery|cash\s*(&|and)\s*carry|subzi|sabzi|mandi|kirana|carniceria|panaderia|produce|farmers?)\b/i;
 const RESTAURANT_NAME = /\b(restaurant|caf[eé]|kitchen|grill|pizzeria|pizza|diner|bistro|eatery|taqueria|tavern|steakhouse|bar\s*&\s*grill|noodle|sushi|ramen|bbq|barbecue|dhaba)\b/i;
 
-function tagBits(cand: CandidateLike): { cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string } {
+// Google Places (New) type signals (primaryType + types[]) — authoritative and
+// present exactly for the well-known businesses OSM often leaves untagged.
+const GROCERY_GTYPE = /grocery|supermarket|convenience_store|liquor_store|food_store|butcher|greengrocer|warehouse_store|wholesaler|department_store|market(?!ing)/;
+const RESTAURANT_GTYPE = /restaurant|\bcafe\b|coffee_shop|\bbar\b|\bpub\b|meal_takeaway|meal_delivery|fast_food|food_court|ice_cream|diner|steak_house|bistro|brewery|winery/;
+
+function tagBits(cand: CandidateLike): {
+  cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string;
+  primaryType?: string; gtypes: string[];
+} {
   const raw = cand.raw ?? {};
   const ex = raw.extratags ?? {};
+  const primaryType = raw.primaryType ? String(raw.primaryType).toLowerCase() : undefined;
+  const gtypes = [raw.primaryType, ...(Array.isArray(raw.types) ? raw.types : [])]
+    .filter(Boolean)
+    .map((s: any) => String(s).toLowerCase());
   return {
     cls: (raw.osm_class ?? raw.class)?.toLowerCase?.(),
     type: (raw.osm_type_tag ?? raw.type)?.toLowerCase?.(),
     shop: ex.shop?.toLowerCase?.(),
     amenity: ex.amenity?.toLowerCase?.(),
     cuisine: ex.cuisine?.toLowerCase?.(),
+    primaryType,
+    gtypes,
   };
 }
 
 /** "grocery" | "restaurant" — best guess for a picked place. Defaults to
  *  restaurant only as a last resort (most food places in OSM are restaurants). */
 export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
-  const { cls, type, shop, amenity, cuisine } = tagBits(cand);
+  const { cls, type, shop, amenity, cuisine, primaryType, gtypes } = tagBits(cand);
 
+  // 1) OSM structured tags
   if (shop && GROCERY_SHOP.has(shop)) return "grocery";
   if (cls === "shop" || (type && GROCERY_SHOP.has(type))) return "grocery";
   if (amenity && RESTAURANT_AMENITY.has(amenity)) return "restaurant";
   if (cls === "amenity" && type && RESTAURANT_AMENITY.has(type)) return "restaurant";
+
+  // 2) Google Places types — primaryType is the most authoritative single signal
+  //    (e.g. "grocery_store", "asian_grocery_store", "indian_restaurant").
+  if (primaryType) {
+    if (GROCERY_GTYPE.test(primaryType)) return "grocery";
+    if (RESTAURANT_GTYPE.test(primaryType)) return "restaurant";
+  }
+  const gGroc = gtypes.some((t) => GROCERY_GTYPE.test(t));
+  const gRest = gtypes.some((t) => RESTAURANT_GTYPE.test(t));
+  if (gGroc && !gRest) return "grocery";
+  if (gRest && !gGroc) return "restaurant";
 
   const name = cand.name ?? "";
   // Name signals: an explicit eatery word (grille, restaurant, kitchen, pizzeria…)
@@ -135,11 +161,16 @@ function normalizeCuisine(s: string): string[] {
 /** The cuisine/ethnic keywords that describe a place (may be empty). */
 export function extractSubtype(cand: CandidateLike): string[] {
   const found = new Set<string>();
-  const ex = cand.raw?.extratags ?? {};
+  const raw = cand.raw ?? {};
+  const ex = raw.extratags ?? {};
   const cuisineTag = ex.cuisine ?? cand.category ?? "";
   for (const tok of normalizeCuisine(String(cuisineTag))) {
     if (CUISINES.includes(tok)) found.add(tok);
   }
+  // Google Places types carry cuisine too (e.g. "indian_restaurant",
+  // "asian_grocery_store" → indian / asian).
+  const gtypes = [raw.primaryType, ...(Array.isArray(raw.types) ? raw.types : [])].filter(Boolean);
+  for (const gt of gtypes) for (const tok of normalizeCuisine(String(gt))) if (CUISINES.includes(tok)) found.add(tok);
   // origin tag (e.g. cuisine origin country) + explicit halal diet tag
   if (ex.origin) for (const tok of normalizeCuisine(String(ex.origin))) if (CUISINES.includes(tok)) found.add(tok);
   if (ex["diet:halal"] === "yes") found.add("halal");

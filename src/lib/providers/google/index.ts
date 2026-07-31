@@ -63,7 +63,7 @@ export class GoogleProvider implements PublicContentProvider {
         "content-type": "application/json",
         "X-Goog-Api-Key": this.key,
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.primaryType",
+          "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.websiteUri,places.primaryType,places.types",
       },
       body: JSON.stringify(body),
     });
