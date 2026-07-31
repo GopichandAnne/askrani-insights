@@ -61,17 +61,77 @@ export async function discoverCandidates(input: DiscoverInput): Promise<ProfileC
   );
 }
 
-function dedupeCandidates(cands: ProfileCandidate[]): ProfileCandidate[] {
-  const byKey = new Map<string, ProfileCandidate>();
-  for (const c of cands) {
-    const key =
-      (c.website && safeHost(c.website)) ||
-      `${c.name.toLowerCase().trim()}|${c.platform}`;
-    const existing = byKey.get(key);
-    if (!existing) byKey.set(key, c);
-    else if ((c.prominence ?? 0) > (existing.prominence ?? 0)) byKey.set(key, c);
-  }
-  return [...byKey.values()];
+/**
+ * Cross-provider dedupe. The same business shows up from Google *and* OSM with
+ * different shapes (Google carries primaryType/types, OSM carries osm_class), so
+ * a naive per-platform key lists it twice. We cluster candidates that are the
+ * same business — sharing a website host, or a normalized name at the same place
+ * (~1km) — and merge each cluster into one candidate that keeps the *union* of
+ * signals (so both Google and OSM tags remain available for vertical detection).
+ */
+export function dedupeCandidates(cands: ProfileCandidate[]): ProfileCandidate[] {
+  const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const geoBucket = (g?: { lat: number; lng: number }) =>
+    g ? `${g.lat.toFixed(2)},${g.lng.toFixed(2)}` : undefined; // ~1.1km cell
+  const keysFor = (c: ProfileCandidate): string[] => {
+    const ks: string[] = [];
+    const host = c.website && safeHost(c.website);
+    if (host) ks.push(`h:${host}`);
+    const n = normName(c.name);
+    if (n) {
+      const gb = geoBucket(c.geo);
+      // name+place is a strong identity; name-only (no geo) as a weak fallback.
+      ks.push(gb ? `ng:${n}@${gb}` : `n:${n}`);
+    }
+    return ks;
+  };
+
+  // union-find over candidate indices
+  const parent = cands.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  const union = (a: number, b: number) => {
+    parent[find(a)] = find(b);
+  };
+  const keyToIdx = new Map<string, number>();
+  cands.forEach((c, i) => {
+    for (const k of keysFor(c)) {
+      const seen = keyToIdx.get(k);
+      if (seen != null) union(i, seen);
+      else keyToIdx.set(k, i);
+    }
+  });
+
+  const groups = new Map<number, ProfileCandidate[]>();
+  cands.forEach((c, i) => {
+    const r = find(i);
+    const g = groups.get(r) ?? [];
+    g.push(c);
+    groups.set(r, g);
+  });
+
+  const mergeInto = (base: ProfileCandidate, extra: ProfileCandidate): ProfileCandidate => ({
+    ...base,
+    website: base.website ?? extra.website,
+    geo: base.geo ?? extra.geo,
+    category: base.category ?? extra.category,
+    distanceKm: base.distanceKm ?? extra.distanceKm,
+    prominence: Math.max(base.prominence ?? 0, extra.prominence ?? 0),
+    confidence: Math.max(base.confidence ?? 0, extra.confidence ?? 0),
+    // union of raw signals; base wins on overlapping keys, but OSM's osm_class and
+    // Google's primaryType/types are disjoint so both survive for detection.
+    raw: { ...((extra.raw as any) ?? {}), ...((base.raw as any) ?? {}) },
+  });
+
+  return [...groups.values()].map((g) => {
+    const [first, ...rest] = [...g].sort((a, b) => (b.prominence ?? 0) - (a.prominence ?? 0));
+    return rest.reduce(mergeInto, first);
+  });
 }
 
 function safeHost(url: string): string | undefined {
