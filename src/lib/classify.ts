@@ -26,7 +26,7 @@ const RESTAURANT_AMENITY = new Set([
   "restaurant", "cafe", "fast_food", "bar", "pub", "food_court", "ice_cream",
   "biergarten", "cafeteria",
 ]);
-const GROCERY_NAME = /\b(grocer(y|ies|s)?|supermarket|market|bazaar|mart|foods?|provisions?|spices?|halal meat|butcher|deli|bakery|cash\s*&\s*carry)\b/i;
+const GROCERY_NAME = /\b(grocer(y|ies|s)?|supermarket|market|bazaar|mart|foods?|provisions?|spices?|halal meat|butcher|deli|bakery|cash\s*(&|and)\s*carry|subzi|sabzi|mandi|kirana|carniceria|panaderia|produce|farmers?)\b/i;
 const RESTAURANT_NAME = /\b(restaurant|caf[eé]|kitchen|grill|pizzeria|pizza|diner|bistro|eatery|taqueria|tavern|steakhouse|bar\s*&\s*grill|noodle|sushi|ramen|bbq|barbecue|dhaba)\b/i;
 
 function tagBits(cand: CandidateLike): { cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string } {
@@ -52,9 +52,11 @@ export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
   if (cls === "amenity" && type && RESTAURANT_AMENITY.has(type)) return "restaurant";
 
   const name = cand.name ?? "";
-  // Name signals: check grocery first (a "market" is grocery, not a restaurant).
-  if (GROCERY_NAME.test(name)) return "grocery";
+  // Name signals: an explicit eatery word (grille, restaurant, kitchen, pizzeria…)
+  // is unambiguous and wins over generic grocery words like "market" that also
+  // show up in some restaurant names; otherwise a grocery keyword → grocery.
   if (RESTAURANT_NAME.test(name)) return "restaurant";
+  if (GROCERY_NAME.test(name)) return "grocery";
   // cuisine tag without a shop tag → almost always a restaurant
   if (cuisine) return "restaurant";
   return "restaurant";
