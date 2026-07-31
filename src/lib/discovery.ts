@@ -41,6 +41,22 @@ function tokens(s?: string): Set<string> {
   );
 }
 
+/** How well a candidate name matches the search query (0..1). Handles spacing
+ *  variants ("Man Pasand" vs "Manpasand") via a spaceless-substring check. */
+function nameRelevance(query: string, name: string): number {
+  const qt = tokens(query);
+  const nt = tokens(name);
+  let shared = 0;
+  for (const t of nt) if (qt.has(t)) shared++;
+  const overlap = nt.size ? shared / nt.size : 0;
+  const qc = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const nc = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const sub = qc && nc && (qc.includes(nc) || nc.includes(qc)) ? 1 : 0;
+  let tokenIn = 0;
+  for (const t of qt) if (t.length >= 3 && nc.includes(t)) { tokenIn = 0.6; break; }
+  return Math.max(overlap, sub, tokenIn);
+}
+
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (!a.size || !b.size) return 0;
   let inter = 0;
@@ -205,7 +221,22 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     sigsByName.get(k)!.add(sig);
   }
 
-  return cands.map((c) => {
+  // Relevance filter: drop Nominatim noise (person names, addresses, admin areas
+  // that matched the location tokens). Keep a candidate only if it's locatable
+  // AND is either a Google Places business, a name match, a confirmed food
+  // business (structured type), or has its own website. Then rank by how well the
+  // name matches the query, with prominence as a tiebreak.
+  const ranked = cands
+    .map((c) => ({ c, rel: nameRelevance(query, c.name) }))
+    .filter(({ c, rel }) => {
+      if (!c.geo) return false; // unlocatable → useless for market intel
+      return c.platform === "google" || rel > 0 || structuredVertical(c as any) !== null || !!c.website;
+    })
+    .sort((a, b) => b.rel * 0.6 + (b.c.prominence ?? 0) * 0.4 - (a.rel * 0.6 + (a.c.prominence ?? 0) * 0.4))
+    .slice(0, 12)
+    .map(({ c }) => c);
+
+  return ranked.map((c) => {
     let detectedVertical = inferVertical(c as any);
     const consensus = sigsByName.get(norm(c.name));
     if (consensus && consensus.size === 1) detectedVertical = [...consensus][0];
