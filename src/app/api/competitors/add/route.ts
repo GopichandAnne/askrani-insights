@@ -1,7 +1,6 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api";
 import { addCompetitor } from "@/lib/discovery";
-import { enqueueOne, nudgeWorker } from "@/lib/jobs";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -20,28 +19,24 @@ export async function POST(req: Request) {
       .select("target_business_id,vertical")
       .eq("id", workspaceId)
       .single();
-    let geo, category: string | undefined;
+    let geo, category: string | undefined, subtype: string[] | undefined;
     if (ws?.target_business_id) {
-      const { data: loc } = await svc
-        .from("location")
-        .select("geo")
-        .eq("business_id", ws.target_business_id)
-        .limit(1)
-        .maybeSingle();
-      // geo comes back as GeoJSON-ish or WKB; we only need category for scoring here
-      void loc;
-      const { data: b } = await svc.from("business").select("category").eq("id", ws.target_business_id).single();
+      const { data: b } = await svc
+        .from("business")
+        .select("category,attributes")
+        .eq("id", ws.target_business_id)
+        .single();
       category = b?.category ?? undefined;
+      subtype = (b?.attributes as any)?.subtype as string[] | undefined;
     }
     const competitor = await addCompetitor(
       workspaceId,
-      { businessId: ws?.target_business_id, geo, category },
+      { businessId: ws?.target_business_id, geo, category, subtype },
       candidate,
       ws?.vertical ?? "restaurant",
     );
-    // queue the new competitor for background collection + kick the worker
-    await enqueueOne(svc, workspaceId, competitor.businessId, 0);
-    after(() => nudgeWorker());
+    // NOTE: collection is NOT auto-started. The user starts it explicitly once
+    // the competitor set is curated (POST /api/collect/start).
     return NextResponse.json({ competitor });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

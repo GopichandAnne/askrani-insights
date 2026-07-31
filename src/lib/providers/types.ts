@@ -85,6 +85,9 @@ export interface DiscoverInput {
   near?: { lat: number; lng: number; radiusKm?: number };
   vertical?: string;
   limit?: number;
+  // cuisine/ethnic terms (e.g. ["indian"]) to run an extra like-for-like nearby
+  // pass so same-subtype competitors surface, not just generic category matches.
+  subtypeTerms?: string[];
 }
 
 export interface ProfileBatch {

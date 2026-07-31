@@ -106,7 +106,15 @@ export class OsmProvider implements PublicContentProvider {
         category: r.extratags?.cuisine ?? r.type,
         prominence: r.importance ?? 0,
         confidence: 0.7,
-        raw: { display_name: r.display_name, address: r.address, extratags: r.extratags },
+        // osm_class/osm_type_tag = OSM class ("shop"/"amenity") + tag value
+        // ("supermarket"/"restaurant"), used to auto-detect the vertical.
+        raw: {
+          display_name: r.display_name,
+          address: r.address,
+          extratags: r.extratags,
+          osm_class: r.category,
+          osm_type_tag: r.type,
+        },
       };
     });
   }
@@ -120,38 +128,52 @@ export class OsmProvider implements PublicContentProvider {
   private async nearby(input: DiscoverInput): Promise<ProfileCandidate[]> {
     const { lat, lng, radiusKm = 3 } = input.near!;
     const center = { lat, lng };
-    // Primary: Nominatim bounded category search — same reliable infra as text
-    // search, and (unlike public Overpass) it stays up. viewbox restricts to a
-    // box ~radiusKm around the business.
+    // viewbox restricts to a box ~radiusKm around the business.
     const dLat = radiusKm / 111;
     const dLng = radiusKm / (111 * Math.cos((lat * Math.PI) / 180) || 111);
     const vb = `${lng - dLng},${lat - dLat},${lng + dLng},${lat + dLat}`;
     const term = OsmProvider.CATEGORY_TERM[input.vertical ?? "restaurant"] ?? "restaurant";
 
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", term);
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("viewbox", vb);
-    url.searchParams.set("bounded", "1");
-    url.searchParams.set("limit", String(Math.min(input.limit ?? 40, 40)));
-    url.searchParams.set("extratags", "1");
-    url.searchParams.set("namedetails", "1");
+    // Build query terms: the generic category ("supermarket"/"restaurant"), plus
+    // one like-for-like pass per subtype term ("indian supermarket") so
+    // same-cuisine competitors surface even when the generic pass buries them.
+    const terms = [term];
+    for (const st of (input.subtypeTerms ?? []).slice(0, 2)) {
+      const label = st.replace(/_/g, " ").trim();
+      if (label && label !== "asian") terms.push(`${label} ${term}`);
+    }
+    if ((input.subtypeTerms ?? []).includes("asian")) terms.push(`asian ${term}`);
 
-    let rows: any[] = [];
-    try {
-      const res = await fetchWithTimeout(
-        url.toString(),
-        { headers: { "User-Agent": UA, "Accept-Language": "en" } },
-        10000,
-      );
-      if (res.ok) rows = (await res.json()) as any[];
-    } catch {
-      // Nominatim hiccup → degrade to manual/Google
+    const rowsById = new Map<string, any>();
+    for (const q of terms) {
+      const url = new URL("https://nominatim.openstreetmap.org/search");
+      url.searchParams.set("q", q);
+      url.searchParams.set("format", "jsonv2");
+      url.searchParams.set("viewbox", vb);
+      url.searchParams.set("bounded", "1");
+      url.searchParams.set("limit", String(Math.min(input.limit ?? 40, 40)));
+      url.searchParams.set("extratags", "1");
+      url.searchParams.set("namedetails", "1");
+      try {
+        const res = await fetchWithTimeout(
+          url.toString(),
+          { headers: { "User-Agent": UA, "Accept-Language": "en" } },
+          10000,
+        );
+        if (res.ok) {
+          for (const r of (await res.json()) as any[]) {
+            const id = `${r.osm_type}/${r.osm_id}`;
+            if (!rowsById.has(id)) rowsById.set(id, r);
+          }
+        }
+      } catch {
+        // Nominatim hiccup on one pass → keep whatever the others returned
+      }
     }
 
     const out: ProfileCandidate[] = [];
     const seen = new Set<string>();
-    for (const r of rows) {
+    for (const r of rowsById.values()) {
       const name = r.namedetails?.name ?? r.name ?? String(r.display_name).split(",")[0];
       if (!name) continue;
       const key = name.toLowerCase().trim();
@@ -172,7 +194,7 @@ export class OsmProvider implements PublicContentProvider {
         category: r.extratags?.cuisine ?? r.type,
         prominence: r.importance ?? 0,
         confidence: 0.6,
-        raw: { extratags: r.extratags, address: r.address },
+        raw: { extratags: r.extratags, address: r.address, osm_class: r.category, osm_type_tag: r.type },
       });
     }
     return out.sort((a, b) => (a.distanceKm ?? 1e9) - (b.distanceKm ?? 1e9));

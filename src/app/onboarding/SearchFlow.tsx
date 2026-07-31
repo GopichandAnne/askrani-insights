@@ -3,13 +3,16 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { RaniSpinner } from "@/components/RaniSpinner";
+import { subtypeLabel } from "@/lib/classify";
 
 /**
- * Search-first onboarding (guide §2.2): find your business → auto-discover &
- * rank competitors → collection runs in the BACKGROUND (a worker drains the
- * queue). The page just enqueues and watches progress; you can close the tab.
+ * Search-first onboarding (guide §2.2): find your business → we auto-detect its
+ * type (restaurant/grocery) and cuisine, then rank *like-for-like* competitors →
+ * you review/curate the set → YOU press "Start collecting". Nothing is scraped
+ * until that explicit action.
  */
 
+type Vertical = "restaurant" | "grocery";
 interface Candidate {
   name: string;
   website?: string;
@@ -17,6 +20,8 @@ interface Candidate {
   category?: string;
   address?: string;
   platform: string;
+  detectedVertical?: Vertical;
+  subtype?: string[];
   raw?: unknown;
 }
 interface Competitor {
@@ -41,19 +46,34 @@ interface Job {
   error?: string | null;
 }
 
+function VerticalTag({ v, subtype }: { v?: Vertical; subtype?: string[] }) {
+  const label = v === "grocery" ? "🛒 Grocery" : "🍽️ Restaurant";
+  const sub = subtypeLabel(subtype ?? []);
+  return (
+    <span className="chip bg-surface-sunken text-ink-soft">
+      {label}
+      {sub ? ` · ${sub}` : ""}
+    </span>
+  );
+}
+
 export function SearchFlow() {
   const [phase, setPhase] = useState<"search" | "workspace">("search");
-  const [vertical, setVertical] = useState<"restaurant" | "grocery">("restaurant");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Candidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [pickedCand, setPickedCand] = useState<Candidate | null>(null);
+  const [vertical, setVertical] = useState<Vertical>("restaurant");
+  const [subtype, setSubtype] = useState<string[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [jobs, setJobs] = useState<Record<string, Job>>({});
+  const [started, setStarted] = useState(false);
+  const [starting, setStarting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function runSearch(q: string): Promise<Candidate[]> {
@@ -102,26 +122,54 @@ export function SearchFlow() {
     }
   }
 
-  async function pickBusiness(cand: Candidate) {
+  // Resolve the picked business (or re-resolve when the user overrides the type).
+  async function resolve(cand: Candidate, overrideVertical?: Vertical) {
     setError(null);
     setCreating(true);
     try {
       const res = await fetch("/api/workspace/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ candidate: cand, vertical }),
+        body: JSON.stringify({ candidate: cand, vertical: overrideVertical ?? cand.detectedVertical }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "could not create workspace");
+      setPickedCand(cand);
       setWorkspaceId(data.workspaceId);
+      setVertical(data.vertical as Vertical);
+      setSubtype((data.subtype as string[]) ?? []);
       setTarget(data.target);
       setCompetitors(data.competitors ?? []);
+      setJobs({});
+      setStarted(false);
       setPhase("workspace");
-      poll(data.workspaceId); // collection was enqueued server-side; watch it
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function changeVertical(v: Vertical) {
+    if (v === vertical || !pickedCand) return;
+    await resolve(pickedCand, v);
+  }
+
+  async function startCollection() {
+    if (!workspaceId) return;
+    setStarting(true);
+    try {
+      const res = await fetch("/api/collect/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId }),
+      });
+      if (res.ok) {
+        setStarted(true);
+        poll(workspaceId);
+      }
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -139,26 +187,11 @@ export function SearchFlow() {
     return (
       <div className="space-y-5">
         <form onSubmit={onSearch} className="rounded-xl border border-line bg-surface p-6">
-          <div className="mb-4">
-            <span className="block text-sm font-medium">What kind of business is it?</span>
-            <div className="mt-2 inline-flex rounded-lg border border-line p-0.5">
-              {(["restaurant", "grocery"] as const).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setVertical(v)}
-                  className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
-                    vertical === v ? "bg-brand-gradient text-white shadow-brand" : "text-ink-faint hover:text-ink"
-                  }`}
-                >
-                  {v === "restaurant" ? "🍽️ Restaurant" : "🛒 Grocery"}
-                </button>
-              ))}
-            </div>
-          </div>
           <label className="block text-sm font-medium">Find your business</label>
           <p className="mb-3 text-sm text-ink-faint">
-            Search by name and city — e.g. {vertical === "grocery" ? "“Patel Brothers Edison NJ”" : "“Katz’s Delicatessen New York”"}.
+            Search by name and city — we&apos;ll figure out the rest (restaurant or grocery, cuisine,
+            and your closest competitors). e.g. “Patel Brothers Edison NJ” or “Katz&apos;s Delicatessen
+            New York”.
           </p>
           <div className="flex gap-2">
             <input
@@ -178,13 +211,16 @@ export function SearchFlow() {
             {results.map((r, i) => (
               <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface p-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{r.name}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{r.name}</span>
+                    <VerticalTag v={r.detectedVertical} subtype={r.subtype} />
+                  </div>
                   <div className="truncate text-xs text-ink-faint">
                     {r.address ?? ""} {r.website ? `· ${safeHost(r.website)}` : "· no website on record"}
                   </div>
                 </div>
                 <button
-                  onClick={() => pickBusiness(r)}
+                  onClick={() => resolve(r)}
                   disabled={creating}
                   className="shrink-0 rounded-lg border border-brand px-3 py-1.5 text-sm font-medium text-brand disabled:opacity-60"
                 >
@@ -194,7 +230,7 @@ export function SearchFlow() {
             ))}
           </div>
         )}
-        {searching && <RaniSpinner label="Searching OpenStreetMap…" />}
+        {searching && <RaniSpinner label="Searching…" />}
       </div>
     );
   }
@@ -209,46 +245,50 @@ export function SearchFlow() {
     const s = jobs[b.id]?.status;
     return s === "pending" || s === "running";
   });
-  const started = Object.keys(jobs).length > 0;
   const allDone = started && !anyActive && done > 0;
 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-brand bg-brand-soft/30 p-4">
-        <div className="text-xs uppercase tracking-wide text-brand">Your business</div>
-        <div className="font-medium">{target?.name}</div>
-        {target?.website && <div className="text-xs text-ink-faint">{target.website}</div>}
-        {target && <div className="mt-2"><StatusPill j={jobs[target.businessId]} /></div>}
-      </div>
-
-      <div className="rounded-xl border border-line bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div className="font-medium">Collection {allDone ? "complete" : "running in the background"}</div>
-          <div className="text-sm text-ink-faint">{done}/{businesses.length} done</div>
-        </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-sunken">
-          <div className="h-full bg-brand transition-all" style={{ width: `${businesses.length ? (done / businesses.length) * 100 : 0}%` }} />
-        </div>
-        {!allDone ? (
-          <p className="mt-2 text-xs text-ink-faint">
-            We&apos;re gathering everything about your market in the background — menus, prices,
-            offers and reviews. This can take a few minutes. Feel free to leave this page; we&apos;ll
-            keep working and it&apos;ll be ready when you come back.
-          </p>
-        ) : (
-          <div className="mt-3 flex flex-wrap gap-3 text-sm">
-            <Link href="/offers" className="text-brand underline">View offers →</Link>
-            <Link href="/recommendations" className="text-brand underline">View recommendations →</Link>
-            <Link href="/feed" className="text-brand underline">View feed →</Link>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-brand">Your business</div>
+            <div className="font-medium">{target?.name}</div>
+            {target?.website && <div className="text-xs text-ink-faint">{target.website}</div>}
           </div>
-        )}
+          <div className="text-right">
+            <VerticalTag v={vertical} subtype={subtype} />
+            {!started && (
+              <div className="mt-1 text-xs text-ink-faint">
+                Not a {vertical}?{" "}
+                <button
+                  onClick={() => changeVertical(vertical === "grocery" ? "restaurant" : "grocery")}
+                  disabled={creating}
+                  className="text-brand underline disabled:opacity-60"
+                >
+                  It&apos;s a {vertical === "grocery" ? "restaurant" : "grocery"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        {started && target && <div className="mt-2"><StatusPill j={jobs[target.businessId]} /></div>}
       </div>
 
+      {/* competitor review + start */}
       <div>
         <div className="relative mb-2 flex items-center justify-between">
           <h2 className="font-semibold">Competitors ({competitors.length})</h2>
-          <AddCompetitor onAdd={(c) => { setCompetitors((cs) => [...cs, c]); if (workspaceId) poll(workspaceId); }} workspaceId={workspaceId!} runSearch={runSearch} />
+          <AddCompetitor
+            onAdd={(c) => setCompetitors((cs) => [...cs, c])}
+            workspaceId={workspaceId!}
+            runSearch={runSearch}
+          />
         </div>
+        <p className="mb-2 text-xs text-ink-faint">
+          {vertical === "grocery" ? "Grocers" : "Restaurants"} closest to yours by type &amp; distance — like-for-like first.
+          Review the list, remove any that don&apos;t belong, and add your own. Nothing is collected until you start.
+        </p>
         {competitors.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-faint">
             We couldn&apos;t find competitors automatically for this spot. No problem — add them
@@ -265,7 +305,7 @@ export function SearchFlow() {
                   </span>
                 </span>
                 <span className="flex items-center gap-2">
-                  <StatusPill j={jobs[c.businessId]} />
+                  {started && <StatusPill j={jobs[c.businessId]} />}
                   <button onClick={() => removeCompetitor(c.edgeId)} className="text-ink-faint hover:text-trust-low" title="Remove">✕</button>
                 </span>
               </li>
@@ -273,6 +313,52 @@ export function SearchFlow() {
           </ul>
         )}
       </div>
+
+      {/* start / progress */}
+      {!started ? (
+        <div className="rounded-xl border border-line bg-surface p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-medium">Ready when you are</div>
+              <p className="text-xs text-ink-faint">
+                We&apos;ll gather websites, menus, offers, reviews and social for your business and the {competitors.length} competitor{competitors.length === 1 ? "" : "s"} above.
+              </p>
+            </div>
+            <button onClick={startCollection} disabled={starting} className="btn btn-primary disabled:opacity-60">
+              {starting ? "Starting…" : "Start collecting"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-line bg-surface p-4">
+          <div className="flex items-center justify-between">
+            <div className="font-medium">Collection {allDone ? "complete" : "running in the background"}</div>
+            <div className="text-sm text-ink-faint">{done}/{businesses.length} done</div>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-sunken">
+            <div className="h-full bg-brand transition-all" style={{ width: `${businesses.length ? (done / businesses.length) * 100 : 0}%` }} />
+          </div>
+          {!allDone ? (
+            <p className="mt-2 text-xs text-ink-faint">
+              We&apos;re gathering everything about your market in the background — menus, prices,
+              offers and reviews. This can take a few minutes. Feel free to leave this page; we&apos;ll
+              keep working and it&apos;ll be ready when you come back.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-3 text-sm">
+              <Link href="/offers" className="text-brand underline">View offers →</Link>
+              <Link href="/recommendations" className="text-brand underline">View recommendations →</Link>
+              <Link href="/reports" className="text-brand underline">View report →</Link>
+            </div>
+          )}
+          {/* let the user pick up competitors added after starting */}
+          <div className="mt-3">
+            <button onClick={startCollection} disabled={starting} className="text-xs text-brand underline disabled:opacity-60">
+              {starting ? "Queuing…" : "Collect any newly-added competitors"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -358,8 +444,9 @@ function AddCompetitor({
       </div>
       <div className="mt-2 max-h-56 space-y-1 overflow-auto">
         {results.map((r, i) => (
-          <button key={i} onClick={() => add(r)} className="block w-full rounded-lg px-2 py-1 text-left text-sm hover:bg-surface-sunken">
-            {r.name} <span className="text-xs text-ink-faint">{r.website ? safeHost(r.website) : ""}</span>
+          <button key={i} onClick={() => add(r)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-sm hover:bg-surface-sunken">
+            <span className="min-w-0 truncate">{r.name}</span>
+            <span className="ml-auto shrink-0"><VerticalTag v={r.detectedVertical} subtype={r.subtype} /></span>
           </button>
         ))}
       </div>

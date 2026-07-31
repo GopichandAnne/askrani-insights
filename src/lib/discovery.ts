@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
+import { extractSubtype, subtypeSimilarity, inferVertical } from "@/lib/classify";
 
 /**
  * Discovery service — guide §2.2 (onboarding) + §9 (competitor graph).
@@ -54,7 +55,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
  * the available components and record which were used.
  */
 export function scoreCompetitor(
-  target: { category?: string },
+  target: { category?: string; subtype?: string[] },
   cand: ProfileCandidate,
   radiusKm: number,
 ): { score: number; components: Record<string, unknown> } {
@@ -62,18 +63,35 @@ export function scoreCompetitor(
   const categorySim = jaccard(tokens(target.category), tokens(cand.category)) || 0.4;
   const prominence = Math.max(0, Math.min(1, cand.prominence ?? 0));
 
-  // available-signal weights (re-normalized from §9.2 defaults)
-  const score = 0.45 * geoOverlap + 0.3 * categorySim + 0.25 * prominence;
+  // Subtype (cuisine/ethnicity) similarity — the "like-for-like" signal. Only
+  // weighted when the target actually has a subtype; otherwise we re-normalize
+  // over geo/category/prominence so a generic business isn't penalized.
+  const targetSubtype = target.subtype ?? [];
+  const candSubtype = extractSubtype(cand as any);
+  const hasSubtype = targetSubtype.length > 0;
+  const subtypeSim = hasSubtype ? subtypeSimilarity(targetSubtype, candSubtype) : 0;
+
+  let score: number;
+  if (hasSubtype) {
+    // like-for-like leads; geo close behind (guide §9.2, re-normalized).
+    score = 0.34 * subtypeSim + 0.33 * geoOverlap + 0.13 * categorySim + 0.2 * prominence;
+  } else {
+    score = 0.45 * geoOverlap + 0.3 * categorySim + 0.25 * prominence;
+  }
   return {
     score: Number(score.toFixed(4)),
     components: {
+      subtype_similarity: hasSubtype ? Number(subtypeSim.toFixed(3)) : null,
+      subtype_matched: hasSubtype ? candSubtype.filter((s) => targetSubtype.includes(s)) : [],
       geo_overlap: Number(geoOverlap.toFixed(3)),
       category_similarity: Number(categorySim.toFixed(3)),
       prominence: Number(prominence.toFixed(3)),
       offering_similarity: null, // pending collection
       price_tier_similarity: null,
       audience_similarity: null,
-      note: "onboarding v1: geo+category+prominence; offering/price/audience fill after collection",
+      note: hasSubtype
+        ? "onboarding v2: like-for-like subtype + geo + category + prominence; offering/price/audience fill after collection"
+        : "onboarding v1: geo+category+prominence; offering/price/audience fill after collection",
     },
   };
 }
@@ -112,6 +130,7 @@ export async function upsertBusiness(
     const address = cand.raw?.address
       ? Object.values(cand.raw.address).filter(Boolean).join(", ")
       : undefined;
+    const subtype = extractSubtype(cand as any);
     const { data, error } = await svc
       .from("business")
       .insert({
@@ -120,7 +139,11 @@ export async function upsertBusiness(
         vertical,
         category: cand.category ?? vertical,
         confidence: 0.7,
-        attributes: { ...(cand.geo ? { geo: cand.geo } : {}), ...(address ? { address } : {}) },
+        attributes: {
+          ...(cand.geo ? { geo: cand.geo } : {}),
+          ...(address ? { address } : {}),
+          ...(subtype.length ? { subtype } : {}),
+        },
       })
       .select("id")
       .single();
@@ -162,7 +185,9 @@ export async function upsertBusiness(
   return businessId!;
 }
 
-/** Search for the user's business (or any business) across configured providers. */
+/** Search for the user's business (or any business) across configured providers.
+ *  Each result carries a detected vertical + subtype so onboarding doesn't have
+ *  to ask, and can prioritize like-for-like competitors. */
 export async function searchBusinesses(query: string, near?: { lat: number; lng: number }) {
   const cands = await discoverCandidates({ query, near, vertical: "restaurant", limit: 10 });
   return cands.map((c) => ({
@@ -172,6 +197,8 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     category: c.category,
     address: (c.raw as any)?.address ? Object.values((c.raw as any).address).filter(Boolean).join(", ") : undefined,
     platform: c.platform,
+    detectedVertical: inferVertical(c as any),
+    subtype: extractSubtype(c as any),
     raw: c.raw,
   }));
 }
@@ -181,9 +208,10 @@ export async function createWorkspaceFromCandidate(
   orgId: string,
   cand: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; raw?: any },
   vertical: string = "restaurant",
-): Promise<{ workspaceId: string; businessId: string; geo?: { lat: number; lng: number }; vertical: string }> {
+): Promise<{ workspaceId: string; businessId: string; geo?: { lat: number; lng: number }; vertical: string; subtype: string[] }> {
   const svc = createServiceClient();
   const businessId = await upsertBusiness(svc, cand, vertical);
+  const subtype = extractSubtype(cand as any);
 
   const { data: existingWs } = await svc
     .from("workspace")
@@ -202,14 +230,19 @@ export async function createWorkspaceFromCandidate(
       .single();
     if (error) throw new Error(`workspace insert: ${error.message}`);
     workspaceId = data.id as string;
+  } else {
+    // keep the workspace + business vertical in sync (e.g. user overrode the
+    // auto-detected type before starting)
+    await svc.from("workspace").update({ vertical }).eq("id", workspaceId);
+    await svc.from("business").update({ vertical }).eq("id", businessId);
   }
-  return { workspaceId, businessId, geo: cand.geo, vertical };
+  return { workspaceId, businessId, geo: cand.geo, vertical, subtype };
 }
 
 /** Auto-discover, rank and persist competitors near the target business. */
 export async function autoDiscoverCompetitors(
   workspaceId: string,
-  target: { businessId: string; name: string; geo?: { lat: number; lng: number }; category?: string },
+  target: { businessId: string; name: string; geo?: { lat: number; lng: number }; category?: string; subtype?: string[] },
   opts: { radiusKm?: number; limit?: number; vertical?: string } = {},
 ): Promise<CompetitorRow[]> {
   if (!target.geo) return [];
@@ -218,12 +251,25 @@ export async function autoDiscoverCompetitors(
   const vertical = opts.vertical ?? "restaurant";
   const svc = createServiceClient();
 
-  const cands = await discoverCandidates({ near: { ...target.geo, radiusKm }, vertical, limit: 40 });
+  // Target subtype drives a like-for-like discovery pass + ranking. Fall back to
+  // the stored attributes if the caller didn't pass one.
+  let subtype = target.subtype ?? [];
+  if (!subtype.length) {
+    const { data: tb } = await svc.from("business").select("attributes").eq("id", target.businessId).maybeSingle();
+    subtype = ((tb?.attributes as any)?.subtype as string[]) ?? [];
+  }
+
+  const cands = await discoverCandidates({
+    near: { ...target.geo, radiusKm },
+    vertical,
+    limit: 40,
+    subtypeTerms: subtype,
+  });
   const targetName = target.name.toLowerCase().trim();
 
   const scored = cands
     .filter((c) => c.name.toLowerCase().trim() !== targetName)
-    .map((c) => ({ cand: c, ...scoreCompetitor({ category: target.category }, c, radiusKm) }))
+    .map((c) => ({ cand: c, ...scoreCompetitor({ category: target.category, subtype }, c, radiusKm) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
@@ -237,6 +283,8 @@ export async function autoDiscoverCompetitors(
     if (compId === target.businessId) continue;
     const relation = i < 5 ? "primary" : "secondary";
     const tier = i < 5 ? "priority" : "standard";
+    const matched = (s.components as any).subtype_matched as string[] | undefined;
+    const like = matched?.length ? `same type (${matched.join(", ").replace(/_/g, " ")}) · ` : "";
     const { data, error } = await svc
       .from("competitor_edge")
       .upsert(
@@ -247,7 +295,7 @@ export async function autoDiscoverCompetitors(
           tier,
           score: s.score,
           score_components: s.components,
-          rationale: `${s.cand.distanceKm ?? "?"}km away · ${s.cand.category ?? "restaurant"}`,
+          rationale: `${like}${s.cand.distanceKm ?? "?"}km away · ${s.cand.category ?? vertical}`,
         },
         { onConflict: "workspace_id,competitor_id" },
       )
@@ -270,7 +318,7 @@ export async function autoDiscoverCompetitors(
 /** Manually add a competitor by picked candidate (from search). */
 export async function addCompetitor(
   workspaceId: string,
-  target: { businessId: string; geo?: { lat: number; lng: number }; category?: string },
+  target: { businessId: string; geo?: { lat: number; lng: number }; category?: string; subtype?: string[] },
   cand: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; raw?: any },
   vertical: string = "restaurant",
 ): Promise<CompetitorRow> {
@@ -282,7 +330,7 @@ export async function addCompetitor(
       ? { ...cand, distanceKm: haversineKm(target.geo, cand.geo) }
       : { ...cand, distanceKm: undefined };
   const { score, components } = scoreCompetitor(
-    { category: target.category },
+    { category: target.category, subtype: target.subtype },
     { ...(withDist as any), prominence: 0.3, platform: "manual" },
     radiusKm,
   );

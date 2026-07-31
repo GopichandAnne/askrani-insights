@@ -7,9 +7,9 @@ export const metadata = { title: "Set up your workspace — Ask Rani Insights" }
 export const dynamic = "force-dynamic";
 
 const STEPS = [
-  ["1", "Find your business", "Search by name — we resolve the canonical listing."],
-  ["2", "Meet your competitors", "We auto-discover & rank nearby rivals; edit the set."],
-  ["3", "We collect it all", "Websites, menus, offers, reviews, social — on their own."],
+  ["1", "Find your business", "Search by name — we detect if it's a restaurant or grocery, and its cuisine."],
+  ["2", "Review your competitors", "We rank like-for-like rivals first; edit the set until it's right."],
+  ["3", "You start collecting", "When you're happy, press start — we gather menus, offers, reviews & social."],
 ];
 
 export default async function OnboardingPage() {
@@ -24,9 +24,9 @@ export default async function OnboardingPage() {
           <h1 className="font-display text-3xl font-extrabold italic">Set up your workspace</h1>
         </div>
         <p className="mt-2 max-w-2xl text-white/85">
-          Search your business, we auto-find your local competitors, then collect everything
-          available — websites, menus, offers, reviews — autonomously. Every fact keeps its source
-          and confidence.
+          Search your business — we detect its type and cuisine, then rank your closest like-for-like
+          competitors. Review the set, then choose when to collect everything available — websites,
+          menus, offers, reviews. Every fact keeps its source and confidence.
         </p>
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           {STEPS.map(([n, t, d]) => (
