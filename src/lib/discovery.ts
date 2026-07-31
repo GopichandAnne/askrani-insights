@@ -267,8 +267,13 @@ export async function autoDiscoverCompetitors(
   });
   const targetName = target.name.toLowerCase().trim();
 
+  // Vertical consistency: the like-for-like OSM passes ("indian supermarket")
+  // are free-text and can pull in same-cuisine *restaurants*; keep only
+  // candidates whose own type matches the target vertical (a grocery's rivals
+  // are groceries, a restaurant's are restaurants).
   const scored = cands
     .filter((c) => c.name.toLowerCase().trim() !== targetName)
+    .filter((c) => inferVertical(c as any) === vertical)
     .map((c) => ({ cand: c, ...scoreCompetitor({ category: target.category, subtype }, c, radiusKm) }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);

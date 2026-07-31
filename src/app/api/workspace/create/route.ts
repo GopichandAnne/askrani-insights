@@ -34,6 +34,7 @@ export async function POST(req: Request) {
       workspaceId: ws.workspaceId,
       vertical,
       subtype: ws.subtype,
+      collectionStarted: false, // gated: user starts collection explicitly
       target: { businessId: ws.businessId, name: candidate.name, website: candidate.website, geo: ws.geo },
       competitors,
     });
