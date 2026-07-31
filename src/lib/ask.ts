@@ -16,13 +16,15 @@ export interface AskResult {
   workspace?: string;
 }
 
-const SYSTEM = [
+const GROUNDING = [
   "You are Ask Rani, a friendly local-market analyst for a busy, non-technical small-business owner.",
   "Answer ONLY from the DATA provided (the owner is \"you\"). Be concise: 1–4 short sentences, plain English, no jargon.",
   "Use specific business names and real numbers from the data. Never invent or estimate figures that aren't present.",
-  "If the data doesn't contain the answer, set answerable=false and briefly say what's missing or suggest collecting more.",
   "Prices are in USD. 'offers' means menu items/products. 'events' are recent market changes.",
 ].join(" ");
+
+const SYSTEM_STRUCTURED = `${GROUNDING} If the data doesn't contain the answer, set answerable=false and briefly say what's missing or suggest collecting more.`;
+const SYSTEM_STREAM = `${GROUNDING} If the data doesn't contain the answer, say so briefly and suggest what to collect — do not guess.`;
 
 const SCHEMA = {
   type: "object",
@@ -34,14 +36,17 @@ const SCHEMA = {
   required: ["answerable", "answer"],
 };
 
-export async function answerQuestion(question: string): Promise<AskResult> {
+type Prompt = { text: string; workspace: string } | { guard: string };
+
+/** Assemble the grounded context prompt for a question (shared by stream + non-stream). */
+async function buildAskPrompt(question: string): Promise<Prompt> {
   const q = (question ?? "").trim();
-  if (!q) return { answerable: false, answer: "Ask me anything about your market — prices, competitors, ratings, or what to do next." };
-  if (!isLlmConfigured()) return { answerable: false, answer: "The assistant isn't configured yet (no AI key)." };
+  if (!q) return { guard: "Ask me anything about your market — prices, competitors, ratings, or what to do next." };
+  if (!isLlmConfigured()) return { guard: "The assistant isn't configured yet (no AI key)." };
 
   const state = await activeWorkspace();
   if (state.status !== "ok") {
-    return { answerable: false, answer: "Set up your business first, then I can answer questions about your local market." };
+    return { guard: "Set up your business first, then I can answer questions about your local market." };
   }
   const ws = state.workspace;
 
@@ -84,16 +89,32 @@ export async function answerQuestion(question: string): Promise<AskResult> {
     sampleOffersByBusiness: sample,
   };
 
+  return { text: `Question: ${q}\n\nDATA (JSON):\n${JSON.stringify(context)}`, workspace: ws.name };
+}
+
+/** One-shot grounded answer (structured). */
+export async function answerQuestion(question: string): Promise<AskResult> {
+  const p = await buildAskPrompt(question);
+  if ("guard" in p) return { answerable: false, answer: p.guard };
   try {
     const { data } = await getLlm().callStructured<AskResult>({
-      system: SYSTEM,
-      text: `Question: ${q}\n\nDATA (JSON):\n${JSON.stringify(context)}`,
-      schema: SCHEMA,
-      tier: "extract",
-      maxTokens: 500,
+      system: SYSTEM_STRUCTURED, text: p.text, schema: SCHEMA, tier: "extract", maxTokens: 500,
     });
-    return { answerable: !!data.answerable, answer: String(data.answer ?? "").trim() || "I couldn't find that in your data yet.", workspace: ws.name };
+    return { answerable: !!data.answerable, answer: String(data.answer ?? "").trim() || "I couldn't find that in your data yet.", workspace: p.workspace };
   } catch (e) {
     return { answerable: false, answer: `Sorry — I couldn't answer that just now (${(e as Error).message}).` };
+  }
+}
+
+/** Streamed grounded answer — yields text deltas token-by-token. */
+export async function* streamAnswer(question: string): AsyncIterable<string> {
+  const p = await buildAskPrompt(question);
+  if ("guard" in p) { yield p.guard; return; }
+  try {
+    for await (const delta of getLlm().streamText({ system: SYSTEM_STREAM, text: p.text, tier: "extract", maxTokens: 500 })) {
+      yield delta;
+    }
+  } catch (e) {
+    yield `\n\n(Sorry — I hit a problem answering that: ${(e as Error).message})`;
   }
 }

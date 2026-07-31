@@ -26,10 +26,19 @@ export interface StructuredCall {
   maxTokens?: number;
 }
 
+export interface StreamCall {
+  system: string;
+  text: string;
+  tier?: "classify" | "extract";
+  maxTokens?: number;
+}
+
 export interface LlmClient {
   readonly provider: string;
   readonly modelFor: (tier: "classify" | "extract") => string;
   callStructured<T = unknown>(call: StructuredCall): Promise<{ data: T; modelVersion: string }>;
+  /** Stream a plain-text answer token-by-token (for the Ask Rani command bar). */
+  streamText(call: StreamCall): AsyncIterable<string>;
 }
 
 const MODELS = {
@@ -98,6 +107,22 @@ class AnthropicClient implements LlmClient {
     }
     return { data: toolUse.input as T, modelVersion: model };
   }
+
+  async *streamText(call: StreamCall): AsyncIterable<string> {
+    const model = this.modelFor(call.tier ?? "extract");
+    const stream = await this.client.messages.create({
+      model,
+      max_tokens: call.maxTokens ?? 600,
+      system: call.system,
+      messages: [{ role: "user", content: [{ type: "text", text: call.text }] }],
+      stream: true,
+    });
+    for await (const ev of stream) {
+      if (ev.type === "content_block_delta" && ev.delta.type === "text_delta") {
+        yield ev.delta.text;
+      }
+    }
+  }
 }
 
 class OpenAiClient implements LlmClient {
@@ -137,6 +162,46 @@ class OpenAiClient implements LlmClient {
     if (!res.ok) throw new Error(`openai ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as any;
     return { data: JSON.parse(data.choices[0].message.content) as T, modelVersion: model };
+  }
+
+  async *streamText(call: StreamCall): AsyncIterable<string> {
+    const model = this.modelFor(call.tier ?? "extract");
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: call.maxTokens ?? 600,
+        messages: [
+          { role: "system", content: call.system },
+          { role: "user", content: call.text },
+        ],
+        stream: true,
+      }),
+    });
+    if (!res.ok || !res.body) throw new Error(`openai ${res.status}`);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t.startsWith("data:")) continue;
+        const payload = t.slice(5).trim();
+        if (payload === "[DONE]") return;
+        try {
+          const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+          if (delta) yield delta as string;
+        } catch {
+          /* ignore keep-alive / partial */
+        }
+      }
+    }
   }
 }
 

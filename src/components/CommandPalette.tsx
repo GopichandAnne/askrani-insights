@@ -53,15 +53,13 @@ function isQuestionLike(s: string): boolean {
   return t.split(/\s+/).length >= 4;
 }
 
-interface AskResult { answerable: boolean; answer: string; workspace?: string }
-
 export function CommandPalette({ open, onClose, admin }: { open: boolean; onClose: () => void; admin?: boolean }) {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
   const [asked, setAsked] = useState<string | null>(null); // the question currently answered
-  const [loading, setLoading] = useState(false);
-  const [answer, setAnswer] = useState<AskResult | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [answerText, setAnswerText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const all = useMemo(() => (admin ? [...COMMANDS, ADMIN] : COMMANDS), [admin]);
@@ -80,7 +78,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   );
 
   useEffect(() => {
-    if (open) { setQ(""); setActive(0); setAsked(null); setAnswer(null); setLoading(false); setTimeout(() => inputRef.current?.focus(), 20); }
+    if (open) { setQ(""); setActive(0); setAsked(null); setAnswerText(""); setStreaming(false); setTimeout(() => inputRef.current?.focus(), 20); }
   }, [open]);
   useEffect(() => { setActive(preferAsk ? 0 : showAsk ? 1 : 0); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -90,15 +88,24 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
 
   async function runAsk(question: string) {
     setAsked(question);
-    setAnswer(null);
-    setLoading(true);
+    setAnswerText("");
+    setStreaming(true);
     try {
-      const res = await fetch("/api/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question }) });
-      setAnswer((await res.json()) as AskResult);
+      const res = await fetch("/api/ask/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question }) });
+      if (!res.ok || !res.body) { setAnswerText("I couldn't reach the assistant just now. Please try again."); return; }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let acc = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += dec.decode(value, { stream: true });
+        setAnswerText(acc);
+      }
     } catch {
-      setAnswer({ answerable: false, answer: "I couldn't reach the assistant just now. Please try again." });
+      setAnswerText("I couldn't reach the assistant just now. Please try again.");
     } finally {
-      setLoading(false);
+      setStreaming(false);
     }
   }
 
@@ -121,7 +128,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
           <input
             ref={inputRef}
             value={q}
-            onChange={(e) => { setQ(e.target.value); if (asked !== null) { setAsked(null); setAnswer(null); } }}
+            onChange={(e) => { setQ(e.target.value); if (asked !== null) { setAsked(null); setAnswerText(""); } }}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, items.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
@@ -138,7 +145,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
         {/* body */}
         <div className="max-h-[56vh] overflow-auto p-2">
           {answering ? (
-            <AnswerPanel asked={asked!} loading={loading} answer={answer} onGo={go} onAskAnother={() => { setAsked(null); setAnswer(null); inputRef.current?.focus(); }} />
+            <AnswerPanel asked={asked!} streaming={streaming} text={answerText} onGo={go} onAskAnother={() => { setAsked(null); setAnswerText(""); inputRef.current?.focus(); }} />
           ) : (
             <>
               {showAsk && (
@@ -203,7 +210,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   );
 }
 
-function AnswerPanel({ asked, loading, answer, onGo, onAskAnother }: { asked: string; loading: boolean; answer: AskResult | null; onGo: (href: string) => void; onAskAnother: () => void }) {
+function AnswerPanel({ asked, streaming, text, onGo, onAskAnother }: { asked: string; streaming: boolean; text: string; onGo: (href: string) => void; onAskAnother: () => void }) {
   return (
     <div className="p-1.5">
       <div className="mb-2 flex items-start gap-2 rounded-2xl bg-white/55 p-3">
@@ -214,20 +221,18 @@ function AnswerPanel({ asked, loading, answer, onGo, onAskAnother }: { asked: st
       <div className="flex items-start gap-2 rounded-2xl bg-brand-soft/50 p-3">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand">✦</span>
         <div className="min-w-0 flex-1">
-          {loading ? (
+          {streaming && !text ? (
             <span className="rani-dots" aria-label="Thinking"><span /><span /><span /></span>
           ) : (
-            <>
-              <p className="whitespace-pre-wrap text-sm text-ink">{answer?.answer}</p>
-              {answer && !answer.answerable && (
-                <p className="mt-1 text-xs text-ink-faint">Tip: collect more, or open a section below for the full picture.</p>
-              )}
-            </>
+            <p className="whitespace-pre-wrap text-sm text-ink" aria-live="polite">
+              {text}
+              {streaming && <span className="ask-caret" aria-hidden />}
+            </p>
           )}
         </div>
       </div>
 
-      {!loading && (
+      {!streaming && text && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button onClick={onAskAnother} className="btn btn-secondary px-3 py-1.5 text-xs">Ask another</button>
           <button onClick={() => onGo("/reports")} className="btn btn-secondary px-3 py-1.5 text-xs">Open full report</button>

@@ -247,6 +247,18 @@ select:focus {
 }
 .animate-float { animation: float-soft 6s ease-in-out infinite; }
 
+/* streaming answer caret (Ask Rani) */
+.ask-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--teal);
+  animation: ask-blink 1s steps(2, start) infinite;
+}
+@keyframes ask-blink { 50% { opacity: 0; } }
+
 /* gradient text accent */
 .text-gradient {
   background: linear-gradient(120deg, var(--teal-deep), var(--teal), var(--teal-dark));
