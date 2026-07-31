@@ -58,10 +58,14 @@ const config: Config = {
         brand: "0 4px 14px rgba(20, 184, 166, 0.3)",
         "brand-lg": "0 6px 20px rgba(20, 184, 166, 0.4)",
         card: "0 8px 24px rgba(0, 0, 0, 0.08)",
+        glow: "0 0 0 1px rgba(20,184,166,0.14), 0 8px 30px -8px rgba(20,184,166,0.45)",
+        glass: "0 10px 30px -12px rgba(15,118,110,0.18), 0 2px 8px -4px rgba(12,18,34,0.08)",
       },
       backgroundImage: {
         "brand-gradient": "linear-gradient(135deg, #14b8a6, #0d9488)",
         "brand-hero": "linear-gradient(135deg, #0f766e, #14b8a6 50%, #0d9488)",
+        "brand-mesh":
+          "radial-gradient(60% 55% at 12% 8%, rgba(20,184,166,0.16), transparent 60%), radial-gradient(55% 50% at 92% 4%, rgba(94,234,212,0.16), transparent 55%), linear-gradient(135deg,#0f766e,#14b8a6 55%,#0d9488)",
       },
     },
   },

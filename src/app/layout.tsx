@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import { getUser, isSuperAdmin } from "@/lib/auth";
+import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 
 export const metadata: Metadata = {
@@ -10,20 +11,21 @@ export const metadata: Metadata = {
     "Understand what local businesses are doing, why it matters, and what to do next. By Ask Rani.",
 };
 
-const NAV = [
-  { href: "/", label: "Today" },
-  { href: "/feed", label: "Market feed" },
-  { href: "/offers", label: "Offers" },
-  { href: "/competitors", label: "Competitors" },
-  { href: "/recommendations", label: "Recommendations" },
-  { href: "/reports", label: "Report" },
-  { href: "/onboarding", label: "New workspace" },
+const NAV: NavItem[] = [
+  { href: "/", label: "Today", icon: "today" },
+  { href: "/feed", label: "Market feed", icon: "feed" },
+  { href: "/offers", label: "Offers", icon: "offers" },
+  { href: "/competitors", label: "Competitors", icon: "competitors" },
+  { href: "/recommendations", label: "Recommendations", icon: "recommendations" },
+  { href: "/reports", label: "Report", icon: "report" },
+  { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser();
   const admin = isSuperAdmin(user);
-  const nav = admin ? [...NAV, { href: "/admin", label: "Admin" }] : NAV;
+  const nav = admin ? [...NAV, { href: "/admin", label: "Admin", icon: "admin" as const }] : NAV;
+
   return (
     <html lang="en">
       <head>
@@ -35,51 +37,34 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
-        <div className="flex min-h-screen flex-col">
-          <header className="sticky top-0 z-50 border-b border-line bg-white/90 backdrop-blur">
-            <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3">
-              <Link href="/" aria-label="Ask Rani Insights home">
-                <RaniWordmark />
-              </Link>
-              <nav className="hidden flex-wrap gap-5 text-sm font-medium text-ink-faint md:flex">
-                {nav.map((n) => (
-                  <Link key={n.href} href={n.href} className="transition-colors hover:text-brand">
-                    {n.label}
-                  </Link>
-                ))}
-              </nav>
-              <div className="ml-auto text-sm">
-                {user ? (
-                  <form action="/auth/signout" method="post" className="flex items-center gap-3">
-                    <span className="hidden text-ink-faint sm:inline">{user.email}</span>
-                    <button type="submit" className="text-ink-soft transition-colors hover:text-brand">
-                      Sign out
-                    </button>
-                  </form>
-                ) : (
-                  <Link href="/login" className="font-semibold text-brand hover:text-brand-deep">
-                    Sign in
-                  </Link>
-                )}
+        <div className="aurora-bg" aria-hidden />
+
+        {user ? (
+          // ── Signed-in app shell: glass sidebar + content ──────────────
+          <div className="min-h-screen">
+            <AppNav items={nav} email={user.email ?? undefined} />
+            <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8 lg:pt-8">
+              {children}
+            </main>
+          </div>
+        ) : (
+          // ── Signed-out marketing shell ────────────────────────────────
+          <div className="flex min-h-screen flex-col">
+            <MarketingBar />
+            <main className="flex-1">{children}</main>
+            <footer className="no-print border-t border-line/60">
+              <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-6 text-sm text-ink-faint">
+                <Link href="/" className="flex items-center gap-2">
+                  <RaniWordmark compact />
+                </Link>
+                <span>
+                  Local market intelligence · a product by{" "}
+                  <span className="font-semibold text-brand-deep">Ask Rani</span> · insights.askrani.ai
+                </span>
               </div>
-            </div>
-          </header>
-
-          <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">{children}</main>
-
-          <footer className="border-t border-line bg-white">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-6 text-sm text-ink-faint">
-              <span className="flex items-center gap-2">
-                <RaniWordmark compact />
-                <span className="text-ink-faint">Insights</span>
-              </span>
-              <span>
-                Local market intelligence · a product by{" "}
-                <span className="font-semibold text-brand-deep">Ask Rani</span> · insights.askrani.ai
-              </span>
-            </div>
-          </footer>
-        </div>
+            </footer>
+          </div>
+        )}
       </body>
     </html>
   );
