@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
-import { extractSubtype, subtypeSimilarity, inferVertical, structuredVertical } from "@/lib/classify";
+import { extractSubtype, subtypeSimilarity, inferVertical, structuredVertical, isNonFood } from "@/lib/classify";
 
 /**
  * Discovery service — guide §2.2 (onboarding) + §9 (competitor graph).
@@ -230,10 +230,11 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     .map((c) => ({ c, rel: nameRelevance(query, c.name) }))
     .filter(({ c, rel }) => {
       if (!c.geo) return false; // unlocatable → useless for market intel
-      // Food-vertical relevance: keep name matches (the searched business /
-      // competitors) and confirmed grocery/restaurant places; drop location-token
-      // noise (person names) and off-vertical hits (clothing, salons, etc.).
-      return rel > 0 || structuredVertical(c as any) !== null;
+      if (isNonFood(c as any)) return false; // drop clothing/salon/etc. by type
+      // Keep name matches (the searched business / competitors), confirmed
+      // grocery/restaurant places, and other real businesses (Google POIs /
+      // sites); the geo + non-food gates above already strip Nominatim noise.
+      return c.platform === "google" || rel > 0 || structuredVertical(c as any) !== null || !!c.website;
     })
     .sort((a, b) => b.rel * 0.6 + (b.c.prominence ?? 0) * 0.4 - (a.rel * 0.6 + (a.c.prominence ?? 0) * 0.4))
     .slice(0, 12)

@@ -213,6 +213,21 @@ export function subtypeSimilarity(a: string[], b: string[]): number {
   return 0;
 }
 
+// Clearly non-food retail/service Google place types (and OSM shops) — used to
+// drop off-vertical hits (a clothing store, salon…) from a food search without
+// nuking generic-typed food businesses. Matches on TYPE, never the name (a
+// grocery may be named "…Boutique").
+const NONFOOD_TYPE =
+  /clothing|apparel|\bshoe|footwear|jewelry|jeweler|beauty_salon|hair_care|hair_salon|nail_salon|barber|\bgym\b|fitness|yoga_studio|\bbank\b|\batm\b|insurance|pharmacy|drugstore|hardware_store|electronics_store|cell_phone|furniture_store|home_goods|car_repair|car_dealer|auto_parts|gas_station|\bfuel\b|lodging|\bhotel\b|motel|real_estate|\bdoctor|dentist|hospital|\bclinic\b|\bschool\b|university|book_store|florist|pet_store|toy_store|travel_agency|laundry|dry_clean|\btailor\b|optician|beauty|cosmetics/;
+
+/** True when a candidate is clearly a non-food business (drop it from food-vertical
+ *  discovery). Conservative: only fires on an explicit off-vertical type. */
+export function isNonFood(cand: CandidateLike): boolean {
+  const { gtypes, shop } = tagBits(cand);
+  if (shop && NONFOOD_TYPE.test(shop) && !GROCERY_SHOP.has(shop)) return true;
+  return gtypes.some((t) => NONFOOD_TYPE.test(t));
+}
+
 /** A short human label for a subtype set, e.g. ["indian"] → "Indian". */
 export function subtypeLabel(subtype: string[]): string | undefined {
   if (!subtype.length) return undefined;
