@@ -265,7 +265,6 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
       platform: c.platform,
       detectedVertical,
       subtype: extractSubtype(c as any),
-      _strong: isStrong(c), // debug marker: confirms de-noise build is live
       raw: c.raw,
     };
   });
