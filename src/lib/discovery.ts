@@ -221,21 +221,33 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     sigsByName.get(k)!.add(sig);
   }
 
+  // "Strong" = a well-corroborated listing: a Google POI, a confirmed food type,
+  // or one with its own website. Bare OSM entries (name + geo only) are weak.
+  const isStrong = (c: (typeof cands)[number]) =>
+    c.platform === "google" || structuredVertical(c as any) !== null || !!c.website;
+
   // Relevance filter: drop Nominatim noise (person names, addresses, admin areas
   // that matched the location tokens). Keep a candidate only if it's locatable
   // AND is either a Google Places business, a name match, a confirmed food
-  // business (structured type), or has its own website. Then rank by how well the
-  // name matches the query, with prominence as a tiebreak.
-  const ranked = cands
+  // business (structured type), or has its own website.
+  const prelim = cands
     .map((c) => ({ c, rel: nameRelevance(query, c.name) }))
     .filter(({ c, rel }) => {
       if (!c.geo) return false; // unlocatable → useless for market intel
       if (isNonFood(c as any)) return false; // drop clothing/salon/etc. by type
-      // Keep name matches (the searched business / competitors), confirmed
-      // grocery/restaurant places, and other real businesses (Google POIs /
-      // sites); the geo + non-food gates above already strip Nominatim noise.
       return c.platform === "google" || rel > 0 || structuredVertical(c as any) !== null || !!c.website;
-    })
+    });
+
+  // Chain-query de-noise: a chain name (e.g. "Patel Brothers") comes back from
+  // Nominatim as many bare entries at scattered locations. When a well-
+  // corroborated (strong) listing for that exact name exists, drop the weak
+  // bare-OSM duplicates; keep weak ones only when no strong twin exists.
+  const strongNames = new Set<string>();
+  for (const { c } of prelim) if (isStrong(c)) strongNames.add(norm(c.name));
+  const deNoised = prelim.filter(({ c }) => isStrong(c) || !strongNames.has(norm(c.name)));
+
+  // Rank by how well the name matches the query, with prominence as a tiebreak.
+  const ranked = deNoised
     .sort((a, b) => b.rel * 0.6 + (b.c.prominence ?? 0) * 0.4 - (a.rel * 0.6 + (a.c.prominence ?? 0) * 0.4))
     .slice(0, 12)
     .map(({ c }) => c);
