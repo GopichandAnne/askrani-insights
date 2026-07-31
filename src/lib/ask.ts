@@ -2,6 +2,7 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
 
 /**
  * "Ask Rani" inline answers — natural-language questions answered over the
@@ -21,10 +22,19 @@ const GROUNDING = [
   "Answer ONLY from the DATA provided (the owner is \"you\"). Be concise: 1–4 short sentences, plain English, no jargon.",
   "Use specific business names and real numbers from the data. Never invent or estimate figures that aren't present.",
   "Prices are in USD. 'offers' means menu items/products. 'events' are recent market changes.",
+  "A numbered SOURCES list is provided — customer reviews (Yelp/Google), the business's own website & menus, delivery apps (DoorDash/UberEats), and social media posts (Instagram/Facebook/TikTok/YouTube).",
+  "You may reference social posts and any source. When a statement rests on a source, cite it inline with its number in square brackets, e.g. [2]. Only cite numbers that appear in SOURCES.",
 ].join(" ");
 
 const SYSTEM_STRUCTURED = `${GROUNDING} If the data doesn't contain the answer, set answerable=false and briefly say what's missing or suggest collecting more.`;
 const SYSTEM_STREAM = `${GROUNDING} If the data doesn't contain the answer, say so briefly and suggest what to collect — do not guess.`;
+
+const SOURCE_LABEL: Record<string, string> = {
+  website: "Website", pdf: "Menu (PDF)", google: "Google", yelp: "Yelp",
+  instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube",
+  doordash: "DoorDash", ubereats: "UberEats",
+};
+
 
 const SCHEMA = {
   type: "object",
@@ -36,7 +46,7 @@ const SCHEMA = {
   required: ["answerable", "answer"],
 };
 
-type Prompt = { text: string; workspace: string } | { guard: string };
+type Prompt = { text: string; workspace: string; sources: Source[] } | { guard: string };
 
 /** Assemble the grounded context prompt for a question (shared by stream + non-stream). */
 async function buildAskPrompt(question: string): Promise<Prompt> {
@@ -77,6 +87,33 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   }
   for (const k of Object.keys(sample)) sample[k] = sample[k].slice(0, 14);
 
+  // Citable sources — the actual content items we collected across every channel
+  // (reviews, website, delivery apps, and social media). Snippets let Rani
+  // reference social posts ("their Instagram promoted…") and cite them.
+  const { data: content } = await supabase
+    .from("content_item")
+    .select("platform,url,text,observed_at,business:business_id(canonical_name)")
+    .in("business_id", scope)
+    .order("observed_at", { ascending: false })
+    .limit(120);
+  const sources: Source[] = [];
+  const sourceNotes: { id: number; business: string; source: string; note: string }[] = [];
+  const perKey = new Map<string, number>();
+  for (const c of content ?? []) {
+    if (sources.length >= 26) break;
+    const platform = (c as any).platform as string;
+    const business = ((c as any).business as any)?.canonical_name ?? "Unknown";
+    const key = `${business}|${platform}`;
+    const n = perKey.get(key) ?? 0;
+    if (n >= 2) continue; // keep the source list diverse across channels/businesses
+    perKey.set(key, n + 1);
+    const id = sources.length + 1;
+    const label = SOURCE_LABEL[platform] ?? platform;
+    sources.push({ id, business, platform, label, url: (c as any).url ?? undefined });
+    const note = String((c as any).text ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+    sourceNotes.push({ id, business, source: label, note });
+  }
+
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
     businesses: report.pricing.map((p) => ({
@@ -87,9 +124,10 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     recommendations: report.recommendations.slice(0, 8).map((r) => ({ title: r.title, action: r.action })),
     monitoringCost: { projectedPerMonthUsd: report.cost.projectedMonthlyUsd, perBusinessPerMonthUsd: report.cost.perBusinessMonthlyUsd, spentInWindowUsd: report.cost.totalUsd, days: report.cost.days },
     sampleOffersByBusiness: sample,
+    sources: sourceNotes,
   };
 
-  return { text: `Question: ${q}\n\nDATA (JSON):\n${JSON.stringify(context)}`, workspace: ws.name };
+  return { text: `Question: ${q}\n\nDATA (JSON):\n${JSON.stringify(context)}`, workspace: ws.name, sources };
 }
 
 /** One-shot grounded answer (structured). */
@@ -106,7 +144,8 @@ export async function answerQuestion(question: string): Promise<AskResult> {
   }
 }
 
-/** Streamed grounded answer — yields text deltas token-by-token. */
+/** Streamed grounded answer — yields text deltas token-by-token, then a sources
+ *  block (after SOURCES_SENTINEL) so the client can render clickable citations. */
 export async function* streamAnswer(question: string): AsyncIterable<string> {
   const p = await buildAskPrompt(question);
   if ("guard" in p) { yield p.guard; return; }
@@ -117,4 +156,5 @@ export async function* streamAnswer(question: string): AsyncIterable<string> {
   } catch (e) {
     yield `\n\n(Sorry — I hit a problem answering that: ${(e as Error).message})`;
   }
+  if (p.sources.length) yield SOURCES_SENTINEL + JSON.stringify(p.sources);
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
 
 /**
  * "Ask Rani" command bar (⌘K). Two modes in one bar:
@@ -60,6 +61,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   const [asked, setAsked] = useState<string | null>(null); // the question currently answered
   const [streaming, setStreaming] = useState(false);
   const [answerText, setAnswerText] = useState("");
+  const [sources, setSources] = useState<Source[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const all = useMemo(() => (admin ? [...COMMANDS, ADMIN] : COMMANDS), [admin]);
@@ -78,7 +80,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   );
 
   useEffect(() => {
-    if (open) { setQ(""); setActive(0); setAsked(null); setAnswerText(""); setStreaming(false); setTimeout(() => inputRef.current?.focus(), 20); }
+    if (open) { setQ(""); setActive(0); setAsked(null); setAnswerText(""); setSources([]); setStreaming(false); setTimeout(() => inputRef.current?.focus(), 20); }
   }, [open]);
   useEffect(() => { setActive(preferAsk ? 0 : showAsk ? 1 : 0); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -89,6 +91,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   async function runAsk(question: string) {
     setAsked(question);
     setAnswerText("");
+    setSources([]);
     setStreaming(true);
     try {
       const res = await fetch("/api/ask/stream", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question }) });
@@ -100,7 +103,12 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
         const { done, value } = await reader.read();
         if (done) break;
         acc += dec.decode(value, { stream: true });
-        setAnswerText(acc);
+        const i = acc.indexOf(SOURCES_SENTINEL);
+        setAnswerText(i >= 0 ? acc.slice(0, i) : acc); // hide the trailing sources block from the visible answer
+      }
+      const i = acc.indexOf(SOURCES_SENTINEL);
+      if (i >= 0) {
+        try { setSources(JSON.parse(acc.slice(i + SOURCES_SENTINEL.length)) as Source[]); } catch { /* ignore */ }
       }
     } catch {
       setAnswerText("I couldn't reach the assistant just now. Please try again.");
@@ -128,7 +136,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
           <input
             ref={inputRef}
             value={q}
-            onChange={(e) => { setQ(e.target.value); if (asked !== null) { setAsked(null); setAnswerText(""); } }}
+            onChange={(e) => { setQ(e.target.value); if (asked !== null) { setAsked(null); setAnswerText(""); setSources([]); } }}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, items.length - 1)); }
               else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
@@ -145,7 +153,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
         {/* body */}
         <div className="max-h-[56vh] overflow-auto p-2">
           {answering ? (
-            <AnswerPanel asked={asked!} streaming={streaming} text={answerText} onGo={go} onAskAnother={() => { setAsked(null); setAnswerText(""); inputRef.current?.focus(); }} />
+            <AnswerPanel asked={asked!} streaming={streaming} text={answerText} sources={sources} onGo={go} onAskAnother={() => { setAsked(null); setAnswerText(""); setSources([]); inputRef.current?.focus(); }} />
           ) : (
             <>
               {showAsk && (
@@ -210,7 +218,18 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
   );
 }
 
-function AnswerPanel({ asked, streaming, text, onGo, onAskAnother }: { asked: string; streaming: boolean; text: string; onGo: (href: string) => void; onAskAnother: () => void }) {
+const SOURCE_EMOJI: Record<string, string> = {
+  website: "🌐", pdf: "📄", google: "🔵", yelp: "⭐", instagram: "📸",
+  facebook: "👍", tiktok: "🎵", youtube: "▶️", doordash: "🛵", ubereats: "🛵",
+};
+
+function AnswerPanel({ asked, streaming, text, sources, onGo, onAskAnother }: { asked: string; streaming: boolean; text: string; sources: Source[]; onGo: (href: string) => void; onAskAnother: () => void }) {
+  // Show the sources the answer actually cited ([n]); if it cited none, fall back
+  // to the top few we drew on, so provenance is always visible.
+  const citedIds = Array.from(new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]))));
+  const cited = sources.filter((s) => citedIds.includes(s.id));
+  const shown = cited.length ? cited : sources.slice(0, 4);
+
   return (
     <div className="p-1.5">
       <div className="mb-2 flex items-start gap-2 rounded-2xl bg-white/55 p-3">
@@ -232,11 +251,37 @@ function AnswerPanel({ asked, streaming, text, onGo, onAskAnother }: { asked: st
         </div>
       </div>
 
+      {!streaming && shown.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            {cited.length ? "Sources" : "Based on"}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {shown.map((s) => {
+              const inner = (
+                <>
+                  <span aria-hidden>{SOURCE_EMOJI[s.platform] ?? "•"}</span>
+                  {cited.length ? <span className="font-semibold">[{s.id}]</span> : null} {s.label}
+                  <span className="text-ink-faint"> · {s.business}</span>
+                </>
+              );
+              return s.url ? (
+                <a key={s.id} href={s.url} target="_blank" rel="noreferrer" className="chip bg-white/70 text-ink-soft transition-colors hover:text-brand hover:shadow-glow">
+                  {inner}
+                </a>
+              ) : (
+                <span key={s.id} className="chip bg-white/70 text-ink-soft">{inner}</span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {!streaming && text && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button onClick={onAskAnother} className="btn btn-secondary px-3 py-1.5 text-xs">Ask another</button>
           <button onClick={() => onGo("/reports")} className="btn btn-secondary px-3 py-1.5 text-xs">Open full report</button>
-          <button onClick={() => onGo("/offers")} className="btn btn-secondary px-3 py-1.5 text-xs">See offers</button>
+          <button onClick={() => onGo("/feed")} className="btn btn-secondary px-3 py-1.5 text-xs">See sources</button>
           <span className="ml-auto text-[11px] text-ink-faint">Grounded in your collected data</span>
         </div>
       )}
