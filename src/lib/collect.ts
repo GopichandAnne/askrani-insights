@@ -439,7 +439,7 @@ export async function collectBusiness(
               provenance: "OFFICIAL_PUBLIC_API",
               url: it.url,
               text: it.title,
-              media: [{ type: "news", kind: it.kind, source: it.source }],
+              media: [{ type: "news", kind: it.kind, source: it.source, excerpt: it.excerpt || undefined }],
               published_at: it.publishedAt ?? null,
               observed_at: nowIso,
             },

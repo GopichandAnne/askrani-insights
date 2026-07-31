@@ -119,14 +119,16 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     return 2;
   };
 
+  const excerptOf = (c: any): string => String(c.media?.[0]?.excerpt ?? "");
   const scored = (content ?? [])
     .map((c: any) => ({
       c,
       platform: c.platform as string,
       business: (c.business as any)?.canonical_name ?? "Unknown",
       text: String(c.text ?? ""),
+      excerpt: excerptOf(c),
     }))
-    .map((x) => ({ ...x, rel: scoreItem(x.platform, x.business, x.text) }))
+    .map((x) => ({ ...x, rel: scoreItem(x.platform, x.business, `${x.text} ${x.excerpt}`) }))
     .sort((a, b) => b.rel - a.rel || String(b.c.observed_at).localeCompare(String(a.c.observed_at)));
 
   const sources: Source[] = [];
@@ -140,15 +142,23 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     const id = sources.length + 1;
     const label = SOURCE_LABEL[x.platform] ?? x.platform;
     sources.push({ id, business: x.business, platform: x.platform, label, url: x.c.url ?? undefined });
-    sourceNotes.push({ id, business: x.business, source: label, note: x.text.replace(/\s+/g, " ").trim().slice(0, 200) });
+    // for news, cite the article body (deeper trends) not just the headline
+    const note = (x.platform === "news" && x.excerpt ? `${x.text}. ${x.excerpt}` : x.text).replace(/\s+/g, " ").trim().slice(0, 340);
+    sourceNotes.push({ id, business: x.business, source: label, note });
   }
 
-  // Local market radar (industry trends / local news / nearby openings) as a
-  // distinct block so Rani can answer "what's trending / any new openings?".
+  // Local market radar (industry trends / local news / nearby openings) with the
+  // extracted article text, so Rani can give specifics, not just headlines.
   const localNews = (content ?? [])
     .filter((c: any) => c.platform === "news")
     .slice(0, 12)
-    .map((c: any) => ({ headline: c.text, source: c.media?.[0]?.source ?? "", kind: c.media?.[0]?.kind ?? "news", when: c.published_at ?? undefined }));
+    .map((c: any) => ({
+      headline: c.text,
+      source: c.media?.[0]?.source ?? "",
+      kind: c.media?.[0]?.kind ?? "news",
+      when: c.published_at ?? undefined,
+      article: String(c.media?.[0]?.excerpt ?? "").slice(0, 700) || undefined,
+    }));
 
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
