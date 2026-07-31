@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
-import { extractSubtype, subtypeSimilarity, inferVertical } from "@/lib/classify";
+import { extractSubtype, subtypeSimilarity, inferVertical, structuredVertical } from "@/lib/classify";
 
 /**
  * Discovery service — guide §2.2 (onboarding) + §9 (competitor graph).
@@ -190,17 +190,37 @@ export async function upsertBusiness(
  *  to ask, and can prioritize like-for-like competitors. */
 export async function searchBusinesses(query: string, near?: { lat: number; lng: number }) {
   const cands = await discoverCandidates({ query, near, vertical: "restaurant", limit: 10 });
-  return cands.map((c) => ({
-    name: c.name,
-    website: c.website,
-    geo: c.geo,
-    category: c.category,
-    address: (c.raw as any)?.address ? Object.values((c.raw as any).address).filter(Boolean).join(", ") : undefined,
-    platform: c.platform,
-    detectedVertical: inferVertical(c as any),
-    subtype: extractSubtype(c as any),
-    raw: c.raw,
-  }));
+
+  // Brand-consistency: a brand is one vertical. If some listings for a name have
+  // a confident structured signal (e.g. one "Patel Brothers" is a Google
+  // grocery) but others are sparse and would name-default to restaurant, apply
+  // the confident vertical to the whole name-group. Skip on conflict.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const sigsByName = new Map<string, Set<"grocery" | "restaurant">>();
+  for (const c of cands) {
+    const sig = structuredVertical(c as any);
+    if (!sig) continue;
+    const k = norm(c.name);
+    if (!sigsByName.has(k)) sigsByName.set(k, new Set());
+    sigsByName.get(k)!.add(sig);
+  }
+
+  return cands.map((c) => {
+    let detectedVertical = inferVertical(c as any);
+    const consensus = sigsByName.get(norm(c.name));
+    if (consensus && consensus.size === 1) detectedVertical = [...consensus][0];
+    return {
+      name: c.name,
+      website: c.website,
+      geo: c.geo,
+      category: c.category,
+      address: (c.raw as any)?.address ? Object.values((c.raw as any).address).filter(Boolean).join(", ") : undefined,
+      platform: c.platform,
+      detectedVertical,
+      subtype: extractSubtype(c as any),
+      raw: c.raw,
+    };
+  });
 }
 
 /** Resolve the picked candidate into a persisted business + workspace. */

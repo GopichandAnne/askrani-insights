@@ -55,10 +55,11 @@ function tagBits(cand: CandidateLike): {
   };
 }
 
-/** "grocery" | "restaurant" — best guess for a picked place. Defaults to
- *  restaurant only as a last resort (most food places in OSM are restaurants). */
-export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
-  const { cls, type, shop, amenity, cuisine, primaryType, gtypes } = tagBits(cand);
+/** Vertical from *structured* signals only (OSM tags / Google types), or null
+ *  when the data can't say — lets callers separate "known" from "guessed" (e.g.
+ *  to propagate a confident brand vertical across sparse same-name listings). */
+export function structuredVertical(cand: CandidateLike): "grocery" | "restaurant" | null {
+  const { cls, type, shop, amenity, primaryType, gtypes } = tagBits(cand);
 
   // 1) OSM structured tags
   if (shop && GROCERY_SHOP.has(shop)) return "grocery";
@@ -77,6 +78,16 @@ export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
   if (gGroc && !gRest) return "grocery";
   if (gRest && !gGroc) return "restaurant";
 
+  return null;
+}
+
+/** "grocery" | "restaurant" — best guess for a place. Uses structured signals
+ *  first, then the name, defaulting to restaurant only as a last resort. */
+export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
+  const structured = structuredVertical(cand);
+  if (structured) return structured;
+
+  const { cuisine } = tagBits(cand);
   const name = cand.name ?? "";
   // Name signals: an explicit eatery word (grille, restaurant, kitchen, pizzeria…)
   // is unambiguous and wins over generic grocery words like "market" that also
