@@ -4,6 +4,7 @@ import { runExtraction, type PipelineOffer } from "@/lib/extraction/pipeline";
 import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
 import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
+import { collectLocalNews } from "@/lib/news";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -409,6 +410,49 @@ export async function collectBusiness(
     result.socialPosts += posts;
     result.offersWritten += offers;
     await finishRun(svc, run, posts + offers, undefined, apifyCost);
+  }
+
+  // ── 6) LOCAL MARKET RADAR (target only): industry trends, local news, nearby
+  //    openings via Google News RSS (free). One per workspace target is enough. ─
+  if (wants("news") && hasTime()) {
+    const { data: asTarget } = await svc
+      .from("workspace")
+      .select("id")
+      .eq("target_business_id", businessId)
+      .limit(1)
+      .maybeSingle();
+    if (asTarget) {
+      const run = await startRun(svc, "news", businessId);
+      let n = 0;
+      try {
+        const items = await collectLocalNews({
+          vertical: vertical as string,
+          subtype: (attrs.subtype as string[]) ?? [],
+          address: attrs.address as string | undefined,
+        });
+        for (const it of items) {
+          const { error } = await svc.from("content_item").upsert(
+            {
+              business_id: businessId,
+              platform: "news",
+              external_ref: it.url,
+              provenance: "OFFICIAL_PUBLIC_API",
+              url: it.url,
+              text: it.title,
+              media: [{ type: "news", kind: it.kind, source: it.source }],
+              published_at: it.publishedAt ?? null,
+              observed_at: nowIso,
+            },
+            { onConflict: "platform,external_ref" },
+          );
+          if (!error) n++;
+        }
+        if (n > 0) result.sources.push("news");
+      } catch (e) {
+        errors.push(`news: ${(e as Error).message}`);
+      }
+      await finishRun(svc, run, n);
+    }
   }
 
   // ── AI extraction cost (Claude): one estimated run for all items this pass ──

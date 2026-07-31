@@ -220,7 +220,7 @@ export function CommandPalette({ open, onClose, admin }: { open: boolean; onClos
 
 const SOURCE_EMOJI: Record<string, string> = {
   website: "🌐", pdf: "📄", google: "🔵", yelp: "⭐", instagram: "📸",
-  facebook: "👍", tiktok: "🎵", youtube: "▶️", doordash: "🛵", ubereats: "🛵",
+  facebook: "👍", tiktok: "🎵", youtube: "▶️", doordash: "🛵", ubereats: "🛵", news: "📰",
 };
 
 function AnswerPanel({ asked, streaming, text, sources, onGo, onAskAnother }: { asked: string; streaming: boolean; text: string; sources: Source[]; onGo: (href: string) => void; onAskAnother: () => void }) {

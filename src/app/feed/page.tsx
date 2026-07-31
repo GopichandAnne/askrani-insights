@@ -23,7 +23,7 @@ export default async function FeedPage() {
   const supabase = await createClient();
   const idFilter = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
 
-  const [{ data: events }, { data: items }] = await Promise.all([
+  const [{ data: events }, { data: items }, { data: news }] = await Promise.all([
     supabase
       .from("market_event")
       .select("id,event_group,event_type,significance,summary,time_start,business:business_id(canonical_name)")
@@ -35,9 +35,19 @@ export default async function FeedPage() {
       .from("content_item")
       .select("id,platform,provenance,url,observed_at,business:business_id(canonical_name)")
       .in("business_id", idFilter)
+      .neq("platform", "news")
       .order("observed_at", { ascending: false })
       .limit(60),
+    supabase
+      .from("content_item")
+      .select("id,text,url,media,published_at,observed_at")
+      .in("business_id", idFilter)
+      .eq("platform", "news")
+      .order("published_at", { ascending: false })
+      .limit(14),
   ]);
+
+  const NEWS_KIND: Record<string, string> = { trend: "📈 Trend", opening: "✨ New opening", local: "📰 Local" };
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -49,6 +59,34 @@ export default async function FeedPage() {
           promotions — plus the raw sources they came from.
         </p>
       </div>
+
+      {news && news.length > 0 && (
+        <section className="card">
+          <h2 className="mb-1 flex items-center gap-2 font-semibold">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🛰️</span>
+            Around you &amp; your industry
+          </h2>
+          <p className="mb-3 text-xs text-ink-faint">Trends, local news and nearby openings in your market — so you hear about it first.</p>
+          <ul className="stagger space-y-1.5">
+            {news.map((nItem: any) => {
+              const kind = nItem.media?.[0]?.kind as string | undefined;
+              const source = nItem.media?.[0]?.source as string | undefined;
+              return (
+                <li key={nItem.id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-white/55 p-3 text-sm">
+                  <span className="chip shrink-0 bg-brand-soft text-brand-deep">{NEWS_KIND[kind ?? ""] ?? "News"}</span>
+                  <a href={nItem.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 font-medium text-ink hover:text-brand hover:underline">
+                    {nItem.text}
+                  </a>
+                  <span className="text-xs text-ink-faint">
+                    {source ? source + " · " : ""}
+                    {nItem.published_at ? new Date(nItem.published_at).toLocaleDateString() : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section className="card">
         <h2 className="mb-3 flex items-center gap-2 font-semibold">

@@ -22,8 +22,8 @@ const GROUNDING = [
   "Answer ONLY from the DATA provided (the owner is \"you\"). Be concise: 1–4 short sentences, plain English, no jargon.",
   "Use specific business names and real numbers from the data. Never invent or estimate figures that aren't present.",
   "Prices are in USD. 'offers' means menu items/products. 'events' are recent market changes.",
-  "A numbered SOURCES list is provided — customer reviews (Yelp/Google), the business's own website & menus, delivery apps (DoorDash/UberEats), and social media posts (Instagram/Facebook/TikTok/YouTube).",
-  "You may reference social posts and any source. When a statement rests on a source, cite it inline with its number in square brackets, e.g. [2]. Only cite numbers that appear in SOURCES.",
+  "A numbered SOURCES list is provided — customer reviews (Yelp/Google), the business's own website & menus, delivery apps (DoorDash/UberEats), social media posts (Instagram/Facebook/TikTok/YouTube), and local market radar: industry trends, local news, and nearby openings (News).",
+  "You may reference any source, including social posts and news. When a statement rests on a source, cite it inline with its number in square brackets, e.g. [2]. Only cite numbers that appear in SOURCES.",
 ].join(" ");
 
 const SYSTEM_STRUCTURED = `${GROUNDING} If the data doesn't contain the answer, set answerable=false and briefly say what's missing or suggest collecting more.`;
@@ -32,8 +32,9 @@ const SYSTEM_STREAM = `${GROUNDING} If the data doesn't contain the answer, say 
 const SOURCE_LABEL: Record<string, string> = {
   website: "Website", pdf: "Menu (PDF)", google: "Google", yelp: "Yelp",
   instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube",
-  doordash: "DoorDash", ubereats: "UberEats",
+  doordash: "DoorDash", ubereats: "UberEats", news: "News",
 };
+const SOCIAL_PLATFORMS = new Set(["instagram", "facebook", "tiktok", "youtube"]);
 
 
 const SCHEMA = {
@@ -88,31 +89,66 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   for (const k of Object.keys(sample)) sample[k] = sample[k].slice(0, 14);
 
   // Citable sources — the actual content items we collected across every channel
-  // (reviews, website, delivery apps, and social media). Snippets let Rani
-  // reference social posts ("their Instagram promoted…") and cite them.
+  // (reviews, website, delivery apps, social media, and local news). The SOURCES
+  // sample is QUESTION-AWARE: it scores each item against the question and its
+  // intent (social? news/openings?), so asking about social pulls in more social,
+  // asking about openings pulls in news — nothing relevant gets capped out.
   const { data: content } = await supabase
     .from("content_item")
-    .select("platform,url,text,observed_at,business:business_id(canonical_name)")
+    .select("platform,url,text,media,observed_at,published_at,business:business_id(canonical_name)")
     .in("business_id", scope)
     .order("observed_at", { ascending: false })
-    .limit(120);
+    .limit(160);
+
+  const ql = q.toLowerCase();
+  const intentSocial = /social|instagram|insta|facebook|tiktok|youtube|post(ing|ed|s)?|reel|caption|feed/.test(ql);
+  const intentNews = /news|trend|trending|open(ed|ing|s)?|launch|nearby|region|area|happening|industry|market|competitor.*(open|new)|new (place|spot|restaurant|store)/.test(ql);
+  const qTokens = ql.split(/[^a-z0-9]+/).filter((t) => t.length > 3);
+
+  const scoreItem = (platform: string, business: string, text: string): number => {
+    let s = 0;
+    const hay = `${SOURCE_LABEL[platform] ?? platform} ${business} ${text}`.toLowerCase();
+    for (const t of qTokens) if (hay.includes(t)) s += 2;
+    if (intentSocial && SOCIAL_PLATFORMS.has(platform)) s += 6;
+    if (intentNews && platform === "news") s += 8;
+    return s;
+  };
+  const capFor = (platform: string): number => {
+    if (intentSocial && SOCIAL_PLATFORMS.has(platform)) return 5;
+    if (intentNews && platform === "news") return 6;
+    return 2;
+  };
+
+  const scored = (content ?? [])
+    .map((c: any) => ({
+      c,
+      platform: c.platform as string,
+      business: (c.business as any)?.canonical_name ?? "Unknown",
+      text: String(c.text ?? ""),
+    }))
+    .map((x) => ({ ...x, rel: scoreItem(x.platform, x.business, x.text) }))
+    .sort((a, b) => b.rel - a.rel || String(b.c.observed_at).localeCompare(String(a.c.observed_at)));
+
   const sources: Source[] = [];
   const sourceNotes: { id: number; business: string; source: string; note: string }[] = [];
   const perKey = new Map<string, number>();
-  for (const c of content ?? []) {
-    if (sources.length >= 26) break;
-    const platform = (c as any).platform as string;
-    const business = ((c as any).business as any)?.canonical_name ?? "Unknown";
-    const key = `${business}|${platform}`;
-    const n = perKey.get(key) ?? 0;
-    if (n >= 2) continue; // keep the source list diverse across channels/businesses
-    perKey.set(key, n + 1);
+  for (const x of scored) {
+    if (sources.length >= 32) break;
+    const key = `${x.business}|${x.platform}`;
+    if ((perKey.get(key) ?? 0) >= capFor(x.platform)) continue;
+    perKey.set(key, (perKey.get(key) ?? 0) + 1);
     const id = sources.length + 1;
-    const label = SOURCE_LABEL[platform] ?? platform;
-    sources.push({ id, business, platform, label, url: (c as any).url ?? undefined });
-    const note = String((c as any).text ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-    sourceNotes.push({ id, business, source: label, note });
+    const label = SOURCE_LABEL[x.platform] ?? x.platform;
+    sources.push({ id, business: x.business, platform: x.platform, label, url: x.c.url ?? undefined });
+    sourceNotes.push({ id, business: x.business, source: label, note: x.text.replace(/\s+/g, " ").trim().slice(0, 200) });
   }
+
+  // Local market radar (industry trends / local news / nearby openings) as a
+  // distinct block so Rani can answer "what's trending / any new openings?".
+  const localNews = (content ?? [])
+    .filter((c: any) => c.platform === "news")
+    .slice(0, 12)
+    .map((c: any) => ({ headline: c.text, source: c.media?.[0]?.source ?? "", kind: c.media?.[0]?.kind ?? "news", when: c.published_at ?? undefined }));
 
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
@@ -124,6 +160,7 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     recommendations: report.recommendations.slice(0, 8).map((r) => ({ title: r.title, action: r.action })),
     monitoringCost: { projectedPerMonthUsd: report.cost.projectedMonthlyUsd, perBusinessPerMonthUsd: report.cost.perBusinessMonthlyUsd, spentInWindowUsd: report.cost.totalUsd, days: report.cost.days },
     sampleOffersByBusiness: sample,
+    localNews,
     sources: sourceNotes,
   };
 
