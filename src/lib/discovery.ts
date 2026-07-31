@@ -230,7 +230,10 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     .map((c) => ({ c, rel: nameRelevance(query, c.name) }))
     .filter(({ c, rel }) => {
       if (!c.geo) return false; // unlocatable → useless for market intel
-      return c.platform === "google" || rel > 0 || structuredVertical(c as any) !== null || !!c.website;
+      // Food-vertical relevance: keep name matches (the searched business /
+      // competitors) and confirmed grocery/restaurant places; drop location-token
+      // noise (person names) and off-vertical hits (clothing, salons, etc.).
+      return rel > 0 || structuredVertical(c as any) !== null;
     })
     .sort((a, b) => b.rel * 0.6 + (b.c.prominence ?? 0) * 0.4 - (a.rel * 0.6 + (a.c.prominence ?? 0) * 0.4))
     .slice(0, 12)
