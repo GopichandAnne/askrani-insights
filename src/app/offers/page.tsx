@@ -33,37 +33,38 @@ export default async function OffersPage() {
   const groups = [...byBiz.values()].sort((a, b) => Number(b.isTarget) - Number(a.isTarget));
 
   return (
-    <div className="space-y-5">
+    <div className="animate-fade-in space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Offers &amp; pricing</h1>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
+        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Offers &amp; pricing</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-soft">
           Menu items and prices for {state.workspace.name} and your competitors, side by side. Each
           one shows where we found it and how sure we are.
         </p>
       </div>
 
       {!groups.length ? (
-        <p className="rounded-xl border border-dashed border-line bg-surface p-6 text-sm text-ink-soft">
+        <p className="card border-dashed text-sm text-ink-soft">
           No offers saved yet. Run a market analysis to populate this.
         </p>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="stagger grid gap-4 lg:grid-cols-2">
           {groups.map((g, i) => (
-            <div key={i} className={`rounded-xl border p-4 ${g.isTarget ? "border-brand bg-brand-soft/30" : "border-line bg-surface"}`}>
+            <div key={i} className={`card card-hover ${g.isTarget ? "ring-1 ring-brand/40" : ""}`}>
               <div className="flex items-center justify-between">
-                <span className="font-medium">
-                  {g.name} {g.isTarget && <span className="text-xs text-brand">(you)</span>}
+                <span className="font-semibold">
+                  {g.name} {g.isTarget && <span className="chip ml-1 bg-brand-soft text-brand">you</span>}
                 </span>
-                <span className="text-xs text-ink-faint">{g.rows.length} offers</span>
+                <span className="chip bg-surface-sunken text-ink-faint">{g.rows.length} offers</span>
               </div>
-              <ul className="mt-3 space-y-1.5">
+              <ul className="mt-3 divide-y divide-line/50">
                 {g.rows.slice(0, 20).map((o) => {
                   const amount = (o.pricing as any)?.amount;
                   return (
-                    <li key={o.id} className="flex items-center justify-between gap-2 text-sm">
+                    <li key={o.id} className="flex items-center justify-between gap-2 py-1.5 text-sm">
                       <span className="truncate">{o.entity_text}</span>
                       <span className="flex shrink-0 items-center gap-2">
-                        {amount != null && <span className="font-medium">${amount}</span>}
+                        {amount != null && <span className="font-semibold text-brand-deep">${amount}</span>}
                         <TrustChip confidence={Number(o.confidence)} />
                       </span>
                     </li>

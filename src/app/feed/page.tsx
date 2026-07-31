@@ -40,28 +40,31 @@ export default async function FeedPage() {
   ]);
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Market feed</h1>
-        <p className="mt-1 text-sm text-ink-soft">
+        <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
+        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Market feed</h1>
+        <p className="mt-1 max-w-2xl text-sm text-ink-soft">
           What changed across {state.workspace.name} and its competitors — price moves, new items,
-          promotions — plus the raw sources they came from. Changes appear once a business has been
-          collected more than once.
+          promotions — plus the raw sources they came from.
         </p>
       </div>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-ink-soft">Changes detected</h2>
+      <section className="card">
+        <h2 className="mb-3 flex items-center gap-2 font-semibold">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">◫</span>
+          Changes detected
+        </h2>
         {!events?.length ? (
-          <p className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-faint">
+          <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-faint">
             No changes yet. These appear after a business is re-collected and something moved
             (price, new dish, a promotion starting). Re-run collection to build history.
           </p>
         ) : (
-          <ul className="space-y-1.5">
+          <ul className="stagger space-y-1.5">
             {events.map((e) => (
-              <li key={e.id} className="flex items-center gap-3 rounded-lg border border-line bg-surface p-3 text-sm">
-                <span className={`chip ${GROUP_COLOR[e.event_group] ?? "bg-surface-sunken text-ink-soft"}`}>
+              <li key={e.id} className="flex items-center gap-3 rounded-2xl bg-white/55 p-3 text-sm">
+                <span className={`chip shrink-0 ${GROUP_COLOR[e.event_group] ?? "bg-surface-sunken text-ink-soft"}`}>
                   {String(e.event_type).replace(/_/g, " ")}
                 </span>
                 <span className="min-w-0 flex-1">
@@ -72,7 +75,7 @@ export default async function FeedPage() {
                   className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-surface-sunken"
                   title={`significance ${Math.round(Number(e.significance) * 100)}%`}
                 >
-                  <span className="block h-full bg-brand" style={{ width: `${Number(e.significance) * 100}%` }} />
+                  <span className="block h-full rounded-full bg-brand-gradient" style={{ width: `${Number(e.significance) * 100}%` }} />
                 </span>
               </li>
             ))}
@@ -80,20 +83,23 @@ export default async function FeedPage() {
         )}
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold text-ink-soft">Observed sources</h2>
+      <section className="card">
+        <h2 className="mb-3 flex items-center gap-2 font-semibold">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">◎</span>
+          Observed sources
+        </h2>
         {!items?.length ? (
-          <p className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-faint">
+          <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-faint">
             Nothing observed yet. Run a collection to seed the feed.
           </p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-1.5">
             {items.map((it) => (
-              <li key={it.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface p-3 text-sm">
+              <li key={it.id} className="flex flex-wrap items-center gap-3 rounded-2xl bg-white/55 p-3 text-sm">
                 <span className="font-medium">{(it.business as any)?.canonical_name ?? "Unknown"}</span>
-                <span className="text-ink-faint">{it.platform}</span>
+                <span className="chip bg-surface-sunken text-ink-soft">{it.platform}</span>
                 {it.url && (
-                  <a href={it.url} target="_blank" rel="noreferrer" className="truncate text-brand hover:underline">
+                  <a href={it.url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-brand hover:underline">
                     {it.url}
                   </a>
                 )}

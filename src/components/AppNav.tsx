@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { RaniWordmark, RaniMark } from "@/components/RaniSpinner";
+import { CommandPalette } from "@/components/CommandPalette";
 
 export interface NavItem {
   href: string;
@@ -12,56 +14,70 @@ export interface NavItem {
 
 const I = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const ICONS = {
-  today: (
-    <svg {...I}><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" /><path d="M9.5 21v-6h5v6" /></svg>
-  ),
-  feed: (
-    <svg {...I}><path d="M3 12h4l2 6 4-14 2.5 8H21" /></svg>
-  ),
-  offers: (
-    <svg {...I}><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12.2V4a1 1 0 0 1 1-1h8.2a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z" /><circle cx="7.5" cy="7.5" r="1.3" /></svg>
-  ),
-  competitors: (
-    <svg {...I}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2A3.2 3.2 0 0 1 16 11" /><path d="M17.5 14.5A5.5 5.5 0 0 1 20.5 20" /></svg>
-  ),
-  recommendations: (
-    <svg {...I}><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg>
-  ),
-  report: (
-    <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>
-  ),
-  add: (
-    <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>
-  ),
-  admin: (
-    <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>
-  ),
+  today: <svg {...I}><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" /><path d="M9.5 21v-6h5v6" /></svg>,
+  feed: <svg {...I}><path d="M3 12h4l2 6 4-14 2.5 8H21" /></svg>,
+  offers: <svg {...I}><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12.2V4a1 1 0 0 1 1-1h8.2a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z" /><circle cx="7.5" cy="7.5" r="1.3" /></svg>,
+  competitors: <svg {...I}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2A3.2 3.2 0 0 1 16 11" /><path d="M17.5 14.5A5.5 5.5 0 0 1 20.5 20" /></svg>,
+  recommendations: <svg {...I}><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg>,
+  report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
+  add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
+  admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
+};
+const SHORT: Record<string, string> = {
+  "/": "Today", "/feed": "Feed", "/offers": "Offers", "/competitors": "Rivals",
+  "/recommendations": "Actions", "/reports": "Report", "/onboarding": "New", "/admin": "Admin",
 };
 
-export function AppNav({ items, email, homeHref = "/" }: { items: NavItem[]; email?: string; homeHref?: string }) {
+function useCommandKey(setOpen: (f: (o: boolean) => boolean) => void) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setOpen((o) => !o); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [setOpen]);
+}
+
+export function AppNav({ items, email, admin }: { items: NavItem[]; email?: string; admin?: boolean }) {
   const pathname = usePathname() || "/";
+  const [open, setOpen] = useState(false);
+  useCommandKey(setOpen);
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+
+  const AskTrigger = ({ className = "" }: { className?: string }) => (
+    <button
+      onClick={() => setOpen(true)}
+      className={`glass group flex items-center gap-2.5 rounded-full px-4 py-2.5 text-left text-sm text-ink-faint transition-all hover:text-ink hover:shadow-glow ${className}`}
+    >
+      <span className="text-brand" aria-hidden>✦</span>
+      <span className="truncate">Ask Rani or jump to anything…</span>
+      <kbd className="ml-auto hidden shrink-0 items-center gap-0.5 rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-ink-faint sm:flex">⌘K</kbd>
+    </button>
+  );
 
   return (
     <>
-      {/* ── Desktop sidebar ─────────────────────────────────────────── */}
-      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-64 flex-col p-3 lg:flex">
-        <div className="glass flex h-full flex-col rounded-3xl p-4">
-          <Link href={homeHref} aria-label="Ask Rani Insights home" className="px-2 py-1.5">
-            <RaniWordmark />
-          </Link>
-          <nav className="mt-5 flex-1 space-y-1">
+      {/* ── Desktop icon rail ───────────────────────────────────────── */}
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-20 p-2 lg:flex">
+        <div className="glass flex h-full w-full flex-col items-center rounded-3xl py-3">
+          <Link href="/" aria-label="Ask Rani Insights home" className="mb-2"><RaniMark size={32} /></Link>
+          <nav className="flex w-full flex-1 flex-col items-center gap-1 px-1.5">
             {items.map((n) => (
-              <Link key={n.href} href={n.href} className="nav-item" data-active={isActive(n.href)}>
-                <span className="shrink-0">{ICONS[n.icon]}</span>
-                <span>{n.label}</span>
+              <Link
+                key={n.href}
+                href={n.href}
+                data-active={isActive(n.href)}
+                title={n.label}
+                className="flex w-full flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium text-ink-faint transition-all hover:bg-brand-soft hover:text-brand-deep data-[active=true]:bg-brand-gradient data-[active=true]:text-white data-[active=true]:shadow-brand"
+              >
+                {ICONS[n.icon]}
+                <span>{SHORT[n.href] ?? n.label}</span>
               </Link>
             ))}
           </nav>
           {email && (
-            <form action="/auth/signout" method="post" className="mt-3 border-t border-line/70 pt-3">
-              <div className="truncate px-2 text-xs text-ink-faint" title={email}>{email}</div>
-              <button type="submit" className="nav-item mt-1 w-full text-left">
+            <form action="/auth/signout" method="post" className="mt-1 w-full px-1.5">
+              <button type="submit" title={`Sign out (${email})`} className="flex w-full flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium text-ink-faint transition-colors hover:bg-trust-low/10 hover:text-trust-low">
                 <svg {...I}><path d="M15 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3" /><path d="M10 17l-5-5 5-5" /><path d="M5 12h11" /></svg>
                 <span>Sign out</span>
               </button>
@@ -70,15 +86,21 @@ export function AppNav({ items, email, homeHref = "/" }: { items: NavItem[]; ema
         </div>
       </aside>
 
+      {/* ── Desktop top command bar ─────────────────────────────────── */}
+      <header className="no-print fixed right-0 top-0 z-30 hidden lg:left-20 lg:block">
+        <div className="px-6 pt-3">
+          <div className="glass-strong flex items-center gap-3 rounded-2xl px-3 py-2">
+            <AskTrigger className="w-full max-w-lg" />
+            {email && <span className="ml-auto truncate px-2 text-xs text-ink-faint" title={email}>{email}</span>}
+          </div>
+        </div>
+      </header>
+
       {/* ── Mobile top bar ──────────────────────────────────────────── */}
       <header className="no-print sticky top-0 z-40 lg:hidden">
-        <div className="glass-strong flex items-center justify-between px-4 py-2.5">
-          <Link href={homeHref} aria-label="Ask Rani Insights home"><RaniWordmark compact /></Link>
-          {email && (
-            <form action="/auth/signout" method="post">
-              <button type="submit" className="rounded-full px-3 py-1 text-sm font-medium text-ink-soft hover:text-brand">Sign out</button>
-            </form>
-          )}
+        <div className="glass-strong flex items-center gap-2 px-4 py-2.5">
+          <Link href="/" aria-label="home" className="shrink-0"><RaniWordmark compact /></Link>
+          <AskTrigger className="ml-auto max-w-[60%] flex-1" />
         </div>
       </header>
 
@@ -94,11 +116,13 @@ export function AppNav({ items, email, homeHref = "/" }: { items: NavItem[]; ema
               className="flex flex-col items-center gap-0.5 rounded-xl px-3 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
             >
               <span className={isActive(n.href) ? "text-brand" : ""}>{ICONS[n.icon]}</span>
-              <span>{n.label.split(" ")[0]}</span>
+              <span>{SHORT[n.href] ?? n.label.split(" ")[0]}</span>
             </Link>
           ))}
         </div>
       </nav>
+
+      <CommandPalette open={open} onClose={() => setOpen(false)} admin={admin} />
     </>
   );
 }

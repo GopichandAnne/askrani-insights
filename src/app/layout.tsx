@@ -42,8 +42,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {user ? (
           // ── Signed-in app shell: glass sidebar + content ──────────────
           <div className="min-h-screen">
-            <AppNav items={nav} email={user.email ?? undefined} />
-            <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-10 lg:pl-72 lg:pr-8 lg:pt-8">
+            <AppNav items={nav} email={user.email ?? undefined} admin={admin} />
+            <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
               {children}
             </main>
           </div>
