@@ -177,6 +177,8 @@ export async function upsertBusiness(
     ["contact:facebook", "facebook"],
     ["contact:instagram", "instagram"],
     ["contact:twitter", "twitter"],
+    ["contact:tiktok", "tiktok"],
+    ["contact:youtube", "youtube"],
   ] as const) {
     if (ex[k]) identities.push({ platform: plat, url: ex[k] });
   }

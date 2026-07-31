@@ -186,6 +186,32 @@ export async function collectBusiness(
   let profileLinks: { platform: string; url: string }[] = [];
   let aiItems = 0; // count of content items sent through Claude extraction (for AI cost)
 
+  // ── 0) RESOLVE WEB PRESENCE ─────────────────────────────────────────────
+  // Competitors often have no website on file (OSM is sparse), so their site is
+  // never crawled and their social handles are never found — meaning rivals'
+  // social posts never get collected. Google Places knows their website, so when
+  // we have none, borrow Google's and persist it. The crawl below then mines it
+  // for Instagram/Facebook/TikTok/YouTube links. (No extra Google cost: the
+  // place_id we resolve here lets the Google review step skip its own lookup.)
+  if (!biz.website && !attrs.web_resolved && wants("website") && hasTime()) {
+    const g = getProvider("google");
+    if (g?.isConfigured()) {
+      try {
+        const cands = await g.discoverProfiles({ query: biz.canonical_name, near: geo, limit: 1 });
+        const cand = cands[0];
+        if (cand?.externalId && !attrs.place_id) attrs.place_id = cand.externalId;
+        if (cand?.website) {
+          try { biz.website = new URL(cand.website).origin; } catch { biz.website = cand.website; }
+          await svc.from("business").update({ website: biz.website }).eq("id", businessId);
+        }
+        attrs.web_resolved = true; // don't re-query Google for this every run
+        attrsDirty = true;
+      } catch {
+        /* leave web_resolved unset so we retry next run */
+      }
+    }
+  }
+
   // ── 1) WEBSITE (always) ─────────────────────────────────────────────────
   if (biz.website && wants("website")) {
     const run = await startRun(svc, "website", businessId);
