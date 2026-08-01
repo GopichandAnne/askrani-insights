@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
 import { BriefingCard } from "@/components/BriefingCard";
+import { EdgeTeaser } from "@/components/EdgeTeaser";
 import { RaniMark } from "@/components/RaniSpinner";
 
 export const dynamic = "force-dynamic";
@@ -233,8 +234,11 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         <p className="text-sm text-ink-faint">Your market, at a glance. Press <kbd className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold">⌘K</kbd> to ask anything.</p>
       </header>
 
-      {/* 1 — briefing */}
-      <BriefingCard />
+      {/* 1 — briefing + edge teaser */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2"><BriefingCard /></div>
+        <EdgeTeaser />
+      </div>
 
       {/* 2 — scorecard */}
       <section className="stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
