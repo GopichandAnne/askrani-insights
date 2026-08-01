@@ -62,7 +62,16 @@ const KIND_META: Record<string, { icon: string; label: string; tone: string }> =
   new_item: { icon: "🆕", label: "New items", tone: "bg-brand-soft text-brand-deep" },
   removed: { icon: "➖", label: "Removed", tone: "bg-surface-sunken text-ink-soft" },
   reputation: { icon: "⭐", label: "Reputation", tone: "bg-trust-direct/10 text-trust-direct" },
+  // competitor social posts (their offers live here)
+  social_promo: { icon: "🏷️", label: "Competitor deal", tone: "bg-coral/15 text-coral-dark" },
+  instagram: { icon: "📸", label: "Instagram", tone: "bg-brand-soft text-brand-deep" },
+  facebook: { icon: "👍", label: "Facebook", tone: "bg-brand-soft text-brand-deep" },
+  tiktok: { icon: "🎵", label: "TikTok", tone: "bg-surface-sunken text-ink-soft" },
+  youtube: { icon: "▶️", label: "YouTube", tone: "bg-surface-sunken text-ink-soft" },
 };
+// caption keywords that mark a social post as an actual offer/promo
+const PROMO_RE = /\b(sale|deal|deals|offer|discount|%|\$\d|special|weekend|combo|bogo|buy one|save|saving|clearance|promo|coupon|off\b)/i;
+const PLATFORM_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube" };
 // plural nouns used when we roll many same-type events into one summary row
 const BUCKET_NOUN: Record<string, string> = {
   price: "price changes", promo: "new promotions", new_item: "new items", removed: "items removed", reputation: "rating updates",
@@ -95,7 +104,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const ids = await workspaceBusinessIds(workspace);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
 
-  const [report, { data: news }] = await Promise.all([
+  const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
     supabase
       .from("content_item")
@@ -104,6 +113,13 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
       .eq("platform", "news")
       .order("published_at", { ascending: false })
       .limit(6),
+    supabase
+      .from("content_item")
+      .select("id,text,url,platform,published_at,observed_at,business:business_id(canonical_name)")
+      .in("business_id", scope)
+      .in("platform", ["instagram", "facebook", "tiktok", "youtube"])
+      .order("observed_at", { ascending: false })
+      .limit(80),
   ]);
 
   // ── interpreted scorecard (standing, not raw counts) ──────────────────────
@@ -161,8 +177,35 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     const kind = ((n as any).media?.[0]?.kind as string) ?? "local";
     items.push({ key: `n${(n as any).id}`, kind, title: (n as any).text, meta: (n as any).media?.[0]?.source ?? "news", when: (n as any).published_at ? Date.parse((n as any).published_at) : 0, href: (n as any).url, external: true });
   }
+  // competitor SOCIAL posts — their actual offers live in the captions. Prefer
+  // promo-like posts, then most recent; keep 2 per business so it stays diverse.
+  const socialRanked = (social ?? [])
+    .map((s) => {
+      const cap = String((s as any).text || "").replace(/\s+/g, " ").trim();
+      const when = (s as any).published_at ? Date.parse((s as any).published_at) : (s as any).observed_at ? Date.parse((s as any).observed_at) : 0;
+      return { s, cap, promo: PROMO_RE.test(cap), when };
+    })
+    .filter((x) => x.cap.length > 4)
+    .sort((a, b) => Number(b.promo) - Number(a.promo) || b.when - a.when);
+  const perBiz = new Map<string, number>();
+  for (const x of socialRanked) {
+    const biz = (x.s as any).business?.canonical_name ?? "A competitor";
+    const n = perBiz.get(biz) ?? 0;
+    if (n >= 2) continue;
+    perBiz.set(biz, n + 1);
+    const plat = (x.s as any).platform as string;
+    items.push({
+      key: `s${(x.s as any).id}`,
+      kind: x.promo ? "social_promo" : plat,
+      title: `${biz} — ${x.cap.slice(0, 96)}${x.cap.length > 96 ? "…" : ""}`,
+      meta: x.promo ? PLATFORM_LABEL[plat] ?? "Social" : "posted",
+      when: x.when,
+      href: (x.s as any).url,
+      external: true,
+    });
+  }
   items.sort((a, b) => b.when - a.when);
-  const whatsNew = items.slice(0, 8);
+  const whatsNew = items.slice(0, 12);
 
   // ── do-this-now: real recommendations, topped up with evergreen quick wins ──
   const wins = QUICK_WINS[workspace.vertical === "grocery" ? "grocery" : "restaurant"];
