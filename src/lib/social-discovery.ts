@@ -53,21 +53,64 @@ function pickHandle(urls: string[], host: "instagram.com" | "facebook.com", gene
   return undefined;
 }
 
+/** Strip branch/location suffixes and parentheticals that derail search, e.g.
+ *  "India Bazaar Austin - Cedar Park" → "India Bazaar Austin". */
+function cleanName(name: string): string {
+  return name
+    .split(/\s[-–—|]\s/)[0] // drop "… - Cedar Park", "… | Downtown"
+    .replace(/\([^)]*\)/g, "") // drop "(Durga Bhavani World Foods)"
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const IG_GENERIC = ["p", "reel", "reels", "explore", "accounts", "stories", "tv"];
+const FB_GENERIC = ["pages", "groups", "events", "watch", "marketplace", "sharer", "login", "profile.php", "people"];
+
+async function findHandle(
+  name: string,
+  city: string,
+  host: "instagram.com" | "facebook.com",
+  generic: string[],
+  state: { searched: boolean },
+): Promise<string | undefined> {
+  const clean = cleanName(name);
+  const loc = city ? ` ${city}` : "";
+  const word = host === "instagram.com" ? "instagram" : "facebook";
+  // try the cleaned name (with + without location), then the raw name — stop at
+  // the first result that plausibly matches the business name.
+  const queries = [`${clean}${loc} ${word}`, `${clean} ${word}`];
+  if (clean !== name) queries.push(`${name} ${word}`);
+  const seen = new Set<string>();
+  for (const q of queries) {
+    if (seen.has(q)) continue;
+    seen.add(q);
+    const urls = await ddgUrls(q);
+    if (urls.length) state.searched = true; // search engine actually responded
+    const h = pickHandle(urls, host, generic);
+    if (h && handleMatchesName(h, name)) return h;
+    await new Promise((r) => setTimeout(r, 400)); // be gentle with DDG
+  }
+  return undefined;
+}
+
+/** Returns discovered handles plus `searched`: false means the search engine
+ *  returned nothing at all (likely a transient block) — caller should retry
+ *  later rather than mark the business as resolved. */
 export async function findSocialHandles(
   name: string,
   city: string,
   want: { instagram?: boolean; facebook?: boolean } = { instagram: true, facebook: true },
-): Promise<{ instagram?: string; facebook?: string }> {
-  const out: { instagram?: string; facebook?: string } = {};
-  const loc = city ? ` ${city}` : "";
-
+): Promise<{ instagram?: string; facebook?: string; searched: boolean }> {
+  const state = { searched: false };
+  const out: { instagram?: string; facebook?: string; searched: boolean } = { searched: false };
   if (want.instagram) {
-    const h = pickHandle(await ddgUrls(`${name}${loc} instagram`), "instagram.com", ["p", "reel", "reels", "explore", "accounts", "stories", "tv"]);
-    if (h && handleMatchesName(h, name)) out.instagram = `https://www.instagram.com/${h}`;
+    const h = await findHandle(name, city, "instagram.com", IG_GENERIC, state);
+    if (h) out.instagram = `https://www.instagram.com/${h}`;
   }
   if (want.facebook) {
-    const h = pickHandle(await ddgUrls(`${name}${loc} facebook`), "facebook.com", ["pages", "groups", "events", "watch", "marketplace", "sharer", "login", "profile.php", "people"]);
-    if (h && handleMatchesName(h, name)) out.facebook = `https://www.facebook.com/${h}`;
+    const h = await findHandle(name, city, "facebook.com", FB_GENERIC, state);
+    if (h) out.facebook = `https://www.facebook.com/${h}`;
   }
+  out.searched = state.searched;
   return out;
 }

@@ -284,18 +284,19 @@ export async function collectBusiness(
           facebook: !haveFb,
         });
         for (const [platform, url] of Object.entries(found)) {
-          if (!url) continue;
+          if (platform === "searched" || !url || typeof url !== "string") continue;
           await svc
             .from("external_identity")
             .insert({ business_id: businessId, platform, url, verification_state: "observed" })
             .then(() => {}, () => {});
           (identRows ?? []).push({ platform, url, handle: null } as any);
         }
+        // Only mark resolved once the search actually responded; a blocked/empty
+        // search leaves the flag off so a later run retries (self-healing).
+        if (found.searched) { attrs.social_resolved = true; attrsDirty = true; }
       } catch {
-        /* best-effort */
+        /* best-effort — retry next run */
       }
-      attrs.social_resolved = true;
-      attrsDirty = true;
     }
   }
 
