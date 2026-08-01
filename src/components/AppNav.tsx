@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RaniWordmark, RaniMark } from "@/components/RaniSpinner";
 import { CommandPalette } from "@/components/CommandPalette";
+import { WorkspaceSwitcher, type WsOption } from "@/components/WorkspaceSwitcher";
 
 export interface NavItem {
   href: string;
@@ -18,13 +19,14 @@ const ICONS = {
   feed: <svg {...I}><path d="M3 12h4l2 6 4-14 2.5 8H21" /></svg>,
   offers: <svg {...I}><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12.2V4a1 1 0 0 1 1-1h8.2a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z" /><circle cx="7.5" cy="7.5" r="1.3" /></svg>,
   competitors: <svg {...I}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2A3.2 3.2 0 0 1 16 11" /><path d="M17.5 14.5A5.5 5.5 0 0 1 20.5 20" /></svg>,
+  channels: <svg {...I}><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="12" cy="12" r="3.4" /><circle cx="17" cy="7" r="1.2" fill="currentColor" stroke="none" /></svg>,
   recommendations: <svg {...I}><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg>,
   report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
   add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
 };
 const SHORT: Record<string, string> = {
-  "/": "Today", "/feed": "Feed", "/offers": "Offers", "/competitors": "Rivals",
+  "/": "Today", "/feed": "Feed", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
   "/recommendations": "Actions", "/reports": "Report", "/onboarding": "New", "/admin": "Admin",
 };
 
@@ -38,7 +40,7 @@ function useCommandKey(setOpen: (f: (o: boolean) => boolean) => void) {
   }, [setOpen]);
 }
 
-export function AppNav({ items, email, admin }: { items: NavItem[]; email?: string; admin?: boolean }) {
+export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId = "" }: { items: NavItem[]; email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string }) {
   const pathname = usePathname() || "/";
   const [open, setOpen] = useState(false);
   useCommandKey(setOpen);
@@ -90,7 +92,8 @@ export function AppNav({ items, email, admin }: { items: NavItem[]; email?: stri
       <header className="no-print fixed right-0 top-0 z-30 hidden lg:left-20 lg:block">
         <div className="px-6 pt-3">
           <div className="glass-strong flex items-center gap-3 rounded-2xl px-3 py-2">
-            <AskTrigger className="w-full max-w-lg" />
+            {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
+            <AskTrigger className="w-full max-w-md" />
             {email && <span className="ml-auto truncate px-2 text-xs text-ink-faint" title={email}>{email}</span>}
           </div>
         </div>
@@ -99,8 +102,9 @@ export function AppNav({ items, email, admin }: { items: NavItem[]; email?: stri
       {/* ── Mobile top bar ──────────────────────────────────────────── */}
       <header className="no-print sticky top-0 z-40 lg:hidden">
         <div className="glass-strong flex items-center gap-2 px-4 py-2.5">
-          <Link href="/" aria-label="home" className="shrink-0"><RaniWordmark compact /></Link>
-          <AskTrigger className="ml-auto max-w-[60%] flex-1" />
+          <Link href="/" aria-label="home" className="shrink-0"><RaniMark size={26} /></Link>
+          {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
+          <AskTrigger className="ml-auto max-w-[45%] flex-1" />
         </div>
       </header>
 

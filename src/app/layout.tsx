@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getUser, isSuperAdmin } from "@/lib/auth";
 import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
+import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 
 export const metadata: Metadata = {
   title: "Ask Rani Insights — local market intelligence",
@@ -16,6 +17,7 @@ const NAV: NavItem[] = [
   { href: "/feed", label: "Market feed", icon: "feed" },
   { href: "/offers", label: "Offers", icon: "offers" },
   { href: "/competitors", label: "Competitors", icon: "competitors" },
+  { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/recommendations", label: "Recommendations", icon: "recommendations" },
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
@@ -25,6 +27,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const user = await getUser();
   const admin = isSuperAdmin(user);
   const nav = admin ? [...NAV, { href: "/admin", label: "Admin", icon: "admin" as const }] : NAV;
+
+  // businesses this login can switch between (only meaningful when signed in)
+  const workspaces = user ? await listWorkspaces() : [];
+  const active = user ? await activeWorkspace() : null;
+  const activeId = active?.status === "ok" ? active.workspace.id : "";
 
   return (
     <html lang="en">
@@ -42,7 +49,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {user ? (
           // ── Signed-in app shell: glass sidebar + content ──────────────
           <div className="min-h-screen">
-            <AppNav items={nav} email={user.email ?? undefined} admin={admin} />
+            <AppNav
+              items={nav}
+              email={user.email ?? undefined}
+              admin={admin}
+              workspaces={workspaces.map((w) => ({ id: w.id, name: w.name, vertical: w.vertical }))}
+              activeWorkspaceId={activeId}
+            />
             <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
               {children}
             </main>

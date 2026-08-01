@@ -18,6 +18,7 @@ export interface CompetitorRow {
   businessId: string;
   name: string;
   website?: string;
+  geo?: { lat: number; lng: number };
   distanceKm?: number;
   relation: string;
   score: number;
@@ -381,6 +382,7 @@ export async function autoDiscoverCompetitors(
       businessId: compId,
       name: s.cand.name,
       website: originOf(s.cand.website),
+      geo: s.cand.geo,
       distanceKm: s.cand.distanceKm,
       relation,
       score: s.score,
@@ -430,6 +432,7 @@ export async function addCompetitor(
     businessId: compId,
     name: cand.name,
     website: originOf(cand.website),
+    geo: cand.geo,
     distanceKm: (withDist as any).distanceKm,
     relation: "primary",
     score,

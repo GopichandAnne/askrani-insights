@@ -1,5 +1,9 @@
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getUser, isSupabaseConfigured } from "@/lib/auth";
+
+/** Cookie that remembers which business (workspace) the user is currently viewing. */
+export const ACTIVE_WS_COOKIE = "ar_active_ws";
 
 /**
  * Read-side helpers for the signed-in user's active workspace. All queries go
@@ -20,13 +24,29 @@ export type ScreenState =
   | { status: "empty" }
   | { status: "ok"; workspace: WorkspaceRow };
 
-/** The most recently created workspace for the current user, or a reason why not. */
+/**
+ * The workspace the user is currently viewing. A login can watch many businesses
+ * (one workspace each); we honor the one they picked (ACTIVE_WS_COOKIE) and fall
+ * back to the most recently created. RLS guarantees the cookie can only ever
+ * resolve to a workspace the user is a member of.
+ */
 export async function activeWorkspace(): Promise<ScreenState> {
   if (!isSupabaseConfigured()) return { status: "unconfigured" };
   const user = await getUser();
   if (!user) return { status: "signedout" };
 
   const supabase = await createClient();
+
+  const pinned = (await cookies()).get(ACTIVE_WS_COOKIE)?.value;
+  if (pinned) {
+    const { data } = await supabase
+      .from("workspace")
+      .select("id,name,vertical,target_business_id")
+      .eq("id", pinned)
+      .maybeSingle();
+    if (data) return { status: "ok", workspace: data as WorkspaceRow };
+  }
+
   const { data } = await supabase
     .from("workspace")
     .select("id,name,vertical,target_business_id")
@@ -36,6 +56,19 @@ export async function activeWorkspace(): Promise<ScreenState> {
 
   if (!data) return { status: "empty" };
   return { status: "ok", workspace: data as WorkspaceRow };
+}
+
+/** All workspaces (businesses) the signed-in user can view, newest first. */
+export async function listWorkspaces(): Promise<WorkspaceRow[]> {
+  if (!isSupabaseConfigured()) return [];
+  const user = await getUser();
+  if (!user) return [];
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("workspace")
+    .select("id,name,vertical,target_business_id")
+    .order("created_at", { ascending: false });
+  return (data ?? []) as WorkspaceRow[];
 }
 
 /** Business ids in a workspace: the target plus its competitor edges. */

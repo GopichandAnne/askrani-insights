@@ -1,9 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { RaniSpinner, RaniMark } from "@/components/RaniSpinner";
 import { subtypeLabel } from "@/lib/classify";
+import type { MapPoint } from "@/components/MapPicker";
+
+// Leaflet touches window on load — load the map only in the browser.
+const MapPicker = dynamic(() => import("@/components/MapPicker").then((m) => m.MapPicker), {
+  ssr: false,
+  loading: () => <div className="grid h-[340px] place-items-center rounded-2xl border border-line/60 bg-surface-sunken text-sm text-ink-faint">Loading map…</div>,
+});
 
 /**
  * Search-first onboarding (guide §2.2): find your business → we auto-detect its
@@ -29,6 +37,7 @@ interface Competitor {
   businessId: string;
   name: string;
   website?: string;
+  geo?: { lat: number; lng: number };
   distanceKm?: number;
   relation: string;
   score: number;
@@ -248,6 +257,19 @@ function SearchPhase({
 
       {error && <p className="rounded-xl border border-trust-low/30 bg-trust-low/5 p-3 text-sm text-trust-low">{error}</p>}
 
+      {results.some((r: Candidate) => r.geo) && (
+        <div className="card p-2">
+          <MapPicker
+            points={results
+              .map((r: Candidate, i: number): MapPoint | null =>
+                r.geo ? { id: String(i), lat: r.geo.lat, lng: r.geo.lng, label: r.name, sub: r.address, tone: "result", action: "This is mine" } : null)
+              .filter(Boolean) as MapPoint[]}
+            onPick={(id) => { const r = results[Number(id)]; if (r) resolve(r); }}
+          />
+          <p className="px-1 pt-2 text-xs text-ink-faint">Tap a pin on the map, or pick from the list below.</p>
+        </div>
+      )}
+
       {results.length > 0 && (
         <div className="stagger space-y-2">
           {results.map((r: Candidate, i: number) => (
@@ -286,6 +308,47 @@ function WorkspacePhase({
   const anyActive = businesses.some((b: any) => ["pending", "running"].includes(jobs[b.id]?.status));
   const allDone = started && !anyActive && done > 0;
 
+  // inline competitor add-by-search, shared between the map pins and the list
+  const [addQuery, setAddQuery] = useState("");
+  const [addResults, setAddResults] = useState<Candidate[]>([]);
+  const [addBusy, setAddBusy] = useState(false);
+
+  async function doAddSearch() {
+    if (addQuery.trim().length < 2) return;
+    setAddBusy(true);
+    try { setAddResults(await runSearch(addQuery.trim())); } finally { setAddBusy(false); }
+  }
+  async function addCandidate(c: Candidate) {
+    setAddBusy(true);
+    try {
+      const res = await fetch("/api/competitors/add", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId, candidate: c }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCompetitors((cs: Competitor[]) => [...cs, data.competitor]);
+        setAddResults((rs) => rs.filter((x) => x !== c));
+      }
+    } finally { setAddBusy(false); }
+  }
+
+  // pins: your business + current competitors + any search candidates to add
+  const mapPoints: MapPoint[] = [];
+  if (target?.geo) mapPoints.push({ id: "target", lat: target.geo.lat, lng: target.geo.lng, label: target.name, sub: "Your business", tone: "target" });
+  for (const c of competitors as Competitor[]) {
+    if (c.geo) mapPoints.push({ id: `comp:${c.edgeId}`, lat: c.geo.lat, lng: c.geo.lng, label: c.name, sub: c.distanceKm != null ? `${c.distanceKm}km · ${c.relation}` : c.relation, tone: "competitor", action: started ? undefined : "Remove" });
+  }
+  addResults.forEach((r, i) => {
+    if (r.geo && !competitors.some((c: Competitor) => c.name === r.name)) mapPoints.push({ id: `cand:${i}`, lat: r.geo!.lat, lng: r.geo!.lng, label: r.name, sub: r.address, tone: "result", action: "Add competitor" });
+  });
+
+  async function onMapPick(id: string) {
+    if (id === "target") return;
+    if (id.startsWith("comp:")) { removeCompetitor(id.slice(5)); return; }
+    if (id.startsWith("cand:")) { const r = addResults[Number(id.slice(5))]; if (r) await addCandidate(r); }
+  }
+
   return (
     <div className="space-y-6">
       {/* your business */}
@@ -319,15 +382,47 @@ function WorkspacePhase({
       <div className="card">
         <div className="relative mb-1 flex items-center justify-between">
           <h2 className="font-semibold">Competitors <span className="text-ink-faint">({competitors.length})</span></h2>
-          <AddCompetitor onAdd={(c: Competitor) => setCompetitors((cs: Competitor[]) => [...cs, c])} workspaceId={workspaceId!} runSearch={runSearch} />
         </div>
         <p className="mb-3 text-xs text-ink-faint">
           {vertical === "grocery" ? "Grocers" : "Restaurants"} closest to yours by type &amp; distance — like-for-like first.
-          Remove any that don&apos;t belong, add your own. Nothing is collected until you start.
+          Tap a pin to remove one, or search below to add — new results drop onto the map as pins you can add. Nothing is collected until you start.
         </p>
+
+        {/* map: your business + competitors + candidates to add */}
+        {mapPoints.length > 0 && (
+          <div className="mb-3">
+            <MapPicker points={mapPoints} onPick={onMapPick} height={360} />
+            <div className="mt-2 flex flex-wrap items-center gap-3 px-1 text-[11px] text-ink-faint">
+              <span className="flex items-center gap-1"><Dot c="#0d9488" /> You</span>
+              <span className="flex items-center gap-1"><Dot c="#0f766e" /> Competitor</span>
+              <span className="flex items-center gap-1"><Dot c="#fb7185" /> Search result — tap to add</span>
+            </div>
+          </div>
+        )}
+
+        {/* add-by-search */}
+        {!started && (
+          <div className="mb-3 rounded-2xl bg-white/45 p-3">
+            <div className="flex gap-2">
+              <input value={addQuery} onChange={(e) => setAddQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doAddSearch()} placeholder="Search a competitor to add (name + city)" className="field flex-1 py-2 text-sm" />
+              <button onClick={doAddSearch} disabled={addBusy} className="btn btn-primary px-4 py-2 text-sm disabled:opacity-60">{addBusy ? "…" : "Search"}</button>
+            </div>
+            {addResults.length > 0 && (
+              <ul className="mt-2 max-h-52 space-y-1 overflow-auto">
+                {addResults.filter((r) => !competitors.some((c: Competitor) => c.name === r.name)).map((r, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-sm hover:bg-brand-soft/60">
+                    <span className="min-w-0 truncate"><span className="font-medium">{r.name}</span> <span className="text-xs text-ink-faint">{r.address ?? ""}</span></span>
+                    <button onClick={() => addCandidate(r)} disabled={addBusy} className="btn btn-secondary shrink-0 px-3 py-1 text-xs disabled:opacity-60">Add</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {competitors.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-faint">
-            We couldn&apos;t find competitors automatically for this spot. No problem — add them with the “Add competitor” button.
+            We couldn&apos;t find competitors automatically for this spot. No problem — search above and add them from the map or list.
           </p>
         ) : (
           <ul className="space-y-1.5">
@@ -410,46 +505,6 @@ function safeHost(url: string): string {
   try { return new URL(url).host; } catch { return url; }
 }
 
-function AddCompetitor({ onAdd, workspaceId, runSearch }: { onAdd: (c: Competitor) => void; workspaceId: string; runSearch: (q: string) => Promise<Candidate[]> }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<Candidate[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  async function search() {
-    setBusy(true);
-    try { setResults(await runSearch(q.trim())); } finally { setBusy(false); }
-  }
-  async function add(c: Candidate) {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/competitors/add", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId, candidate: c }),
-      });
-      const data = await res.json();
-      if (res.ok) { onAdd(data.competitor); setOpen(false); setQ(""); setResults([]); }
-    } finally { setBusy(false); }
-  }
-
-  if (!open) return <button onClick={() => setOpen(true)} className="btn btn-secondary px-3 py-1.5 text-sm">+ Add competitor</button>;
-
-  return (
-    <div className="glass-strong absolute right-0 top-9 z-10 w-80 rounded-2xl p-3">
-      <div className="flex gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()} placeholder="Search a competitor" className="field flex-1 py-1.5" />
-        <button onClick={search} disabled={busy} className="btn btn-primary px-3 py-1.5 text-xs">Go</button>
-      </div>
-      <div className="mt-2 max-h-56 space-y-1 overflow-auto">
-        {results.map((r, i) => (
-          <button key={i} onClick={() => add(r)} className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm hover:bg-brand-soft">
-            <span className="min-w-0 truncate">{r.name}</span>
-            <span className="ml-auto shrink-0"><VerticalTag v={r.detectedVertical} subtype={r.subtype} /></span>
-          </button>
-        ))}
-      </div>
-      <button onClick={() => setOpen(false)} className="mt-2 text-xs text-ink-faint">close</button>
-    </div>
-  );
+function Dot({ c }: { c: string }) {
+  return <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: c }} aria-hidden />;
 }
