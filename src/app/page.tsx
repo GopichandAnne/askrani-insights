@@ -57,9 +57,37 @@ const KIND_META: Record<string, { icon: string; label: string; tone: string }> =
   opening: { icon: "✨", label: "New opening", tone: "bg-coral/15 text-coral-dark" },
   trend: { icon: "📈", label: "Trend", tone: "bg-trust-corroborated/10 text-trust-corroborated" },
   local: { icon: "📰", label: "Local news", tone: "bg-surface-sunken text-ink-soft" },
-  price: { icon: "💸", label: "Price move", tone: "bg-trust-inferred/10 text-trust-inferred" },
-  change: { icon: "🔄", label: "Menu change", tone: "bg-brand-soft text-brand-deep" },
+  price: { icon: "💸", label: "Price change", tone: "bg-trust-inferred/10 text-trust-inferred" },
+  promo: { icon: "🏷️", label: "New promo", tone: "bg-coral/15 text-coral-dark" },
+  new_item: { icon: "🆕", label: "New items", tone: "bg-brand-soft text-brand-deep" },
+  removed: { icon: "➖", label: "Removed", tone: "bg-surface-sunken text-ink-soft" },
   reputation: { icon: "⭐", label: "Reputation", tone: "bg-trust-direct/10 text-trust-direct" },
+};
+// plural nouns used when we roll many same-type events into one summary row
+const BUCKET_NOUN: Record<string, string> = {
+  price: "price changes", promo: "new promotions", new_item: "new items", removed: "items removed", reputation: "rating updates",
+};
+function eventBucket(t: string): string {
+  if (t.includes("price")) return "price";
+  if (t.includes("sale") || t.includes("promo") || t.includes("combo") || t.includes("happy")) return "promo";
+  if (t.includes("removed")) return "removed";
+  if (t.includes("rating") || t.includes("review")) return "reputation";
+  return "new_item";
+}
+
+// Evergreen starter actions to fill "Do this now" when there aren't enough
+// data-driven recommendations yet — plain, non-tech, high-leverage.
+const QUICK_WINS: Record<string, { category: string; title: string; action: string }[]> = {
+  restaurant: [
+    { category: "reviews", title: "Ask for a few reviews", action: "Ask 5 happy diners this week to leave a Google review — it's the fastest way to climb the local ranking." },
+    { category: "menu", title: "Put your prices online", action: "Make sure your full menu with prices is on your website and Google — it's the first thing new diners check." },
+    { category: "promotion", title: "Run a weekday special", action: "Post one clearly-priced special (e.g. a lunch combo) on Instagram to fill slow days." },
+  ],
+  grocery: [
+    { category: "reviews", title: "Ask for a few reviews", action: "Ask happy shoppers to leave a Google review — ratings decide who finds your store first." },
+    { category: "content", title: "Post this week's deals", action: "Share your weekly deals on Instagram/Facebook — the top-rated grocers nearby post several times a week." },
+    { category: "menu", title: "List your staples online", action: "Put popular items and prices online so shoppers can compare before they drive over." },
+  ],
 };
 
 async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
@@ -103,12 +131,31 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     { icon: "🎯", value: String(report.snapshot.openRecommendations), label: "Actions to take", sub: "recommended for you", href: "/recommendations" },
   ];
 
-  // ── "what's new" — merge competitor changes + local news/openings/trends ──
+  // ── "what's new" — GROUP many similar competitor events into one summary
+  //    ("H Mart — 24 new items") so it stays glanceable, then merge with local
+  //    news/openings/trends. Grouping also tames noisy bulk menu imports.
   type Item = { key: string; kind: string; title: string; meta: string; when: number; href?: string; external?: boolean };
+  const groups = new Map<string, { business: string; bucket: string; count: number; sample: string; when: number; sig: number }>();
+  for (const e of report.events) {
+    const bucket = eventBucket(e.type);
+    const key = `${e.business}|${bucket}`;
+    const g = groups.get(key) ?? { business: e.business, bucket, count: 0, sample: e.summary, when: 0, sig: 0 };
+    g.count++;
+    g.when = Math.max(g.when, e.at ? Date.parse(e.at) : 0);
+    g.sig = Math.max(g.sig, e.significance);
+    groups.set(key, g);
+  }
   const items: Item[] = [];
-  for (const e of report.events.slice(0, 12)) {
-    const kind = e.type.includes("price") ? "price" : e.type.includes("removed") || e.type.includes("dish") || e.type.includes("product") ? "change" : "change";
-    items.push({ key: `e${e.id}`, kind, title: `${e.business} — ${e.summary}`, meta: `${Math.round(e.significance * 100)}% significance`, when: e.at ? Date.parse(e.at) : 0, href: "/feed" });
+  for (const g of groups.values()) {
+    const many = g.count >= 3;
+    items.push({
+      key: `g${g.business}${g.bucket}`,
+      kind: g.bucket,
+      title: many ? `${g.business} — ${g.count} ${BUCKET_NOUN[g.bucket] ?? "updates"}` : `${g.business} — ${g.sample}`,
+      meta: many ? `${g.count} updates` : `${Math.round(g.sig * 100)}% significance`,
+      when: g.when,
+      href: "/feed",
+    });
   }
   for (const n of news ?? []) {
     const kind = ((n as any).media?.[0]?.kind as string) ?? "local";
@@ -116,6 +163,15 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   }
   items.sort((a, b) => b.when - a.when);
   const whatsNew = items.slice(0, 8);
+
+  // ── do-this-now: real recommendations, topped up with evergreen quick wins ──
+  const wins = QUICK_WINS[workspace.vertical === "grocery" ? "grocery" : "restaurant"];
+  const actions: { category: string; title: string; action: string; tip?: boolean }[] = report.recommendations.slice(0, 3).map((r) => ({ category: r.category, title: r.title, action: r.action }));
+  for (const w of wins) {
+    if (actions.length >= 3) break;
+    if (actions.some((a) => a.category === w.category)) continue;
+    actions.push({ ...w, tip: true });
+  }
 
   // ── competitor leaderboard (rating + price, you highlighted) ──────────────
   const priceByName = new Map(report.pricing.map((p) => [p.name, p.avgPrice]));
@@ -151,30 +207,26 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         ))}
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        {/* 3 — do this now */}
-        <section className="card lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🎯</span>Do this now</h2>
-            <Link href="/recommendations" className="text-xs font-medium text-brand hover:underline">all →</Link>
-          </div>
-          {!report.recommendations.length ? (
-            <p className="mt-4 text-sm text-ink-faint">No actions yet — they appear once we&apos;ve compared you to your rivals.</p>
-          ) : (
-            <ul className="mt-4 space-y-3">
-              {report.recommendations.slice(0, 3).map((r) => (
-                <li key={r.id} className="rounded-2xl bg-white/55 p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="chip bg-brand-soft text-brand">{r.category}</span>
-                    <span className="text-sm font-semibold">{r.title}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-ink-soft">{r.action}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+      {/* 3 — do this now (full width; recs topped up with quick wins) */}
+      <section className="card">
+        <div className="flex items-center justify-between">
+          <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🎯</span>Do this now</h2>
+          <Link href="/recommendations" className="text-xs font-medium text-brand hover:underline">all →</Link>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {actions.map((a, i) => (
+            <div key={i} className="flex flex-col rounded-2xl bg-white/55 p-3.5">
+              <div className="flex items-center gap-2">
+                <span className={`chip ${a.tip ? "bg-surface-sunken text-ink-soft" : "bg-brand-soft text-brand"}`}>{a.tip ? "quick win" : a.category}</span>
+                <span className="text-sm font-semibold">{a.title}</span>
+              </div>
+              <p className="mt-1 text-sm text-ink-soft">{a.action}</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
+      <div className="grid gap-6 lg:grid-cols-5">
         {/* 4 — what's new */}
         <section className="card lg:col-span-3">
           <div className="flex items-center justify-between">
@@ -207,35 +259,26 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
             </ul>
           )}
         </section>
-      </div>
 
-      {/* 5 — competitors at a glance */}
-      <section className="card">
-        <div className="flex items-center justify-between">
-          <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🧭</span>Competitors at a glance</h2>
-          <Link href="/competitors" className="text-xs font-medium text-brand hover:underline">manage →</Link>
-        </div>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[420px] text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs text-ink-faint">
-                <th className="py-1.5 font-medium">Business</th>
-                <th className="py-1.5 text-right font-medium">Rating</th>
-                <th className="py-1.5 text-right font-medium">Avg price</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leaderboard.map((b, i) => (
-                <tr key={i} className={`border-b border-line/60 ${b.isTarget ? "bg-brand-soft/30" : ""}`}>
-                  <td className="py-2">{b.name} {b.isTarget && <span className="chip ml-1 bg-brand-soft text-brand">you</span>}</td>
-                  <td className="py-2 text-right font-medium">{b.rating != null ? `${b.rating}★` : "—"}</td>
-                  <td className="py-2 text-right tabular-nums text-ink-soft">{b.price != null ? `$${Number(b.price).toFixed(0)}` : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+        {/* 5 — competitors at a glance */}
+        <section className="card lg:col-span-2">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🧭</span>Competitors</h2>
+            <Link href="/competitors" className="text-xs font-medium text-brand hover:underline">manage →</Link>
+          </div>
+          <ul className="mt-3 space-y-1">
+            {leaderboard.map((b, i) => (
+              <li key={i} className={`flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm ${b.isTarget ? "bg-brand-soft/40" : ""}`}>
+                <span className="min-w-0 flex-1 truncate">
+                  {b.isTarget && <span className="mr-1 text-xs font-semibold text-brand">You ·</span>}{b.name}
+                </span>
+                <span className="shrink-0 font-medium">{b.rating != null ? `${b.rating}★` : "—"}</span>
+                <span className="w-12 shrink-0 text-right tabular-nums text-ink-faint">{b.price != null ? `$${Number(b.price).toFixed(0)}` : "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
     </div>
   );
 }
