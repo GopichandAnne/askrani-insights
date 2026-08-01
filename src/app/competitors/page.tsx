@@ -1,19 +1,42 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { CompetitorsMap } from "@/components/CompetitorsMap";
+import type { MapPoint } from "@/components/MapPicker";
 
 export const dynamic = "force-dynamic";
+
+type Geo = { lat: number; lng: number };
+const geoOf = (attrs: unknown): Geo | null => {
+  const g = (attrs as { geo?: Geo } | null)?.geo;
+  return g && Number.isFinite(g.lat) && Number.isFinite(g.lng) ? g : null;
+};
 
 export default async function CompetitorsPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Competitors" />;
 
   const supabase = await createClient();
-  const { data: edges } = await supabase
-    .from("competitor_edge")
-    .select("id,relation,tier,score,score_components,rationale,competitor:competitor_id(canonical_name,website)")
-    .eq("workspace_id", state.workspace.id)
-    .order("score", { ascending: false });
+  const [{ data: edges }, { data: target }] = await Promise.all([
+    supabase
+      .from("competitor_edge")
+      .select("id,relation,tier,score,score_components,rationale,competitor:competitor_id(canonical_name,website,attributes)")
+      .eq("workspace_id", state.workspace.id)
+      .order("score", { ascending: false }),
+    state.workspace.target_business_id
+      ? supabase.from("business").select("canonical_name,attributes").eq("id", state.workspace.target_business_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  // build map points: your business (if geo) + each competitor with geo
+  const points: MapPoint[] = [];
+  const tGeo = geoOf((target as any)?.attributes);
+  if (tGeo) points.push({ id: "target", lat: tGeo.lat, lng: tGeo.lng, label: (target as any)?.canonical_name ?? state.workspace.name, sub: "Your business", tone: "target" });
+  for (const e of edges ?? []) {
+    const g = geoOf((e.competitor as any)?.attributes);
+    if (g) points.push({ id: `comp:${e.id}`, lat: g.lat, lng: g.lng, label: (e.competitor as any)?.canonical_name ?? "Competitor", sub: `${e.relation} · score ${Number(e.score).toFixed(2)}`, tone: "competitor", action: "Remove" });
+  }
+  const mapped = points.filter((p) => p.id !== "target").length;
 
   return (
     <div className="space-y-5">
@@ -24,6 +47,17 @@ export default async function CompetitorsPage() {
           they are. You can add or remove any of them.
         </p>
       </div>
+
+      {points.length > 0 && (
+        <div>
+          <CompetitorsMap points={points} />
+          {mapped < (edges?.length ?? 0) && (
+            <p className="mt-1.5 px-1 text-xs text-ink-faint">
+              Showing {mapped} of {edges?.length} competitors on the map — the rest don&apos;t have a location on record yet.
+            </p>
+          )}
+        </div>
+      )}
 
       {!edges?.length ? (
         <p className="rounded-xl border border-dashed border-line bg-surface p-6 text-sm text-ink-soft">
