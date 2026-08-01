@@ -171,6 +171,24 @@ async function buildEdgeContext(ws: WorkspaceRow) {
   };
 }
 
+// Guard against models that occasionally bleed tool-call / XML syntax into a
+// string field (e.g. "...act on.</theEdge> <parameter name=…>"). Cut any string
+// at the first tag-like artifact and collapse whitespace.
+function stripTags(s: string): string {
+  const i = s.search(/<\/|<(parameter|function|antml|invoke)\b/i);
+  return (i >= 0 ? s.slice(0, i) : s).replace(/\s+/g, " ").trim();
+}
+function deepStrip<T>(v: T): T {
+  if (typeof v === "string") return stripTags(v) as unknown as T;
+  if (Array.isArray(v)) return v.map(deepStrip) as unknown as T;
+  if (v && typeof v === "object") {
+    const o: Record<string, unknown> = {};
+    for (const k of Object.keys(v as object)) o[k] = deepStrip((v as Record<string, unknown>)[k]);
+    return o as T;
+  }
+  return v;
+}
+
 export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
   const at = new Date().toISOString();
   const empty: Edge = {
@@ -189,7 +207,7 @@ export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
       tier: "extract",
       maxTokens: 2200,
     });
-    return { ...data, at };
+    return { ...deepStrip(data), at };
   } catch {
     return empty;
   }
@@ -201,7 +219,7 @@ export async function getOrMakeEdge(ws: WorkspaceRow, opts: { maxAgeHours?: numb
   const supabase = await createClient();
   const { data } = await supabase.from("workspace").select("settings").eq("id", ws.id).maybeSingle();
   const cached = (data?.settings as any)?.edge as Edge | undefined;
-  if (!force && cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return cached;
+  if (!force && cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return deepStrip(cached);
 
   const fresh = await generateEdge(ws);
   const svc = createServiceClient();
