@@ -75,13 +75,40 @@ function handleMatchesName(handle: string, name: string): boolean {
   return toks.some((t) => h.includes(t));
 }
 
-function pickHandle(urls: string[], host: "instagram.com" | "facebook.com", generic: string[]): string | undefined {
+/** Pick a handle, preferring one whose slug contains the business's city token
+ *  (geo-guard against grabbing a same-name account in another city). */
+function pickHandle(urls: string[], host: "instagram.com" | "facebook.com", generic: string[], cityToken?: string): string | undefined {
   const re = new RegExp(host.replace(".", "\\.") + "\\/([A-Za-z0-9._-]+)");
+  const cands: string[] = [];
   for (const u of urls) {
     const m = re.exec(u);
-    if (m && !generic.includes(m[1].toLowerCase())) return m[1];
+    if (m && !generic.includes(m[1].toLowerCase())) cands.push(m[1]);
   }
-  return undefined;
+  if (cityToken && cityToken.length >= 3) {
+    const cityHit = cands.find((h) => h.toLowerCase().replace(/[^a-z0-9]/g, "").includes(cityToken));
+    if (cityHit) return cityHit;
+  }
+  return cands[0];
+}
+
+/** Reverse-geocode coordinates → city name (Nominatim, free) for the geo-guard. */
+export async function reverseGeoCity(geo?: { lat: number; lng: number }): Promise<string> {
+  if (!geo) return "";
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 7000);
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=12&lat=${geo.lat}&lon=${geo.lng}`, {
+      headers: { "user-agent": "local-intel-app/0.1", "accept-language": "en" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return "";
+    const a = ((await res.json()) as any)?.address ?? {};
+    return a.city || a.town || a.village || a.suburb || a.municipality || a.county || "";
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 /** Strip branch/location suffixes and parentheticals that derail search, e.g.
@@ -106,9 +133,9 @@ async function findHandle(
 ): Promise<string | undefined> {
   const clean = cleanName(name);
   const loc = city ? ` ${city}` : "";
+  const cityToken = city.toLowerCase().replace(/[^a-z0-9]/g, "");
   const word = host === "instagram.com" ? "instagram" : "facebook";
-  // try the cleaned name (with + without location), then the raw name — stop at
-  // the first result that plausibly matches the business name.
+  // Location-scoped queries first (bias results to the right city), then broader.
   const queries = [`${clean}${loc} ${word}`, `${clean} ${word}`];
   if (clean !== name) queries.push(`${name} ${word}`);
   const seen = new Set<string>();
@@ -117,7 +144,7 @@ async function findHandle(
     seen.add(q);
     const urls = await searchUrls(q);
     if (urls.length) state.searched = true; // search engine actually responded
-    const h = pickHandle(urls, host, generic);
+    const h = pickHandle(urls, host, generic, cityToken);
     if (h && handleMatchesName(h, name)) return h;
     await new Promise((r) => setTimeout(r, 400)); // be gentle with DDG
   }

@@ -5,7 +5,7 @@ import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
 import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
 import { collectLocalNews, extractCity } from "@/lib/news";
-import { findSocialHandles } from "@/lib/social-discovery";
+import { findSocialHandles, reverseGeoCity } from "@/lib/social-discovery";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -278,8 +278,16 @@ export async function collectBusiness(
     const haveIg = (identRows ?? []).some((i: any) => i.platform === "instagram");
     const haveFb = (identRows ?? []).some((i: any) => i.platform === "facebook");
     if (!haveIg || !haveFb) {
-      try {
-        const found = await findSocialHandles(biz.canonical_name, extractCity(attrs.address as string | undefined), {
+      // Geo-guard: require a city/geo signal before accepting a name-matched
+      // social handle, so a generic-named competitor can't grab a same-name
+      // account in another city. City from the address, else reverse-geocoded.
+      let socialCity = extractCity(attrs.address as string | undefined);
+      if (!socialCity && geo) socialCity = await reverseGeoCity(geo);
+      if (!socialCity) {
+        attrs.social_resolved = true; // no location signal → skip name discovery
+        attrsDirty = true;
+      } else try {
+        const found = await findSocialHandles(biz.canonical_name, socialCity, {
           instagram: !haveIg,
           facebook: !haveFb,
         });
