@@ -19,13 +19,19 @@ export interface PricingRow {
   minPrice: number | null;
   maxPrice: number | null;
 }
+export interface RatingSource {
+  source: string; // 'google' | 'yelp' | ...
+  rating: number;
+  reviewCount: number | null;
+}
 export interface ReputationRow {
   businessId: string;
   name: string;
   isTarget: boolean;
-  rating: number | null;
+  rating: number | null; // primary = the most-reviewed source
   reviewCount: number | null;
   reviewsSeen: number;
+  sources: RatingSource[]; // per-source ratings (Google, Yelp, …)
 }
 export interface EventRow {
   id: string;
@@ -138,18 +144,18 @@ export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30): Promise
     })
     .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || b.offers - a.offers);
 
-  // ── reputation per business (latest rating summary + review volume seen) ──
-  const repAcc = new Map<string, { rating: number | null; reviewCount: number | null; seen: number }>();
+  // ── reputation per business, PER SOURCE (Google, Yelp, …). Each source
+  //    publishes one "Rated X★ … from Y reviews" summary; we key by platform so
+  //    ratings from every source show side by side. Primary = most-reviewed. ──
+  const repAcc = new Map<string, { seen: number; bySource: Map<string, { rating: number; reviewCount: number | null }> }>();
   for (const r of reviews ?? []) {
     const bid = (r as any).business_id as string;
-    const acc = repAcc.get(bid) ?? { rating: null, reviewCount: null, seen: 0 };
+    const platform = String((r as any).platform ?? "");
+    const acc = repAcc.get(bid) ?? { seen: 0, bySource: new Map() };
     acc.seen++;
-    if (acc.rating == null) {
-      const m = RATING_RE.exec(String((r as any).text ?? ""));
-      if (m) {
-        acc.rating = Number(m[1]);
-        acc.reviewCount = Number(m[2].replace(/,/g, ""));
-      }
+    const m = RATING_RE.exec(String((r as any).text ?? ""));
+    if (m && !acc.bySource.has(platform)) {
+      acc.bySource.set(platform, { rating: Number(m[1]), reviewCount: Number(m[2].replace(/,/g, "")) });
     }
     repAcc.set(bid, acc);
   }
@@ -157,13 +163,18 @@ export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30): Promise
     .filter((id) => nameById.has(id))
     .map((id) => {
       const acc = repAcc.get(id);
+      const sources: RatingSource[] = [...(acc?.bySource ?? new Map()).entries()]
+        .map(([source, v]) => ({ source, rating: v.rating, reviewCount: v.reviewCount }))
+        .sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
+      const primary = sources[0];
       return {
         businessId: id,
         name: nameOf(id),
         isTarget: isTarget(id),
-        rating: acc?.rating ?? null,
-        reviewCount: acc?.reviewCount ?? null,
+        rating: primary?.rating ?? null,
+        reviewCount: primary?.reviewCount ?? null,
         reviewsSeen: acc?.seen ?? 0,
+        sources,
       };
     })
     .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || (b.rating ?? 0) - (a.rating ?? 0));

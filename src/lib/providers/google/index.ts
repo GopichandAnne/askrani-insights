@@ -123,6 +123,26 @@ export class GoogleProvider implements PublicContentProvider {
           }
           const p = (await res.json()) as any;
           const now = new Date().toISOString();
+          // Overall rating summary — the Places API returns the aggregate rating
+          // + count; store it (mirrors Yelp) so reputation isn't Yelp-only.
+          if (p.rating != null) {
+            const summary = `Rated ${p.rating}★ on Google from ${p.userRatingCount ?? 0} reviews.`;
+            out.push({
+              provider: this.name,
+              provenance: "OFFICIAL_PUBLIC_API",
+              platform: "google",
+              contentKind: "review",
+              externalRef: `${placeId}#google-rating`,
+              sourceUrl: p.websiteUri,
+              businessHint: { name: p.displayName?.text },
+              text: summary,
+              media: [],
+              observedAt: now,
+              contentHash: createHash("sha256").update(`${placeId}|${p.rating}|${p.userRatingCount}`).digest("hex"),
+              raw: { rating: p.rating, userRatingCount: p.userRatingCount },
+              structuredHints: { rating: p.rating, authorRatingCount: p.userRatingCount },
+            });
+          }
           for (const rev of p.reviews ?? []) {
             const text = rev.text?.text ?? rev.originalText?.text ?? "";
             out.push({

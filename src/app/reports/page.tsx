@@ -7,6 +7,8 @@ import { labelForProvider } from "@/lib/costs";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Report — Ask Rani Insights" };
 
+const SOURCE_LABEL: Record<string, string> = { google: "Google", yelp: "Yelp", facebook: "Facebook", tripadvisor: "TripAdvisor", trustpilot: "Trustpilot" };
+
 const usd = (n: number | null | undefined) =>
   n == null ? "—" : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -148,7 +150,8 @@ export default async function ReportsPage() {
             <thead>
               <tr className="border-b border-line text-left text-xs text-ink-faint">
                 <th className="py-1.5 font-medium">Business</th>
-                <th className="py-1.5 text-right font-medium">Rating</th>
+                <th className="py-1.5 font-medium">By source</th>
+                <th className="py-1.5 text-right font-medium">Best</th>
                 <th className="py-1.5 text-right font-medium">Reviews</th>
               </tr>
             </thead>
@@ -157,6 +160,19 @@ export default async function ReportsPage() {
                 <tr key={x.businessId} className={`border-b border-line/60 ${x.isTarget ? "bg-brand-soft/30" : ""}`}>
                   <td className="py-1.5">
                     {x.name} {x.isTarget && <span className="text-xs text-brand">(you)</span>}
+                  </td>
+                  <td className="py-1.5">
+                    {x.sources.length ? (
+                      <span className="flex flex-wrap gap-1.5">
+                        {x.sources.map((s) => (
+                          <span key={s.source} className="chip bg-surface-sunken text-ink-soft" title={`${s.reviewCount ?? 0} reviews`}>
+                            {SOURCE_LABEL[s.source] ?? s.source} {s.rating}★
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-ink-faint">—</span>
+                    )}
                   </td>
                   <td className="py-1.5 text-right tabular-nums font-medium">{x.rating != null ? `${x.rating}★` : "—"}</td>
                   <td className="py-1.5 text-right tabular-nums text-ink-soft">

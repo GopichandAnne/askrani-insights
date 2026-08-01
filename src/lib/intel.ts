@@ -159,7 +159,7 @@ async function buildEdgeContext(ws: WorkspaceRow) {
     vertical: ws.vertical,
     positioning: {
       pricing: report.pricing.map((p) => ({ name: p.name, you: p.isTarget, avgPrice: p.avgPrice, pricedItems: p.offers })),
-      reputation: report.reputation.map((r) => ({ name: r.name, you: r.isTarget, rating: r.rating, reviews: r.reviewCount })),
+      reputation: report.reputation.map((r) => ({ name: r.name, you: r.isTarget, rating: r.rating, reviews: r.reviewCount, bySource: r.sources.map((s) => ({ source: s.source, rating: s.rating, reviews: s.reviewCount })) })),
     },
     competitorActivity: report.events.slice(0, 20).map((e) => ({ business: e.business, type: e.type, summary: e.summary })),
     competitorSocial: socialByBiz,

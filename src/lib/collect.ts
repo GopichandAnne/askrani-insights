@@ -579,9 +579,13 @@ export async function refreshRecommendations(workspaceId: string): Promise<numbe
   const ratingRe = /Rated\s+([\d.]+)\s*★.*?from\s+([\d,]+)\s+review/i;
   for (const rv of revs ?? []) {
     const bid = (rv as any).business_id as string;
-    if (ratingOf.has(bid)) continue;
     const m = ratingRe.exec(String((rv as any).text ?? ""));
-    if (m) ratingOf.set(bid, { rating: Number(m[1]), reviewCount: Number(m[2].replace(/,/g, "")) });
+    if (!m) continue;
+    const rating = Number(m[1]);
+    const reviewCount = Number(m[2].replace(/,/g, ""));
+    const prev = ratingOf.get(bid);
+    // keep the most-reviewed source's rating as the representative one
+    if (!prev || (reviewCount ?? 0) > (prev.reviewCount ?? 0)) ratingOf.set(bid, { rating, reviewCount });
   }
 
   const target: BusinessOffers = {

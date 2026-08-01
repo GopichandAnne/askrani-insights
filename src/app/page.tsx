@@ -220,9 +220,10 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   // ── competitor leaderboard (rating + price, you highlighted) ──────────────
   const priceByName = new Map(report.pricing.map((p) => [p.name, p.avgPrice]));
   const leaderboard = report.reputation
-    .map((r) => ({ name: r.name, isTarget: r.isTarget, rating: r.rating, price: priceByName.get(r.name) ?? null }))
+    .map((r) => ({ name: r.name, isTarget: r.isTarget, rating: r.rating, sources: r.sources, price: priceByName.get(r.name) ?? null }))
     .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || (b.rating ?? 0) - (a.rating ?? 0))
     .slice(0, 7);
+  const SRC_ABBR: Record<string, string> = { google: "G", yelp: "Y", facebook: "FB", tripadvisor: "TA", trustpilot: "TP" };
 
   return (
     <div className="space-y-6">
@@ -316,8 +317,11 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
           <ul className="mt-3 space-y-1">
             {leaderboard.map((b, i) => (
               <li key={i} className={`flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm ${b.isTarget ? "bg-brand-soft/40" : ""}`}>
-                <span className="min-w-0 flex-1 truncate">
-                  {b.isTarget && <span className="mr-1 text-xs font-semibold text-brand">You ·</span>}{b.name}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{b.isTarget && <span className="mr-1 text-xs font-semibold text-brand">You ·</span>}{b.name}</span>
+                  {b.sources.length > 1 && (
+                    <span className="text-[10px] text-ink-faint">{b.sources.map((s) => `${SRC_ABBR[s.source] ?? s.source} ${s.rating}★`).join(" · ")}</span>
+                  )}
                 </span>
                 <span className="shrink-0 font-medium">{b.rating != null ? `${b.rating}★` : "—"}</span>
                 <span className="w-12 shrink-0 text-right tabular-nums text-ink-faint">{b.price != null ? `$${Number(b.price).toFixed(0)}` : "—"}</span>
