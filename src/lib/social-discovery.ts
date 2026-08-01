@@ -1,0 +1,73 @@
+/**
+ * Name-based social handle discovery. The profile resolver only finds a
+ * business's Instagram/Facebook if its website links them — but many small
+ * businesses (esp. ethnic grocers) live mostly on social and don't. This finds
+ * their handles via a web search (DuckDuckGo HTML, free), guarded by a name
+ * match so we never attach the wrong account. Found handles are then scraped by
+ * the normal social collectors.
+ */
+
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+
+async function ddgUrls(query: string): Promise<string[]> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
+      headers: { "user-agent": UA, accept: "text/html" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const urls: string[] = [];
+    for (const m of html.matchAll(/uddg=([^"&]+)/g)) {
+      try { urls.push(decodeURIComponent(m[1])); } catch { /* skip */ }
+    }
+    for (const m of html.matchAll(/href="(https?:\/\/[^"]*(?:instagram|facebook)\.com[^"]*)"/g)) urls.push(m[1]);
+    return urls;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const nameTokens = (s: string): string[] =>
+  s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 4 && !["indian", "grocery", "store", "market", "foods", "supermarket", "restaurant", "halal", "cafe"].includes(t));
+
+/** The handle must share a distinctive token with the business name (guards
+ *  against attaching an unrelated account). */
+function handleMatchesName(handle: string, name: string): boolean {
+  const h = handle.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const toks = nameTokens(name);
+  if (!toks.length) return h.length > 0; // generic name → accept first result
+  return toks.some((t) => h.includes(t));
+}
+
+function pickHandle(urls: string[], host: "instagram.com" | "facebook.com", generic: string[]): string | undefined {
+  const re = new RegExp(host.replace(".", "\\.") + "\\/([A-Za-z0-9._-]+)");
+  for (const u of urls) {
+    const m = re.exec(u);
+    if (m && !generic.includes(m[1].toLowerCase())) return m[1];
+  }
+  return undefined;
+}
+
+export async function findSocialHandles(
+  name: string,
+  city: string,
+  want: { instagram?: boolean; facebook?: boolean } = { instagram: true, facebook: true },
+): Promise<{ instagram?: string; facebook?: string }> {
+  const out: { instagram?: string; facebook?: string } = {};
+  const loc = city ? ` ${city}` : "";
+
+  if (want.instagram) {
+    const h = pickHandle(await ddgUrls(`${name}${loc} instagram`), "instagram.com", ["p", "reel", "reels", "explore", "accounts", "stories", "tv"]);
+    if (h && handleMatchesName(h, name)) out.instagram = `https://www.instagram.com/${h}`;
+  }
+  if (want.facebook) {
+    const h = pickHandle(await ddgUrls(`${name}${loc} facebook`), "facebook.com", ["pages", "groups", "events", "watch", "marketplace", "sharer", "login", "profile.php", "people"]);
+    if (h && handleMatchesName(h, name)) out.facebook = `https://www.facebook.com/${h}`;
+  }
+  return out;
+}

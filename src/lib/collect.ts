@@ -4,7 +4,8 @@ import { runExtraction, type PipelineOffer } from "@/lib/extraction/pipeline";
 import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
 import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
-import { collectLocalNews } from "@/lib/news";
+import { collectLocalNews, extractCity } from "@/lib/news";
+import { findSocialHandles } from "@/lib/social-discovery";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -269,6 +270,34 @@ export async function collectBusiness(
     const row = (identRows ?? []).find((i: any) => i.platform === platform);
     return row?.url ?? (row?.handle ? row.handle : undefined);
   };
+
+  // ── social handle discovery by name: many businesses (esp. ethnic grocers)
+  //    only exist on social and don't link it from their site — find the handle
+  //    via web search so competitors' IG/FB get scanned too. Same run scrapes it.
+  if (!attrs.social_resolved && hasTime() && platformActorConfigured("instagram")) {
+    const haveIg = (identRows ?? []).some((i: any) => i.platform === "instagram");
+    const haveFb = (identRows ?? []).some((i: any) => i.platform === "facebook");
+    if (!haveIg || !haveFb) {
+      try {
+        const found = await findSocialHandles(biz.canonical_name, extractCity(attrs.address as string | undefined), {
+          instagram: !haveIg,
+          facebook: !haveFb,
+        });
+        for (const [platform, url] of Object.entries(found)) {
+          if (!url) continue;
+          await svc
+            .from("external_identity")
+            .insert({ business_id: businessId, platform, url, verification_state: "observed" })
+            .then(() => {}, () => {});
+          (identRows ?? []).push({ platform, url, handle: null } as any);
+        }
+      } catch {
+        /* best-effort */
+      }
+      attrs.social_resolved = true;
+      attrsDirty = true;
+    }
+  }
 
   // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");

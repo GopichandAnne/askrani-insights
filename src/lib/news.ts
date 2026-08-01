@@ -101,7 +101,7 @@ export async function extractArticleText(url: string, maxChars = 2200): Promise<
 
 /** US addresses read "street, city, state zip, country" — the city is usually the
  *  3rd-from-last comma part (or the first when there's no street). */
-function extractCity(address?: string): string {
+export function extractCity(address?: string): string {
   if (!address) return "";
   const parts = address.split(",").map((p) => p.trim()).filter(Boolean);
   if (parts.length >= 3) return parts[parts.length - 3];
