@@ -113,7 +113,7 @@ export class GoogleProvider implements PublicContentProvider {
               headers: {
                 "X-Goog-Api-Key": this.key,
                 "X-Goog-FieldMask":
-                  "id,displayName,rating,userRatingCount,reviews,photos,websiteUri",
+                  "id,displayName,rating,userRatingCount,reviews,photos,websiteUri,formattedAddress",
               },
             },
           );
@@ -134,7 +134,7 @@ export class GoogleProvider implements PublicContentProvider {
               contentKind: "review",
               externalRef: `${placeId}#google-rating`,
               sourceUrl: p.websiteUri,
-              businessHint: { name: p.displayName?.text },
+              businessHint: { name: p.displayName?.text, address: p.formattedAddress } as any,
               text: summary,
               media: [],
               observedAt: now,

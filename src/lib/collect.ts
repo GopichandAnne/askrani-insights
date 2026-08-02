@@ -330,6 +330,10 @@ export async function collectBusiness(
         gCalls++; // Place Details (reviews + photos)
         await pollJob(google, job.jobId, 30000);
         for await (const rev of google.fetchResults(job.jobId)) {
+          // Backfill the street address from Google (unlocks delivery search,
+          // which needs an address). Same details call — no extra API cost.
+          const addr = (rev.businessHint as any)?.address as string | undefined;
+          if (addr && !attrs.address) { attrs.address = addr; attrsDirty = true; }
           await upsertObsContentItem(svc, businessId, rev, nowIso);
           n++;
         }
