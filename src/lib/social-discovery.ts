@@ -69,11 +69,15 @@ const STOP = new Set(["indian", "grocery", "store", "market", "foods", "food", "
 const nameTokens = (s: string): string[] =>
   s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !STOP.has(t));
 
+// Non-account paths that leak into search results (esp. Instagram's /popular/…,
+// /explore/…, /directory/… SEO pages). Anything here is never a real handle.
 const GENERIC: Record<SocialHost, string[]> = {
-  "instagram.com": ["p", "reel", "reels", "explore", "accounts", "stories", "tv"],
-  "facebook.com": ["pages", "groups", "events", "watch", "marketplace", "sharer", "login", "profile.php", "people", "p"],
-  "tiktok.com": ["tag", "music", "discover", "foryou", "explore", "live", "@"],
+  "instagram.com": ["p", "reel", "reels", "explore", "accounts", "stories", "tv", "popular", "directory", "web", "about", "legal", "privacy", "developer", "topics", "location", "locations", "lite", "help"],
+  "facebook.com": ["pages", "groups", "events", "watch", "marketplace", "sharer", "login", "profile.php", "people", "p", "help", "business", "policies", "legal"],
+  "tiktok.com": ["tag", "music", "discover", "foryou", "explore", "live", "@", "about", "legal", "business", "search"],
 };
+// slugs that are obviously not a business account regardless of platform
+const NEVER_HANDLE = new Set(["popular", "explore", "directory", "search", "about", "help", "login", "signup", "home", "topics", "trending"]);
 
 /** Extract candidate {handle, url, context} for a host from search results. */
 function candidatesFor(results: SearchResult[], host: SocialHost): { handle: string; url: string; context: string }[] {
@@ -84,8 +88,9 @@ function candidatesFor(results: SearchResult[], host: SocialHost): { handle: str
     const m = re.exec(r.url);
     if (!m) continue;
     const handle = m[1].replace(/^@/, "");
-    if (GENERIC[host].includes(handle.toLowerCase())) continue;
-    if (seen.has(handle.toLowerCase())) continue;
+    const lc = handle.toLowerCase();
+    if (GENERIC[host].includes(lc) || NEVER_HANDLE.has(lc)) continue;
+    if (seen.has(lc)) continue;
     seen.add(handle.toLowerCase());
     out.push({ handle, url: r.url, context: `${r.title ?? ""} ${r.description ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 160) });
   }
@@ -138,7 +143,7 @@ async function pickIntelligent(
       maxTokens: 120,
     });
     const chosen = String(data.handle ?? "").replace(/^@/, "").trim();
-    if (chosen && data.confident && cands.some((c) => c.handle.toLowerCase() === chosen.toLowerCase())) return chosen;
+    if (chosen && data.confident && !NEVER_HANDLE.has(chosen.toLowerCase()) && cands.some((c) => c.handle.toLowerCase() === chosen.toLowerCase())) return chosen;
     return undefined; // model not confident → don't attach a wrong account
   } catch {
     return pickHeuristic(cands, name, cityToken);
