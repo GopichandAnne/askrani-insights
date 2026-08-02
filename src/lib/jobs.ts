@@ -1,7 +1,20 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { collectBusiness, refreshRecommendations } from "@/lib/collect";
 import { detectEventsForBusiness } from "@/lib/events";
-import { spendForCost } from "@/lib/credits";
+import { spendForCost, hasCredits } from "@/lib/credits";
+
+/** Error sentinel marking a job paused for lack of credits (re-queueable). */
+export const PAUSE_SENTINEL = "MONITORING_PAUSED_NO_CREDITS";
+
+/** Re-activate credit-paused jobs for an org (call after credits are added). */
+export async function requeuePausedForOrg(orgId: string): Promise<number> {
+  const svc = createServiceClient();
+  const { data: ws } = await svc.from("workspace").select("id").eq("organization_id", orgId);
+  const ids = (ws ?? []).map((w: any) => w.id);
+  if (!ids.length) return 0;
+  const { data } = await svc.from("collection_job").update({ status: "pending", error: null }).in("workspace_id", ids).eq("error", PAUSE_SENTINEL).select("id");
+  return data?.length ?? 0;
+}
 
 /**
  * Background collection queue (guide §5.3). Enqueue jobs; a worker drains them
@@ -64,7 +77,7 @@ export interface TickResult {
   processed: boolean;
   jobId?: string;
   businessId?: string;
-  status?: "done" | "error";
+  status?: "done" | "error" | "blocked";
   offersWritten?: number;
   remaining: number;
 }
@@ -109,6 +122,16 @@ export async function processOneJob(): Promise<TickResult> {
   if (error) throw new Error(`claim: ${error.message}`);
   if (!job || !job.id) return { processed: false, remaining: await pendingCount(svc) };
 
+  // Resolve the owning org once (used for the credit gate + debit).
+  const { data: wsRow } = await svc.from("workspace").select("organization_id").eq("id", job.workspace_id).maybeSingle();
+  const orgId = (wsRow?.organization_id as string | undefined) ?? undefined;
+
+  // ── Phase 2 gate: don't run collection when the org is out of credits ──
+  if (orgId && !(await hasCredits(orgId))) {
+    await svc.from("collection_job").update({ status: "error", error: PAUSE_SENTINEL }).eq("id", job.id);
+    return { processed: true, jobId: job.id, businessId: job.business_id, status: "blocked", offersWritten: 0, remaining: await pendingCount(svc) };
+  }
+
   let outcome: "done" | "error" = "done";
   let offersWritten = 0;
   const runStart = new Date().toISOString();
@@ -138,19 +161,15 @@ export async function processOneJob(): Promise<TickResult> {
 
   // Phase 1 credits (record-only, no gating): debit the org for what this
   // collection actually cost, summed from the provider_run rows it wrote.
-  if (outcome === "done") {
+  if (outcome === "done" && orgId) {
     try {
-      const { data: ws } = await svc.from("workspace").select("organization_id").eq("id", job.workspace_id).maybeSingle();
-      const orgId = ws?.organization_id as string | undefined;
-      if (orgId) {
-        const { data: runs } = await svc
-          .from("provider_run")
-          .select("cost_usd")
-          .like("input_hash", `${job.business_id}:%`)
-          .gte("finished_at", runStart);
-        const costUsd = (runs ?? []).reduce((a: number, r: any) => a + (Number(r.cost_usd) || 0), 0);
-        if (costUsd > 0) await spendForCost(orgId, costUsd, { business_id: job.business_id, workspace_id: job.workspace_id });
-      }
+      const { data: runs } = await svc
+        .from("provider_run")
+        .select("cost_usd")
+        .like("input_hash", `${job.business_id}:%`)
+        .gte("finished_at", runStart);
+      const costUsd = (runs ?? []).reduce((a: number, r: any) => a + (Number(r.cost_usd) || 0), 0);
+      if (costUsd > 0) await spendForCost(orgId, costUsd, { business_id: job.business_id, workspace_id: job.workspace_id });
     } catch { /* record-only — never fail the job on credits */ }
   }
 

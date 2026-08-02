@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api";
-import { enqueueWorkspaceCollection, nudgeWorker } from "@/lib/jobs";
+import { enqueueWorkspaceCollection, nudgeWorker, requeuePausedForOrg } from "@/lib/jobs";
+import { hasCredits, getBalance } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,11 @@ export async function POST(req: Request) {
   if (!(await workspaceInOrg(workspaceId, auth.orgId))) return unauthorized();
 
   try {
+    // Phase 2 gate: monitoring runs on credits. Block enqueue when empty.
+    if (!(await hasCredits(auth.orgId))) {
+      return NextResponse.json({ enqueued: 0, needsCredits: true, balance: await getBalance(auth.orgId) });
+    }
+    await requeuePausedForOrg(auth.orgId); // reactivate anything paused earlier
     const enqueued = await enqueueWorkspaceCollection(workspaceId);
     // Nudge the worker so collection starts within seconds, not next cron tick.
     after(() => nudgeWorker());

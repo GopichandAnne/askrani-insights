@@ -5,6 +5,7 @@ import { getUser, isSuperAdmin } from "@/lib/auth";
 import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
+import { CreditBanner } from "@/components/CreditBanner";
 
 export const metadata: Metadata = {
   title: "Ask Rani Insights — local market intelligence",
@@ -60,6 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               activeWorkspaceId={activeId}
             />
             <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
+              <CreditBanner />
               {children}
             </main>
           </div>

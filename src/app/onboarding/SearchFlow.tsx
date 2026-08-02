@@ -108,6 +108,7 @@ export function SearchFlow() {
   const [jobs, setJobs] = useState<Record<string, Job>>({});
   const [started, setStarted] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [needsCredits, setNeedsCredits] = useState(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function runSearch(q: string): Promise<Candidate[]> {
@@ -207,7 +208,10 @@ export function SearchFlow() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspaceId }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data?.needsCredits) {
+        setNeedsCredits(true);
+      } else if (res.ok) {
         setStarted(true);
         poll(workspaceId);
       }
@@ -237,7 +241,7 @@ export function SearchFlow() {
         />
       ) : (
         <WorkspacePhase
-          {...{ target, vertical, subtype, started, creating, changeVertical, competitors, workspaceId, runSearch, setCompetitors, jobs, starting, startCollection, removeCompetitor }}
+          {...{ target, vertical, subtype, started, creating, changeVertical, competitors, workspaceId, runSearch, setCompetitors, jobs, starting, startCollection, removeCompetitor, needsCredits }}
         />
       )}
     </div>
@@ -312,7 +316,7 @@ function SearchPhase({
 // ── Workspace phase ─────────────────────────────────────────────────────────
 function WorkspacePhase({
   target, vertical, subtype, started, creating, changeVertical,
-  competitors, workspaceId, runSearch, setCompetitors, jobs, starting, startCollection, removeCompetitor,
+  competitors, workspaceId, runSearch, setCompetitors, jobs, starting, startCollection, removeCompetitor, needsCredits,
 }: any) {
   const businesses = [
     ...(target ? [{ id: target.businessId, name: target.name, isTarget: true }] : []),
@@ -473,6 +477,11 @@ function WorkspacePhase({
               {starting ? "Starting…" : "Start collecting"} <RaniMark size={18} />
             </button>
           </div>
+          {needsCredits && (
+            <div className="relative mt-3 rounded-2xl border border-coral/40 bg-coral/10 p-3 text-sm text-coral-dark">
+              You&apos;re out of monitoring credits. <Link href="/billing" className="font-semibold underline">Add credits</Link> to start collecting — exploring stays free.
+            </div>
+          )}
         </div>
       ) : (
         <div className="card">

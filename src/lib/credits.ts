@@ -59,6 +59,17 @@ async function writeBilling(svc: Svc, orgId: string, settings: Record<string, un
 
 export function balanceOf(b: Billing): number { return b.planCredits + b.topupCredits; }
 
+/** Current org credit balance. */
+export async function getBalance(orgId: string): Promise<number> {
+  const svc = createServiceClient();
+  const { billing } = await readBilling(svc, orgId);
+  return balanceOf(billing);
+}
+/** Does the org have at least `min` credits? (Phase 2 gating.) */
+export async function hasCredits(orgId: string, min = 1): Promise<boolean> {
+  try { return (await getBalance(orgId)) >= min; } catch { return true; /* fail-open on infra error */ }
+}
+
 /** Grant the one-time trial credits on first org bootstrap (idempotent). */
 export async function grantTrialIfNeeded(orgId: string): Promise<void> {
   try {
