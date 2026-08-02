@@ -17,7 +17,7 @@ const EXAMPLES = [
   { keyword: "asian grocery", area: "78727" },
 ];
 
-export function ExploreClient() {
+export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
   const [keyword, setKeyword] = useState("");
   const [area, setArea] = useState("");
   const [loading, setLoading] = useState(false);
@@ -100,7 +100,10 @@ export function ExploreClient() {
           )}
 
           <p className="px-1 text-[11px] text-ink-faint">
-            Ratings from Google. Want ongoing tracking, prices &amp; social for one of these? <a href="/onboarding" className="font-medium text-brand hover:underline">Set it up as your business →</a>
+            Ratings from Google. Want ongoing tracking — prices, social, delivery menus &amp; alerts — for one of these?{" "}
+            {signedOut
+              ? <a href="/login" className="font-medium text-brand hover:underline">Sign up to monitor a business →</a>
+              : <a href="/onboarding" className="font-medium text-brand hover:underline">Set it up as your business →</a>}
           </p>
         </>
       )}

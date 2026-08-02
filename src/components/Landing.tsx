@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RaniMark } from "@/components/RaniSpinner";
+import { ExploreClient } from "@/components/ExploreClient";
 
 /**
  * Public front door (signed-out visitors at insights.askrani.ai). Futuristic
@@ -25,14 +26,14 @@ export function Landing() {
             spreadsheets, no guesswork.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/login" className="btn btn-primary px-7 py-3.5 text-base">
-              Get started free <RaniMark size={18} />
-            </Link>
-            <a href="#how" className="btn btn-secondary px-7 py-3.5 text-base">
-              See how it works
+            <a href="#explore" className="btn btn-primary px-7 py-3.5 text-base">
+              Try it free — no signup <RaniMark size={18} />
             </a>
+            <Link href="/login" className="btn btn-secondary px-7 py-3.5 text-base">
+              Sign in
+            </Link>
           </div>
-          <p className="mt-4 text-sm text-ink-faint">Free to explore · no credit card · set up in 2 minutes</p>
+          <p className="mt-4 text-sm text-ink-faint">Explore any area free · no credit card · monitoring runs on credits</p>
         </div>
 
         {/* floating product-preview card */}
@@ -71,6 +72,18 @@ export function Landing() {
         </div>
       </section>
 
+      {/* ── Try it now: live Explore (no signup) ─────────────────────── */}
+      <section id="explore" className="mx-auto max-w-5xl px-6 py-14">
+        <div className="mb-6 text-center">
+          <span className="chip bg-brand-soft text-brand-deep">Free · no signup</span>
+          <h2 className="mt-3 font-display text-3xl font-extrabold sm:text-4xl">See who&apos;s competing in your area</h2>
+          <p className="mx-auto mt-3 max-w-xl text-ink-faint">
+            Type a zip or city and what you&apos;re after — get the real businesses there, ranked by rating, on a map. Try it right now.
+          </p>
+        </div>
+        <ExploreClient signedOut />
+      </section>
+
       {/* ── How it works ─────────────────────────────────────────────── */}
       <section id="how" className="mx-auto max-w-6xl px-6 py-14">
         <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">Three steps. Two minutes.</h2>
@@ -95,15 +108,20 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ── What you'll see ──────────────────────────────────────────── */}
+      {/* ── What we monitor ──────────────────────────────────────────── */}
       <section className="mx-auto max-w-6xl px-6 py-14">
-        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">Everything about your market, in one place</h2>
-        <div className="stagger mt-10 grid gap-5 sm:grid-cols-2">
+        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">What we keep an eye on for you</h2>
+        <p className="mx-auto mt-3 max-w-xl text-center text-ink-faint">
+          Once you pick a business to monitor, we watch every public signal about it and its rivals — and turn it into moves.
+        </p>
+        <div className="stagger mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            ["💸", "Their prices vs yours", "See how your menu and prices stack up against nearby competitors — instantly."],
-            ["🍽️", "New dishes & promotions", "Get alerted the moment a rival launches a special, drops a price, or adds a dish."],
-            ["⭐", "Reputation at a glance", "Ratings and reviews from across the web, gathered and compared in one view."],
-            ["🎯", "Clear next moves", "Prioritized suggestions tailored to your business — not generic advice."],
+            ["⭐", "Ratings & reviews", "Google, Yelp and more — scores and review volume, side by side, per source."],
+            ["💬", "What people really think", "Themes mined from review & social text — praise and complaints, not just stars."],
+            ["📸", "Social & what's working", "Instagram, Facebook & TikTok posts — and which ones actually got engagement."],
+            ["🛵", "Delivery menus & prices", "DoorDash & Uber Eats menus with real prices, promos and delivery ratings."],
+            ["💸", "Menu & price comparison", "Item-by-item pricing across rivals — see exactly where you stand."],
+            ["📈", "Trends, news & openings", "Industry trends, local news and new competitors opening nearby."],
           ].map(([icon, t, d]) => (
             <div key={t} className="card card-hover flex gap-4">
               <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-soft text-2xl">{icon}</div>
@@ -115,7 +133,43 @@ export function Landing() {
           ))}
         </div>
         <p className="mt-8 text-center text-sm text-ink-faint">
-          Every insight shows exactly where it came from — so you can trust it.
+          It&apos;s all synthesized into a plain-English <span className="font-medium text-brand-deep">weekly briefing</span>, a{" "}
+          <span className="font-medium text-brand-deep">Your Edge</span> action plan, and ready-to-post drafts — every insight shows its source.
+        </p>
+      </section>
+
+      {/* ── Pricing / credits ────────────────────────────────────────── */}
+      <section id="pricing" className="mx-auto max-w-5xl px-6 py-14">
+        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">Explore free. Monitor with credits.</h2>
+        <p className="mx-auto mt-3 max-w-xl text-center text-ink-faint">
+          Browsing any area is always free. When you want us to actively track a business and its rivals, that runs on credits — you only pay for what you monitor.
+        </p>
+        <div className="stagger mt-10 grid gap-5 md:grid-cols-2">
+          <div className="card flex flex-col">
+            <span className="chip w-fit bg-surface-sunken text-ink-soft">Free</span>
+            <div className="mt-3 font-display text-3xl font-extrabold">$0</div>
+            <p className="mt-1 text-sm text-ink-faint">No card. No signup to try.</p>
+            <ul className="mt-4 space-y-2 text-sm text-ink-soft">
+              {["Explore any zip or city", "Real ratings & review counts", "Ranked list + map", "A quick market overview"].map((f) => (
+                <li key={f} className="flex items-start gap-2"><span className="mt-0.5 text-trust-direct" aria-hidden>✓</span>{f}</li>
+              ))}
+            </ul>
+            <a href="#explore" className="btn btn-secondary mt-6 py-2.5">Start exploring</a>
+          </div>
+          <div className="card relative flex flex-col ring-1 ring-brand/40">
+            <span className="chip w-fit bg-brand-gradient text-white">Monitoring · credits</span>
+            <div className="mt-3 font-display text-3xl font-extrabold">Pay as you go</div>
+            <p className="mt-1 text-sm text-ink-faint">Buy credits, monitor what you want. Credits scale with how much we collect per business.</p>
+            <ul className="mt-4 space-y-2 text-sm text-ink-soft">
+              {["Track a business + its competitors", "Prices, social, delivery menus & reviews", "Change alerts + weekly AI briefing", "Your Edge action plan + post drafts"].map((f) => (
+                <li key={f} className="flex items-start gap-2"><span className="mt-0.5 text-brand" aria-hidden>✦</span>{f}</li>
+              ))}
+            </ul>
+            <Link href="/login" className="btn btn-primary mt-6 py-2.5">Sign up to monitor <RaniMark size={16} /></Link>
+          </div>
+        </div>
+        <p className="mx-auto mt-6 max-w-xl text-center text-xs text-ink-faint">
+          Credits cover the real cost of gathering data (search, reviews, social & delivery). You control which businesses you monitor and how often.
         </p>
       </section>
 
