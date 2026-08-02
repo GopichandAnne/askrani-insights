@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ProvenanceBadge } from "@/components/TrustChip";
 import { getOrMakeNewsDigest } from "@/lib/newsdigest";
+import { MarketTabs } from "@/components/MarketTabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30; // room for the news-digest LLM call on first (uncached) load
@@ -62,6 +63,8 @@ export default async function FeedPage() {
           promotions — plus the raw sources they came from.
         </p>
       </div>
+
+      <MarketTabs />
 
       {news && news.length > 0 && (
         <section className="card">

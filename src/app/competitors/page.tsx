@@ -2,6 +2,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CompetitorsMap } from "@/components/CompetitorsMap";
+import { MarketTabs } from "@/components/MarketTabs";
 import type { MapPoint } from "@/components/MapPicker";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +48,8 @@ export default async function CompetitorsPage() {
           they are. You can add or remove any of them.
         </p>
       </div>
+
+      <MarketTabs />
 
       {points.length > 0 && (
         <div>

@@ -2,6 +2,7 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { TrustChip, ProvenanceBadge } from "@/components/TrustChip";
+import { MarketTabs } from "@/components/MarketTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,8 @@ export default async function OffersPage() {
           one shows where we found it and how sure we are.
         </p>
       </div>
+
+      <MarketTabs />
 
       {/* price positioning */}
       {totalPriced === 0 ? (
