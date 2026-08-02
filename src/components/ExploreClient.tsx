@@ -34,6 +34,24 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
     } finally { setLoading(false); }
   }
 
+  // Seamless "Explore → monitor" handoff: stash the picked business so onboarding
+  // can pre-fill it, then route to signup (signed-out) or straight to onboarding.
+  function monitor(r: ExploreResult) {
+    const candidate = {
+      name: r.name,
+      website: r.website,
+      geo: r.geo,
+      category: r.category,
+      address: r.address,
+      platform: "google",
+      detectedVertical: r.vertical,
+      subtype: [] as string[],
+      raw: { place_id: r.placeId, rating: r.rating, userRatingCount: r.reviews, formattedAddress: r.address, primaryType: r.category },
+    };
+    try { sessionStorage.setItem("ar_explore_pick", JSON.stringify(candidate)); } catch { /* ignore */ }
+    window.location.href = signedOut ? "/login?next=/onboarding" : "/onboarding";
+  }
+
   const results = data?.results ?? [];
   const points: MapPoint[] = results
     .filter((r) => r.geo)
@@ -95,7 +113,7 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
             <p className="rounded-2xl border border-dashed border-line p-6 text-sm text-ink-faint">Nothing found there — try a broader term or a nearby zip.</p>
           ) : (
             <ol className="stagger space-y-2">
-              {results.map((r, i) => <ResultRow key={i} r={r} rank={i + 1} />)}
+              {results.map((r, i) => <ResultRow key={i} r={r} rank={i + 1} onMonitor={() => monitor(r)} />)}
             </ol>
           )}
 
@@ -111,7 +129,7 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
   );
 }
 
-function ResultRow({ r, rank }: { r: ExploreResult; rank: number }) {
+function ResultRow({ r, rank, onMonitor }: { r: ExploreResult; rank: number; onMonitor: () => void }) {
   return (
     <li className="card card-hover flex items-center gap-3 py-3">
       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-sunken text-xs font-bold text-ink-faint">{rank}</span>
@@ -124,14 +142,11 @@ function ResultRow({ r, rank }: { r: ExploreResult; rank: number }) {
           {r.address ?? ""}{r.distanceKm != null ? ` · ${r.distanceKm}km` : ""}
         </div>
       </div>
-      <div className="shrink-0 text-right">
+      <div className="hidden shrink-0 text-right sm:block">
         <div className="font-semibold text-brand-deep">{r.rating != null ? `${r.rating}★` : "—"}</div>
         <div className="text-[11px] text-ink-faint">{r.reviews != null ? `${r.reviews.toLocaleString()} reviews` : "no reviews"}</div>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1 pl-1">
-        {r.mapsUrl && <a href={r.mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">Map</a>}
-        {r.website && <a href={r.website} target="_blank" rel="noreferrer" className="text-xs text-ink-faint hover:text-brand">Site</a>}
-      </div>
+      <button onClick={onMonitor} className="btn btn-secondary shrink-0 px-3 py-1.5 text-xs" title="Track this business + its competitors">Monitor →</button>
     </li>
   );
 }

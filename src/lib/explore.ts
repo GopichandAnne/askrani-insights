@@ -20,6 +20,8 @@ export interface ExploreResult {
   subtype: string;
   distanceKm?: number;
   mapsUrl?: string;
+  category?: string; // Google primaryType — seeds onboarding
+  placeId?: string;
 }
 export interface ExploreResponse {
   center?: { lat: number; lng: number };
@@ -95,6 +97,8 @@ export async function exploreArea(input: { area: string; keyword?: string }): Pr
       subtype: subtypeLabel(extractSubtype(c)) ?? "",
       distanceKm,
       mapsUrl: c.url,
+      category: p.primaryType,
+      placeId: p.id,
     };
   });
 

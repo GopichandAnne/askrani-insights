@@ -139,6 +139,20 @@ export function SearchFlow() {
 
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
 
+  // Seamless handoff from Explore: if the visitor picked a business to monitor,
+  // it's stashed in sessionStorage — resolve it straight into the review step.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("ar_explore_pick");
+      if (raw) {
+        sessionStorage.removeItem("ar_explore_pick");
+        const cand = JSON.parse(raw) as Candidate;
+        if (cand?.name) resolve(cand);
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function onSearch(e: React.FormEvent) {
     e.preventDefault();
     setError(null);

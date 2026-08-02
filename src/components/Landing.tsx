@@ -14,16 +14,16 @@ export function Landing() {
         <div>
           <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-brand-deep">
             <span className="rani-dots scale-75" aria-hidden><span /><span /><span /></span>
-            Local market intelligence, on autopilot
+            Your always-on local market analyst
           </span>
           <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
-            Know what your rivals are doing —{" "}
-            <span className="text-gradient">and exactly what to do next.</span>
+            Know your local market.{" "}
+            <span className="text-gradient">Beat your competition.</span>
           </h1>
           <p className="mt-6 max-w-xl text-lg text-ink-soft">
-            Tell us your business. We quietly watch your local competitors — their menus, prices,
-            promotions and reviews — and hand you a short, clear list of moves to stay ahead. No
-            spreadsheets, no guesswork.
+            Ask Rani watches your competitors — their prices, menus, reviews and social — and each
+            week tells you exactly what to do about it. Plain English, no spreadsheets. Start free with
+            one search.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a href="#explore" className="btn btn-primary px-7 py-3.5 text-base">
@@ -86,15 +86,15 @@ export function Landing() {
 
       {/* ── How it works ─────────────────────────────────────────────── */}
       <section id="how" className="mx-auto max-w-6xl px-6 py-14">
-        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">Three steps. Two minutes.</h2>
+        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">From zero to your first plan in two minutes</h2>
         <p className="mx-auto mt-3 max-w-xl text-center text-ink-faint">
-          Built for busy owners — no setup, no jargon, nothing to install.
+          No jargon, nothing to install — and you can try step one right now, free.
         </p>
         <div className="stagger mt-10 grid gap-5 md:grid-cols-3">
           {[
-            ["01", "🔎", "Find your business", "Search your name — we detect your type and pull up your neighborhood automatically."],
-            ["02", "🛰️", "We watch your rivals", "We rank your closest like-for-like competitors and keep an eye on prices, dishes, offers and reviews."],
-            ["03", "✅", "Get what to do", "A short, plain-English list of the smartest moves — with the proof behind each one."],
+            ["01", "🔎", "Explore your area", "Search any zip or city and see who's around, ranked by rating. Free, no signup."],
+            ["02", "📍", "Pick your business", "Choose your spot — we auto-find your closest real competitors so you don't have to."],
+            ["03", "🛰️", "Rani watches & advises", "We track prices, offers, reviews and social — and hand you a weekly plan of what to do."],
           ].map(([n, icon, t, d]) => (
             <div key={t} className="card card-hover">
               <div className="flex items-center justify-between">
@@ -103,6 +103,27 @@ export function Landing() {
               </div>
               <h3 className="mt-4 text-lg font-bold">{t}</h3>
               <p className="mt-2 text-sm text-ink-faint">{d}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── What you get (outcomes) ──────────────────────────────────── */}
+      <section className="mx-auto max-w-6xl px-6 py-14">
+        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">What you get out of it</h2>
+        <div className="stagger mt-10 grid gap-5 sm:grid-cols-2">
+          {[
+            ["📊", "Know exactly where you rank", "Your rating, price and standing versus every nearby rival — at a glance."],
+            ["🔔", "Never miss a competitor move", "Get flagged when a rival drops a price, launches a promo, or posts a hit."],
+            ["🎯", "Get told what to do", "A short, prioritized list of the smartest moves — with the proof behind each."],
+            ["✍️", "Act in one click", "Turn any suggestion into a ready-to-post caption, sign or SMS blast."],
+          ].map(([icon, t, d]) => (
+            <div key={t} className="card card-hover flex gap-4">
+              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-gradient text-2xl shadow-brand">{icon}</div>
+              <div>
+                <h3 className="font-bold">{t}</h3>
+                <p className="mt-1 text-sm text-ink-faint">{d}</p>
+              </div>
             </div>
           ))}
         </div>
