@@ -4,6 +4,10 @@
     {
       "path": "/api/worker/tick",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/scheduler/tick",
+      "schedule": "15 * * * *"
     }
   ],
   "functions": {
