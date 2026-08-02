@@ -92,8 +92,8 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
                     </a>
                   )}
                 </span>
-                <span className="hidden shrink-0 text-[11px] text-ink-faint sm:block">
-                  {it.posts > 0 ? `${it.posts} collected` : "awaiting scan"}
+                <span className="hidden shrink-0 text-[11px] text-ink-faint sm:block" title={it.platform === "facebook" && it.posts === 0 ? "Facebook (Meta) blocks scraping — most scans return no posts. Instagram/TikTok are the reliable social sources." : undefined}>
+                  {it.posts > 0 ? `${it.posts} collected` : it.platform === "facebook" ? "Meta limits scraping" : "awaiting scan"}
                 </span>
                 <button onClick={() => remove(it.id)} title="Stop monitoring" className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-trust-low/10 hover:text-trust-low">✕</button>
               </li>
