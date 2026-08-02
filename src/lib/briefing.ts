@@ -30,6 +30,14 @@ const SCHEMA = {
 const SYSTEM =
   "You are Ask Rani, briefing a busy, non-technical local-business owner. Write ONLY from the DATA. Be concrete (business names, numbers), warm, and plain — no jargon, no hedging. The owner is \"you\".";
 
+// Cut any string at the first tool-call/XML artifact (e.g. "…deals.</summary> </invoke>")
+// that models occasionally bleed into a field, then trim.
+function strip(s?: string): string {
+  const v = String(s ?? "");
+  const i = v.search(/<\/|<(parameter|function|antml|invoke|summary|headline)\b/i);
+  return (i >= 0 ? v.slice(0, i) : v).replace(/\s+/g, " ").trim();
+}
+
 export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
   const at = new Date().toISOString();
   if (!isLlmConfigured()) {
@@ -54,7 +62,7 @@ export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
       tier: "extract",
       maxTokens: 350,
     });
-    return { headline: (data.headline || "Your market at a glance").trim(), summary: (data.summary || "").trim(), at };
+    return { headline: strip(data.headline) || "Your market at a glance", summary: strip(data.summary), at };
   } catch {
     return { headline: "Your market at a glance", summary: "We're still gathering enough to summarize — check back after the next scan.", at };
   }
@@ -66,7 +74,8 @@ export async function getOrMakeBriefing(ws: WorkspaceRow, maxAgeHours = 12): Pro
   const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const cached = (data?.goals as any)?.briefing as Briefing | undefined;
   if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.summary) {
-    return cached;
+    // sanitize on read so any previously-cached artifact is cleaned in place
+    return { ...cached, headline: strip(cached.headline), summary: strip(cached.summary) };
   }
   const fresh = await generateBriefing(ws);
   // persist with the service client (workspace.goals isn't member-writable via RLS).

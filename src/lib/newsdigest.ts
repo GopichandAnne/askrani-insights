@@ -71,8 +71,9 @@ export async function generateNewsDigest(ws: WorkspaceRow): Promise<NewsDigest> 
       tier: "extract",
       maxTokens: 900,
     });
-    const items = (data.items ?? []).map((i) => ({ point: (i.point || "").trim(), source: (i.source || "").trim(), url: i.url || undefined, kind: i.kind }));
-    return { summary: (data.summary || "").trim(), items, at };
+    const strip = (s?: string) => { const v = String(s ?? ""); const j = v.search(/<\/|<(parameter|function|antml|invoke|summary|point)\b/i); return (j >= 0 ? v.slice(0, j) : v).replace(/\s+/g, " ").trim(); };
+    const items = (data.items ?? []).map((i) => ({ point: strip(i.point), source: strip(i.source), url: i.url || undefined, kind: i.kind }));
+    return { summary: strip(data.summary), items, at };
   } catch {
     return { summary: "", items: articles.slice(0, 6).map((a) => ({ point: a.headline, source: a.source, url: a.url, kind: a.kind })), at };
   }
