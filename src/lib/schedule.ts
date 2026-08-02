@@ -36,7 +36,7 @@ export async function runScheduler(): Promise<SchedulerResult> {
 
   for (const w of workspaces as any[]) {
     if (!w.target_business_id) continue; // nothing set up to collect
-    const cadence = PLANS[planOf.get(w.organization_id) ?? ""]?.cadence ?? "weekly";
+    const cadence = PLANS[String(planOf.get(w.organization_id) ?? "")]?.cadence ?? "weekly";
     const intervalMs = (cadence === "daily" ? 1 : 7) * DAY;
     const last = w.goals?.lastScheduledRefresh ? Date.parse(w.goals.lastScheduledRefresh) : 0;
     if (last && now - last < intervalMs - SLACK_MS) continue; // not due yet
