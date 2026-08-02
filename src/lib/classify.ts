@@ -34,8 +34,19 @@ const RESTAURANT_NAME = /\b(restaurant|caf[eé]|kitchen|grill|pizzeria|pizza|din
 const GROCERY_GTYPE = /grocery|supermarket|convenience_store|liquor_store|food_store|butcher|greengrocer|warehouse_store|wholesaler|department_store|market(?!ing)/;
 const RESTAURANT_GTYPE = /restaurant|\bcafe\b|coffee_shop|\bbar\b|\bpub\b|meal_takeaway|meal_delivery|fast_food|food_court|ice_cream|diner|steak_house|bistro|brewery|winery/;
 
+// Beauty / med-spa / personal-care vertical ('salon' in the enum). Covers med
+// spas, day spas, aesthetics clinics, skin/laser, salons, barbers, nails, lash/brow.
+const BEAUTY_SHOP = new Set(["beauty", "hairdresser", "cosmetics", "tattoo", "massage", "nail_salon"]);
+const BEAUTY_GTYPE = /\bspa\b|beauty_salon|hair_care|hair_salon|nail_salon|barber|skin_care|medical_spa|med_spa|wellness_center|massage|tanning|waxing|facial|laser|dermatolog|aesthetic/;
+const BEAUTY_NAME = /\b(med\s*spa|medspa|medical\s*spa|aesthetics?|laser|botox|filler|injectable|dermatolog|skin\s*(care|clinic|bar|studio)|facial|hydrafacial|lash|brow|microblad|microneedl|threading|waxing|\bwax\b|nails?|nail\s*bar|salon|barber|\bspa\b|wellness|rejuven|\bglow\b|beauty\s*bar|cosmetic|esthetic)\b/i;
+
+/** The verticals we can monitor. Food (restaurant/grocery) + personal-care
+ *  ('salon' in the DB enum — med spas, day spas, aesthetics, salons, barbers). */
+export type Vertical = "grocery" | "restaurant" | "salon";
+
 function tagBits(cand: CandidateLike): {
   cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string;
+  leisure?: string; healthcare?: string;
   primaryType?: string; gtypes: string[];
 } {
   const raw = cand.raw ?? {};
@@ -50,6 +61,8 @@ function tagBits(cand: CandidateLike): {
     shop: ex.shop?.toLowerCase?.(),
     amenity: ex.amenity?.toLowerCase?.(),
     cuisine: ex.cuisine?.toLowerCase?.(),
+    leisure: ex.leisure?.toLowerCase?.(),
+    healthcare: ex.healthcare?.toLowerCase?.(),
     primaryType,
     gtypes,
   };
@@ -58,32 +71,38 @@ function tagBits(cand: CandidateLike): {
 /** Vertical from *structured* signals only (OSM tags / Google types), or null
  *  when the data can't say — lets callers separate "known" from "guessed" (e.g.
  *  to propagate a confident brand vertical across sparse same-name listings). */
-export function structuredVertical(cand: CandidateLike): "grocery" | "restaurant" | null {
-  const { cls, type, shop, amenity, primaryType, gtypes } = tagBits(cand);
+export function structuredVertical(cand: CandidateLike): Vertical | null {
+  const { cls, type, shop, amenity, leisure, healthcare, primaryType, gtypes } = tagBits(cand);
 
   // 1) OSM structured tags
+  if (shop && BEAUTY_SHOP.has(shop)) return "salon";
+  if (leisure === "spa") return "salon";
+  if (healthcare && /aesthetic|cosmetic|dermat|beauty|spa/.test(healthcare)) return "salon";
   if (shop && GROCERY_SHOP.has(shop)) return "grocery";
   if (cls === "shop" || (type && GROCERY_SHOP.has(type))) return "grocery";
   if (amenity && RESTAURANT_AMENITY.has(amenity)) return "restaurant";
   if (cls === "amenity" && type && RESTAURANT_AMENITY.has(type)) return "restaurant";
 
   // 2) Google Places types — primaryType is the most authoritative single signal
-  //    (e.g. "grocery_store", "asian_grocery_store", "indian_restaurant").
+  //    (e.g. "grocery_store", "asian_grocery_store", "indian_restaurant", "spa").
   if (primaryType) {
+    if (BEAUTY_GTYPE.test(primaryType)) return "salon";
     if (GROCERY_GTYPE.test(primaryType)) return "grocery";
     if (RESTAURANT_GTYPE.test(primaryType)) return "restaurant";
   }
   const gGroc = gtypes.some((t) => GROCERY_GTYPE.test(t));
   const gRest = gtypes.some((t) => RESTAURANT_GTYPE.test(t));
+  const gBeauty = gtypes.some((t) => BEAUTY_GTYPE.test(t));
+  if (gBeauty && !gGroc && !gRest) return "salon";
   if (gGroc && !gRest) return "grocery";
   if (gRest && !gGroc) return "restaurant";
 
   return null;
 }
 
-/** "grocery" | "restaurant" — best guess for a place. Uses structured signals
- *  first, then the name, defaulting to restaurant only as a last resort. */
-export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
+/** Best-guess vertical for a place. Uses structured signals first, then the
+ *  name, defaulting to restaurant only as a last resort. */
+export function inferVertical(cand: CandidateLike): Vertical {
   const structured = structuredVertical(cand);
   if (structured) return structured;
 
@@ -94,6 +113,8 @@ export function inferVertical(cand: CandidateLike): "grocery" | "restaurant" {
   // show up in some restaurant names; otherwise a grocery keyword → grocery.
   if (RESTAURANT_NAME.test(name)) return "restaurant";
   if (GROCERY_NAME.test(name)) return "grocery";
+  // A beauty/med-spa name (no food/shop signal) → salon.
+  if (BEAUTY_NAME.test(name)) return "salon";
   // cuisine tag without a shop tag → almost always a restaurant
   if (cuisine) return "restaurant";
   return "restaurant";
@@ -145,6 +166,21 @@ const NAME_ALIASES: [RegExp, string][] = [
   [/\b(asian|oriental)\b/i, "asian"],
 ];
 
+// Beauty / med-spa service subtypes (name + Google type signals). Direct-match
+// only for similarity (no broad families) — a med spa's like-for-like rival is
+// another place offering the same service line.
+const BEAUTY_ALIASES: [RegExp, string][] = [
+  [/\b(med\s*spa|medspa|medical\s*spa|aesthetics?|esthetic)\b/i, "medspa"],
+  [/\b(botox|filler|injectable|dysport|jeuveau|kybella|tox)\b/i, "injectables"],
+  [/\b(laser|ipl|coolsculpt|emsculpt|body\s*contour|hair\s*removal)\b/i, "laser_body"],
+  [/\b(facial|hydrafacial|skin\s*care|dermaplan|chemical\s*peel|microneedl|derma)\b/i, "skincare"],
+  [/\b(lash|brow|microblad|threading|pmu|permanent\s*makeup)\b/i, "lash_brow"],
+  [/\b(nails?|mani|pedi|manicure|pedicure)\b/i, "nails"],
+  [/\b(hair\s*salon|barber|blowout|balayage|hair\s*care|colorist)\b/i, "hair"],
+  [/\b(wax|sugaring)\b/i, "waxing"],
+  [/\b(massage|wellness|iv\s*(drip|therapy)|sauna|cryo)\b/i, "wellness"],
+];
+
 // Broad families so related cuisines still count as "similar" (Indian ↔ Pakistani).
 const BROAD: Record<string, string> = {
   indian: "south_asian", pakistani: "south_asian", bangladeshi: "south_asian",
@@ -188,6 +224,13 @@ export function extractSubtype(cand: CandidateLike): string[] {
 
   const name = cand.name ?? "";
   for (const [re, key] of NAME_ALIASES) if (re.test(name)) found.add(key);
+
+  // Beauty / med-spa service subtypes — from the name + Google types. Kept
+  // separate from cuisines; they only match beauty places so they never leak
+  // into food classification, and let discovery rank like-for-like (an
+  // injectables-led med spa near other injectables clinics).
+  const beautyHay = `${name} ${gtypes.join(" ")}`;
+  for (const [re, key] of BEAUTY_ALIASES) if (re.test(beautyHay)) found.add(key);
   return [...found];
 }
 
@@ -233,4 +276,30 @@ export function subtypeLabel(subtype: string[]): string | undefined {
   if (!subtype.length) return undefined;
   const pretty = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return subtype.slice(0, 2).map(pretty).join(" / ");
+}
+
+/** Human label for a vertical (for chips / copy). */
+export function verticalLabel(v: Vertical | string | null | undefined): string {
+  switch (v) {
+    case "grocery": return "Grocery";
+    case "salon": return "Beauty & spa";
+    case "restaurant": return "Restaurant";
+    default: return "Business";
+  }
+}
+
+/** A category phrase to seed a Google/Places text query when discovering
+ *  competitors for a vertical. Beauty needs an explicit query (OSM's category
+ *  mapping only covers food); food verticals lean on OSM and pass undefined so
+ *  their tuned behaviour is unchanged. Subtype sharpens the beauty query. */
+export function verticalQuery(v: Vertical | string, subtype: string[] = []): string | undefined {
+  if (v !== "salon") return undefined;
+  const s = new Set(subtype);
+  if (s.has("injectables") || s.has("laser_body") || s.has("skincare") || s.has("medspa"))
+    return "med spa aesthetics clinic";
+  if (s.has("nails")) return "nail salon";
+  if (s.has("hair")) return "hair salon";
+  if (s.has("lash_brow")) return "lash brow studio";
+  if (s.has("wellness")) return "day spa wellness";
+  return "med spa OR day spa OR beauty salon OR aesthetics";
 }

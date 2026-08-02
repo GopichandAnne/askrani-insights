@@ -21,10 +21,16 @@ export function Landing() {
             <span className="text-gradient">Beat your competition.</span>
           </h1>
           <p className="mt-6 max-w-xl text-lg text-ink-soft">
-            Ask Rani watches your competitors — their prices, menus, reviews and social — and each
-            week tells you exactly what to do about it. Plain English, no spreadsheets. Start free with
-            one search.
+            You&apos;re busy running the place — not watching the shop next door. Ask Rani watches your
+            competitors for you — their prices, offers, reviews and social — and each week tells you
+            exactly what to do about it. Plain English, no spreadsheets. Start free with one search.
           </p>
+          <div className="mt-6 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Built for owners of</span>
+            {["Med spas & aesthetics", "Salons & barbers", "Restaurants", "Grocers"].map((t) => (
+              <span key={t} className="chip bg-white/70 text-ink-soft">{t}</span>
+            ))}
+          </div>
           <div className="mt-8 flex flex-wrap gap-3">
             <a href="#explore" className="btn btn-primary px-7 py-3.5 text-base">
               Try it free — no signup <RaniMark size={18} />
@@ -58,12 +64,12 @@ export function Landing() {
 
             <div className="mt-4 space-y-2">
               <div className="flex items-start gap-2 rounded-2xl bg-white/70 p-3 text-sm">
-                <span className="chip shrink-0 bg-surface-sunken text-ink-soft">price drop</span>
-                <span className="text-ink-soft"><b className="text-ink">Olio e Più</b> cut lunch combo to $12</span>
+                <span className="chip shrink-0 bg-surface-sunken text-ink-soft">new offer</span>
+                <span className="text-ink-soft"><b className="text-ink">Radiance Med Spa</b> launched $10/unit Botox for new clients</span>
               </div>
               <div className="flex items-start gap-2 rounded-2xl bg-white/70 p-3 text-sm">
                 <span className="chip shrink-0 bg-brand-soft text-brand">action</span>
-                <span className="text-ink-soft">Launch a weekday lunch special this week</span>
+                <span className="text-ink-soft">Post two before/after results this week — your top rival gets 3× the engagement</span>
               </div>
             </div>
           </div>
@@ -140,8 +146,8 @@ export function Landing() {
             ["⭐", "Ratings & reviews", "Google, Yelp and more — scores and review volume, side by side, per source."],
             ["💬", "What people really think", "Themes mined from review & social text — praise and complaints, not just stars."],
             ["📸", "Social & what's working", "Instagram, Facebook & TikTok posts — and which ones actually got engagement."],
-            ["🛵", "Delivery menus & prices", "DoorDash & Uber Eats menus with real prices, promos and delivery ratings."],
-            ["💸", "Menu & price comparison", "Item-by-item pricing across rivals — see exactly where you stand."],
+            ["💸", "Prices, packages & offers", "Treatments, services, menu items and packages — priced item-by-item across rivals."],
+            ["🎁", "Promotions & specials", "Intro offers, memberships, financing and seasonal deals the moment rivals launch them."],
             ["📈", "Trends, news & openings", "Industry trends, local news and new competitors opening nearby."],
           ].map(([icon, t, d]) => (
             <div key={t} className="card card-hover flex gap-4">

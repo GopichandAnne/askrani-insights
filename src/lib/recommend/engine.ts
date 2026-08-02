@@ -65,11 +65,12 @@ export function generateRecommendations(
   const recs: Omit<Recommendation, "priority">[] = [];
   const peerCount = Math.max(1, competitors.length);
   const isGrocery = vertical === "grocery";
+  const isSalon = vertical === "salon";
 
   // 1) Weekday-lunch daypart gap — restaurant-only (guide 10.3 canonical example).
   const peersWithLunch = competitors.filter((c) => c.offers.some(isLunch)).length;
   const targetHasLunch = target.offers.some(isLunch);
-  if (!isGrocery && !targetHasLunch && peersWithLunch >= Math.ceil(peerCount / 2)) {
+  if (vertical === "restaurant" && !targetHasLunch && peersWithLunch >= Math.ceil(peerCount / 2)) {
     recs.push({
       category: "promotion",
       title: "Own the weekday lunch gap",
@@ -150,14 +151,21 @@ export function generateRecommendations(
     .sort((a, b) => b[1].count - a[1].count)
     .slice(0, 3);
   if (gaps.length) {
-    const where = isGrocery ? "peer stores stock" : "peer menus";
+    const where = isGrocery ? "peer stores stock" : isSalon ? "peer service menus" : "peer menus";
+    const title = isGrocery
+      ? "Popular products your rivals carry that you don't"
+      : isSalon
+        ? "Treatments rivals offer that you don't feature"
+        : "Popular local dishes missing from your menu";
+    const verb = isGrocery ? "stocking" : isSalon ? "adding or promoting" : "adding or featuring";
+    const metric = isGrocery ? "basket_coverage" : isSalon ? "service_coverage" : "menu_coverage";
     recs.push({
       category: "menu",
-      title: isGrocery ? "Popular products your rivals carry that you don't" : "Popular local dishes missing from your menu",
-      action: `Evaluate ${isGrocery ? "stocking" : "adding or featuring"}: ${gaps.map(([, v]) => v.example).join(", ")}.`,
+      title,
+      action: `Evaluate ${verb}: ${gaps.map(([, v]) => v.example).join(", ")}.`,
       why_now: gaps.map(([, v]) => `${v.example} appears on ${v.count} of ${peerCount} ${where}.`),
       evidence: gaps.map(([, v]) => `${v.example} (${v.count} peers)`),
-      expected_impact: { metric: isGrocery ? "basket_coverage" : "menu_coverage", range_pct: [3, 8], confidence: 0.45 },
+      expected_impact: { metric, range_pct: [3, 8], confidence: 0.45 },
       effort: "high",
       urgency: "this_month",
     });

@@ -11,9 +11,9 @@ const MapPicker = dynamic(() => import("@/components/MapPicker").then((m) => m.M
 });
 
 const EXAMPLES = [
+  { keyword: "med spa", area: "Austin TX" },
   { keyword: "boba tea", area: "78641" },
   { keyword: "indian restaurant", area: "Edison NJ" },
-  { keyword: "coffee shop", area: "Austin TX" },
   { keyword: "asian grocery", area: "78727" },
 ];
 
@@ -66,7 +66,7 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && run()}
-            placeholder="What are you looking for? (e.g. boba tea, indian restaurant)"
+            placeholder="What are you looking for? (e.g. med spa, boba tea, indian restaurant)"
             className="field flex-1"
           />
           <input
@@ -136,7 +136,7 @@ function ResultRow({ r, rank, onMonitor }: { r: ExploreResult; rank: number; onM
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{r.name}</span>
-          <span className="chip bg-brand-soft text-brand-deep">{r.vertical === "grocery" ? "🛒 Grocery" : "🍽️ Restaurant"}{r.subtype ? ` · ${r.subtype}` : ""}</span>
+          <span className="chip bg-brand-soft text-brand-deep">{r.vertical === "grocery" ? "🛒 Grocery" : r.vertical === "salon" ? "💆 Beauty & spa" : "🍽️ Restaurant"}{r.subtype ? ` · ${r.subtype}` : ""}</span>
         </div>
         <div className="mt-0.5 truncate text-xs text-ink-faint">
           {r.address ?? ""}{r.distanceKm != null ? ` · ${r.distanceKm}km` : ""}

@@ -125,7 +125,8 @@ export async function collectLocalNews(target: {
 }): Promise<NewsItem[]> {
   const city = extractCity(target.address);
   const cuisine = subtypeLabel(target.subtype ?? []);
-  const kindWord = target.vertical === "grocery" ? "grocery store" : "restaurant";
+  const kindWord =
+    target.vertical === "grocery" ? "grocery store" : target.vertical === "salon" ? "med spa" : "restaurant";
 
   const queries: { kind: NewsKind; q: string }[] = [
     { kind: "trend", q: `${cuisine ? cuisine + " " : ""}${kindWord} industry trends 2026` },

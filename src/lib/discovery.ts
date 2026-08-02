@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
-import { extractSubtype, subtypeSimilarity, inferVertical, structuredVertical, isNonFood } from "@/lib/classify";
+import { extractSubtype, subtypeSimilarity, inferVertical, structuredVertical, isNonFood, verticalQuery, type Vertical } from "@/lib/classify";
 
 /**
  * Discovery service — guide §2.2 (onboarding) + §9 (competitor graph).
@@ -215,7 +215,7 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
   // grocery) but others are sparse and would name-default to restaurant, apply
   // the confident vertical to the whole name-group. Skip on conflict.
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const sigsByName = new Map<string, Set<"grocery" | "restaurant">>();
+  const sigsByName = new Map<string, Set<Vertical>>();
   for (const c of cands) {
     const sig = structuredVertical(c as any);
     if (!sig) continue;
@@ -237,7 +237,10 @@ export async function searchBusinesses(query: string, near?: { lat: number; lng:
     .map((c) => ({ c, rel: nameRelevance(query, c.name) }))
     .filter(({ c, rel }) => {
       if (!c.geo) return false; // unlocatable → useless for market intel
-      if (isNonFood(c as any)) return false; // drop clothing/salon/etc. by type
+      // Drop clearly off-vertical retail/service (clothing, bank…) — but keep
+      // anything that classifies to a vertical we *do* support (a beauty_salon /
+      // spa now resolves to the salon vertical, so it must survive the filter).
+      if (isNonFood(c as any) && structuredVertical(c as any) === null) return false;
       return c.platform === "google" || rel > 0 || structuredVertical(c as any) !== null || !!c.website;
     });
 
@@ -330,6 +333,11 @@ export async function autoDiscoverCompetitors(
   }
 
   const cands = await discoverCandidates({
+    // Beauty/med-spa discovery needs an explicit text query — OSM's category
+    // mapping only really covers food, so we seed Google Places with a
+    // vertical (+subtype) phrase. Food verticals pass undefined and keep their
+    // tuned OSM-driven behaviour unchanged.
+    query: verticalQuery(vertical, subtype),
     near: { ...target.geo, radiusKm },
     vertical,
     limit: 40,

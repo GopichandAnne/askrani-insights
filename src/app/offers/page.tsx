@@ -61,13 +61,16 @@ export default async function OffersPage() {
   const shared = [...itemMap.values()].filter((e) => e.entries.length >= 2).slice(0, 12);
   const usd = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 
+  const v = state.workspace.vertical;
+  const noun = v === "salon" ? "Services and prices" : v === "grocery" ? "Products and prices" : "Menu items and prices";
+
   return (
     <div className="animate-fade-in space-y-5">
       <div>
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Offers &amp; pricing</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-          Menu items and prices for {state.workspace.name} and your competitors, side by side. Each
+          {noun} for {state.workspace.name} and your competitors, side by side. Each
           one shows where we found it and how sure we are.
         </p>
       </div>
@@ -77,11 +80,19 @@ export default async function OffersPage() {
       {/* price positioning */}
       {totalPriced === 0 ? (
         <div className="card border-dashed">
-          <p className="text-sm text-ink-soft">
-            <span className="font-semibold text-ink">No prices captured yet.</span> Prices come from menus, websites and delivery apps.
-            Grocery shelves rarely list prices online — the richest source is <span className="font-medium text-brand-deep">DoorDash / Uber Eats menus</span>.
-            Turn on delivery collection (add the Apify delivery actors) and re-collect to fill this in.
-          </p>
+          {v === "salon" ? (
+            <p className="text-sm text-ink-soft">
+              <span className="font-semibold text-ink">No prices captured yet.</span> For beauty & spa businesses, prices come from
+              your <span className="font-medium text-brand-deep">website service menu</span> and priced promo posts on Instagram/Facebook.
+              Make sure your treatments and prices are published online, then re-collect to fill this in.
+            </p>
+          ) : (
+            <p className="text-sm text-ink-soft">
+              <span className="font-semibold text-ink">No prices captured yet.</span> Prices come from menus, websites and delivery apps.
+              Grocery shelves rarely list prices online — the richest source is <span className="font-medium text-brand-deep">DoorDash / Uber Eats menus</span>.
+              Turn on delivery collection (add the Apify delivery actors) and re-collect to fill this in.
+            </p>
+          )}
         </div>
       ) : (
         <section className="card">

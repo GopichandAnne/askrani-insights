@@ -101,6 +101,11 @@ const QUICK_WINS: Record<string, { category: string; title: string; action: stri
     { category: "content", title: "Post this week's deals", action: "Share your weekly deals on Instagram/Facebook — the top-rated grocers nearby post several times a week." },
     { category: "menu", title: "List your staples online", action: "Put popular items and prices online so shoppers can compare before they drive over." },
   ],
+  salon: [
+    { category: "reviews", title: "Turn happy clients into reviews", action: "Text your 5 most recent 5-star clients a direct Google review link — reviews are the #1 driver of new bookings for med spas." },
+    { category: "content", title: "Post real before & afters", action: "Share consented before/after results on Instagram + TikTok — it's what converts followers into consults. Top spas nearby post 3–5×/week." },
+    { category: "promotion", title: "Feature one signature treatment", action: "Put a clearly-priced hero offer (e.g. a Botox or facial intro) on your site and Google so new clients can book without calling." },
+  ],
 };
 
 async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
@@ -218,7 +223,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const whatsNew = items.slice(0, 12);
 
   // ── do-this-now: real recommendations, topped up with evergreen quick wins ──
-  const wins = QUICK_WINS[workspace.vertical === "grocery" ? "grocery" : "restaurant"];
+  const wins = QUICK_WINS[workspace.vertical] ?? QUICK_WINS.restaurant;
   const actions: { category: string; title: string; action: string; tip?: boolean }[] = report.recommendations.slice(0, 3).map((r) => ({ category: r.category, title: r.title, action: r.action }));
   for (const w of wins) {
     if (actions.length >= 3) break;

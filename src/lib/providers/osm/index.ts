@@ -123,6 +123,7 @@ export class OsmProvider implements PublicContentProvider {
   private static CATEGORY_TERM: Record<string, string> = {
     restaurant: "restaurant",
     grocery: "supermarket",
+    salon: "beauty salon",
   };
 
   private async nearby(input: DiscoverInput): Promise<ProfileCandidate[]> {

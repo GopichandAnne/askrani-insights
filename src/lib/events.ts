@@ -75,7 +75,7 @@ export async function detectEventsForBusiness(
   const cur = toMap(curTs);
   const prev = toMap(prevTs);
 
-  const newItemType = vertical === "grocery" ? "new_product" : "new_dish";
+  const newItemType = vertical === "grocery" ? "new_product" : vertical === "salon" ? "new_treatment" : "new_dish";
   const events: MarketEventRow[] = [];
   const base = (event_group: string, event_type: string, significance: number, summary: string, details: Record<string, unknown>): MarketEventRow => ({
     workspace_id: workspaceId,

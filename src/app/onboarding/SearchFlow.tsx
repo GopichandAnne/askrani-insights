@@ -20,7 +20,9 @@ const MapPicker = dynamic(() => import("@/components/MapPicker").then((m) => m.M
  * that explicit action.
  */
 
-type Vertical = "restaurant" | "grocery";
+type Vertical = "restaurant" | "grocery" | "salon";
+const VERTICAL_LABEL: Record<Vertical, string> = { restaurant: "restaurant", grocery: "grocery", salon: "beauty & spa" };
+const VERTICAL_PLURAL: Record<Vertical, string> = { restaurant: "Restaurants", grocery: "Grocers", salon: "Beauty & spa places" };
 interface Candidate {
   name: string;
   website?: string;
@@ -56,7 +58,7 @@ interface Job {
 }
 
 function VerticalTag({ v, subtype }: { v?: Vertical; subtype?: string[] }) {
-  const label = v === "grocery" ? "🛒 Grocery" : "🍽️ Restaurant";
+  const label = v === "grocery" ? "🛒 Grocery" : v === "salon" ? "💆 Beauty & spa" : "🍽️ Restaurant";
   const sub = subtypeLabel(subtype ?? []);
   return (
     <span className="chip bg-brand-soft text-brand-deep">
@@ -257,8 +259,8 @@ function SearchPhase({
       <form onSubmit={onSearch} className="card">
         <label className="block text-lg font-bold">Find your business</label>
         <p className="mb-4 mt-1 text-sm text-ink-faint">
-          Search by name and city — we&apos;ll figure out the rest (restaurant or grocery, cuisine, and
-          your closest competitors). e.g. “Patel Brothers Edison NJ” or “Katz&apos;s Delicatessen New York”.
+          Search by name and city — we&apos;ll figure out the rest (your business type, specialty, and
+          your closest competitors). e.g. “Glow Med Spa Austin”, “Patel Brothers Edison NJ” or “Katz&apos;s Delicatessen New York”.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -384,11 +386,15 @@ function WorkspacePhase({
           <div className="text-right">
             <VerticalTag v={vertical} subtype={subtype} />
             {!started && (
-              <div className="mt-1 text-xs text-ink-faint">
-                Not a {vertical}?{" "}
-                <button onClick={() => changeVertical(vertical === "grocery" ? "restaurant" : "grocery")} disabled={creating} className="font-medium text-brand underline disabled:opacity-60">
-                  It&apos;s a {vertical === "grocery" ? "restaurant" : "grocery"}
-                </button>
+              <div className="mt-1 flex flex-wrap justify-end gap-x-2 gap-y-0.5 text-xs text-ink-faint">
+                <span>Not a {VERTICAL_LABEL[vertical as Vertical]}?</span>
+                {(["restaurant", "grocery", "salon"] as Vertical[])
+                  .filter((v) => v !== vertical)
+                  .map((v) => (
+                    <button key={v} onClick={() => changeVertical(v)} disabled={creating} className="font-medium text-brand underline disabled:opacity-60">
+                      It&apos;s a {VERTICAL_LABEL[v]}
+                    </button>
+                  ))}
               </div>
             )}
           </div>
@@ -402,7 +408,7 @@ function WorkspacePhase({
           <h2 className="font-semibold">Competitors <span className="text-ink-faint">({competitors.length})</span></h2>
         </div>
         <p className="mb-3 text-xs text-ink-faint">
-          {vertical === "grocery" ? "Grocers" : "Restaurants"} closest to yours by type &amp; distance — like-for-like first.
+          {VERTICAL_PLURAL[vertical as Vertical] ?? "Businesses"} closest to yours by type &amp; distance — like-for-like first.
           Tap a pin to remove one, or search below to add — new results drop onto the map as pins you can add. Nothing is collected until you start.
         </p>
 

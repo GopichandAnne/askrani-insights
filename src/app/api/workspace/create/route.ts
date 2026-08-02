@@ -14,8 +14,8 @@ export async function POST(req: Request) {
   if (!candidate?.name) return badRequest("candidate.name required");
   // Auto-detect the vertical from the picked place's tags/name; honor an explicit
   // client override only when it's a valid value.
-  const vertical =
-    rawVertical === "grocery" || rawVertical === "restaurant" ? rawVertical : inferVertical(candidate);
+  const VALID = new Set(["grocery", "restaurant", "salon"]);
+  const vertical = VALID.has(rawVertical) ? rawVertical : inferVertical(candidate);
 
   try {
     const ws = await createWorkspaceFromCandidate(auth.orgId, candidate, vertical);
