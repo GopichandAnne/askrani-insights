@@ -2,6 +2,7 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ProvenanceBadge } from "@/components/TrustChip";
+import { getOrMakeNewsDigest } from "@/lib/newsdigest";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export default async function FeedPage() {
   ]);
 
   const NEWS_KIND: Record<string, string> = { trend: "📈 Trend", opening: "✨ New opening", local: "📰 Local" };
+  const digest = await getOrMakeNewsDigest(state.workspace);
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -66,25 +68,23 @@ export default async function FeedPage() {
             <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🛰️</span>
             Around you &amp; your industry
           </h2>
-          <p className="mb-3 text-xs text-ink-faint">Trends, local news and nearby openings in your market — so you hear about it first.</p>
-          <ul className="stagger space-y-1.5">
-            {news.map((nItem: any) => {
-              const kind = nItem.media?.[0]?.kind as string | undefined;
-              const source = nItem.media?.[0]?.source as string | undefined;
-              return (
-                <li key={nItem.id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-white/55 p-3 text-sm">
-                  <span className="chip shrink-0 bg-brand-soft text-brand-deep">{NEWS_KIND[kind ?? ""] ?? "News"}</span>
-                  <a href={nItem.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 font-medium text-ink hover:text-brand hover:underline">
-                    {nItem.text}
-                  </a>
-                  <span className="text-xs text-ink-faint">
-                    {source ? source + " · " : ""}
-                    {nItem.published_at ? new Date(nItem.published_at).toLocaleDateString() : ""}
-                  </span>
+          <p className="mb-3 text-xs text-ink-faint">Summarized so you get it at a glance — sources linked, no need to open each one.</p>
+          {digest.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{digest.summary}</p>}
+          {digest.items.length > 0 ? (
+            <ul className="stagger space-y-1.5">
+              {digest.items.map((it, i) => (
+                <li key={i} className="flex flex-wrap items-baseline gap-2 rounded-2xl bg-white/55 p-3 text-sm">
+                  <span className="chip shrink-0 bg-brand-soft text-brand-deep">{NEWS_KIND[it.kind ?? ""] ?? "News"}</span>
+                  <span className="min-w-0 flex-1 text-ink">{it.point}</span>
+                  {it.source && (it.url
+                    ? <a href={it.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-medium text-brand hover:underline">{it.source} ↗</a>
+                    : <span className="shrink-0 text-xs text-ink-faint">{it.source}</span>)}
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-ink-faint">Gathering local news — a summary will appear here after the next scan.</p>
+          )}
         </section>
       )}
 
