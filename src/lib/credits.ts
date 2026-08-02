@@ -32,16 +32,18 @@ export function creditsForCost(costUsd: number): number {
 
 export interface LedgerEntry { ts: string; delta: number; bucket: "plan" | "topup"; reason: string; costUsd?: number; ref?: Record<string, unknown> }
 export interface Billing {
-  planCredits: number;   // resets each period (Phase 2+)
+  plan: string;          // 'free' | 'starter' | 'growth' | 'pro'
+  planCredits: number;   // resets each period
   topupCredits: number;  // persists (trial + purchased top-ups)
   trialGranted: boolean;
   status: string;
   totalSpent: number;    // lifetime credits spent
   totalCostUsd: number;  // lifetime real COGS
-  ledger: LedgerEntry[]; // capped recent history (full ledger → table in Phase 3)
+  ledger: LedgerEntry[]; // capped recent history
+  processedEvents?: string[]; // Stripe event ids handled (idempotency)
 }
 
-const DEFAULT: Billing = { planCredits: 0, topupCredits: 0, trialGranted: false, status: "active", totalSpent: 0, totalCostUsd: 0, ledger: [] };
+const DEFAULT: Billing = { plan: "free", planCredits: 0, topupCredits: 0, trialGranted: false, status: "active", totalSpent: 0, totalCostUsd: 0, ledger: [] };
 const LEDGER_CAP = 300;
 type Svc = ReturnType<typeof createServiceClient>;
 
@@ -104,7 +106,7 @@ export async function spendForCost(orgId: string, costUsd: number, ref: Record<s
 }
 
 export interface CreditsSummary {
-  balance: number; planCredits: number; topupCredits: number;
+  balance: number; plan: string; status: string; planCredits: number; topupCredits: number;
   totalSpent: number; totalCostUsd: number; trialGranted: boolean;
   recent: LedgerEntry[];
 }
@@ -113,6 +115,8 @@ export async function creditsSummary(orgId: string): Promise<CreditsSummary> {
   const { billing } = await readBilling(svc, orgId);
   return {
     balance: balanceOf(billing),
+    plan: billing.plan ?? "free",
+    status: billing.status ?? "active",
     planCredits: billing.planCredits,
     topupCredits: billing.topupCredits,
     totalSpent: billing.totalSpent,
@@ -120,4 +124,68 @@ export async function creditsSummary(orgId: string): Promise<CreditsSummary> {
     trialGranted: billing.trialGranted,
     recent: billing.ledger.slice(-25).reverse(),
   };
+}
+
+/** Read the org's plan (from billing; used by the scheduler for cadence). */
+export async function planOfOrg(orgId: string): Promise<string> {
+  const svc = createServiceClient();
+  const { billing } = await readBilling(svc, orgId);
+  return billing.plan ?? "free";
+}
+
+// ── Stripe-driven grants (Phase 3). Called from the webhook (low frequency). ──
+
+/** One-time top-up: add persistent credits. */
+export async function grantTopup(orgId: string, credits: number, ref?: Record<string, unknown>): Promise<void> {
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  billing.topupCredits += credits;
+  billing.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason: "topup_purchase", ref });
+  await writeBilling(svc, orgId, settings, billing);
+}
+
+/** Set the active plan + status (no credit change; grant happens on invoice.paid). */
+export async function setPlan(orgId: string, plan: string, status = "active"): Promise<void> {
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  billing.plan = plan;
+  billing.status = status;
+  await writeBilling(svc, orgId, settings, billing);
+}
+
+/** Reset the monthly plan-credit allotment (subscription first payment + renewals). */
+export async function grantPlanCredits(orgId: string): Promise<void> {
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  const grant = PLANS[billing.plan]?.monthlyCredits ?? 0;
+  billing.planCredits = grant; // reset, not accumulate (use-it-or-lose-it)
+  billing.ledger.push({ ts: new Date().toISOString(), delta: grant, bucket: "plan", reason: "period_reset" });
+  await writeBilling(svc, orgId, settings, billing);
+}
+
+/** Idempotency: returns true the first time an event id is seen for the org. */
+export async function markEventProcessed(orgId: string, eventId: string): Promise<boolean> {
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  const seen = billing.processedEvents ?? [];
+  if (seen.includes(eventId)) return false;
+  billing.processedEvents = [...seen, eventId].slice(-100);
+  await writeBilling(svc, orgId, settings, billing);
+  return true;
+}
+
+/** Store the Stripe customer id on the org (column) + find org by it. */
+export async function setStripeCustomer(orgId: string, customerId: string): Promise<void> {
+  const svc = createServiceClient();
+  await svc.from("organization").update({ billing_customer_id: customerId }).eq("id", orgId);
+}
+export async function orgByStripeCustomer(customerId: string): Promise<string | null> {
+  const svc = createServiceClient();
+  const { data } = await svc.from("organization").select("id").eq("billing_customer_id", customerId).maybeSingle();
+  return (data?.id as string) ?? null;
+}
+export async function getStripeCustomer(orgId: string): Promise<string | null> {
+  const svc = createServiceClient();
+  const { data } = await svc.from("organization").select("billing_customer_id").eq("id", orgId).maybeSingle();
+  return (data?.billing_customer_id as string) ?? null;
 }

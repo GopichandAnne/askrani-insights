@@ -27,8 +27,8 @@ export async function runScheduler(): Promise<SchedulerResult> {
   const workspaces = wss ?? [];
 
   const orgIds = [...new Set(workspaces.map((w: any) => w.organization_id).filter(Boolean))] as string[];
-  const { data: orgs } = await svc.from("organization").select("id, plan").in("id", orgIds.length ? orgIds : ["00000000-0000-0000-0000-000000000000"]);
-  const planOf = new Map((orgs ?? []).map((o: any) => [o.id, o.plan as string]));
+  const { data: orgs } = await svc.from("organization").select("id, settings").in("id", orgIds.length ? orgIds : ["00000000-0000-0000-0000-000000000000"]);
+  const planOf = new Map((orgs ?? []).map((o: any) => [o.id, (o.settings?.billing?.plan as string) ?? "free"]));
 
   const now = Date.now();
   let due = 0, enqueued = 0, pausedNoCredits = 0;

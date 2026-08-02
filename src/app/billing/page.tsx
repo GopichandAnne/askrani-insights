@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { getUser } from "@/lib/auth";
 import { requireOrg } from "@/lib/api";
-import { creditsSummary, CREDIT_COGS_CAP_USD, PLANS } from "@/lib/credits";
+import { creditsSummary, CREDIT_COGS_CAP_USD, PLANS, getStripeCustomer } from "@/lib/credits";
+import { isStripeConfigured, CATALOG } from "@/lib/stripe";
+import { BillingActions, type BuyItem } from "@/components/BillingActions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Billing & credits — Ask Rani Insights" };
@@ -18,8 +20,13 @@ export default async function BillingPage() {
   if (!auth) return <p className="rounded-2xl border border-dashed border-line p-6 text-sm text-ink-faint">No organization found.</p>;
 
   const s = await creditsSummary(auth.orgId);
-  // a "business refresh" ≈ 3 credits (avg full collection ≈ $0.06 at $0.02/credit)
-  const refreshes = Math.floor(s.balance / 3);
+  // a "business refresh" ≈ 5 credits (avg full collection ≈ $0.10 at $0.02/credit)
+  const refreshes = Math.floor(s.balance / 5);
+  const stripeReady = isStripeConfigured();
+  const hasCustomer = stripeReady ? !!(await getStripeCustomer(auth.orgId)) : false;
+  const toItem = (k: string): BuyItem => ({ key: k, label: CATALOG[k].label, priceUsd: CATALOG[k].priceUsd, credits: CATALOG[k].credits, mode: CATALOG[k].mode, plan: CATALOG[k].plan });
+  const buyPlans = stripeReady ? ["starter", "growth", "pro"].filter((k) => CATALOG[k].price).map(toItem) : [];
+  const buyTopups = stripeReady ? ["topup_500", "topup_1500", "topup_5000"].filter((k) => CATALOG[k].price).map(toItem) : [];
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -48,27 +55,33 @@ export default async function BillingPage() {
         </div>
       </section>
 
-      {/* buy (Phase 3 — checkout coming) */}
+      {/* buy plans / top-ups */}
       <section className="card">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">Need more?</h2>
-            <p className="text-sm text-ink-faint">Plans and credit top-ups are coming soon. For now, explore is free and your trial credits cover monitoring.</p>
-          </div>
-          <button disabled className="btn btn-primary px-5 py-2.5 opacity-60" title="Checkout coming soon">Buy credits (soon)</button>
+        <div className="mb-3">
+          <h2 className="font-semibold">Plans &amp; top-ups</h2>
+          <p className="text-sm text-ink-faint">
+            You&apos;re on the <span className="font-medium text-brand-deep">{PLANS[s.plan]?.label ?? s.plan}</span> plan{s.status !== "active" ? ` (${s.status})` : ""}. Pick a plan for ongoing credits, or top up any time.
+          </p>
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {(["starter", "growth", "pro"] as const).map((k) => {
-            const p = PLANS[k];
-            return (
-              <div key={k} className="rounded-2xl bg-white/55 p-3.5">
-                <div className="font-semibold">{p.label}</div>
-                <div className="text-2xl font-extrabold text-brand-deep">${p.priceUsd}<span className="text-sm font-medium text-ink-faint">/mo</span></div>
-                <div className="mt-1 text-xs text-ink-faint">{p.monthlyCredits.toLocaleString()} credits · up to {p.businessCap} businesses · {p.cadence}</div>
-              </div>
-            );
-          })}
-        </div>
+        {stripeReady && (buyPlans.length > 0 || buyTopups.length > 0) ? (
+          <BillingActions plans={buyPlans} topups={buyTopups} currentPlan={s.plan} hasCustomer={hasCustomer} />
+        ) : (
+          <>
+            <p className="text-sm text-ink-faint">Checkout isn&apos;t switched on yet. For now, explore is free and your trial credits cover monitoring.</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {(["starter", "growth", "pro"] as const).map((k) => {
+                const p = PLANS[k];
+                return (
+                  <div key={k} className="rounded-2xl bg-white/55 p-3.5">
+                    <div className="font-semibold">{p.label}</div>
+                    <div className="text-2xl font-extrabold text-brand-deep">${p.priceUsd}<span className="text-sm font-medium text-ink-faint">/mo</span></div>
+                    <div className="mt-1 text-xs text-ink-faint">{p.monthlyCredits.toLocaleString()} credits · up to {p.businessCap} businesses · {p.cadence}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </section>
 
       {/* usage */}
