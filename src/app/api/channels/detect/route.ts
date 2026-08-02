@@ -21,7 +21,8 @@ export async function POST(req: Request) {
   const { data: existing } = await supabase.from("external_identity").select("platform").eq("business_id", businessId);
   const haveIg = (existing ?? []).some((i: any) => i.platform === "instagram");
   const haveFb = (existing ?? []).some((i: any) => i.platform === "facebook");
-  if (haveIg && haveFb) return NextResponse.json({ found: [], message: "Instagram and Facebook already monitored." });
+  const haveTt = (existing ?? []).some((i: any) => i.platform === "tiktok");
+  if (haveIg && haveFb && haveTt) return NextResponse.json({ found: [], message: "Instagram, Facebook and TikTok already monitored." });
 
   const attrs = ((biz as any).attributes ?? {}) as { address?: string; geo?: { lat: number; lng: number } };
   let city = extractCity(attrs.address);

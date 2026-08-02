@@ -40,14 +40,21 @@ type Svc = ReturnType<typeof createServiceClient>;
 /** Loose match for the delivery search fallback — a distinctive token of the
  *  business name (len ≥ 4) must appear in the returned store name, or vice
  *  versa. Prevents attaching the wrong store when searching by name. */
+// Loosened delivery store↔business matcher: strip generic words, compare
+// distinctive tokens (≥3 chars) with substring overlap, and accept whole-name
+// containment. Higher yield (catches "Patel Bros" ↔ "Patel Brothers Grocery")
+// at a small risk of a same-name store — acceptable per product decision.
+const NM_STOP = new Set(["the", "and", "grocery", "market", "supermarket", "store", "foods", "food", "restaurant", "cafe", "halal", "indian", "asian", "llc", "inc", "co", "kitchen", "bakery", "boba", "tea"]);
 function nameMatches(storeName: string, bizName: string): boolean {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
-  const a = norm(storeName);
-  const b = norm(bizName);
+  const a = norm(storeName), b = norm(bizName);
   if (!a || !b) return false;
-  const bTokens = b.split(" ").filter((t) => t.length >= 4);
-  const aTokens = a.split(" ").filter((t) => t.length >= 4);
-  return bTokens.some((t) => a.includes(t)) || aTokens.some((t) => b.includes(t));
+  if (a.includes(b) || b.includes(a)) return true; // whole-name containment
+  const toks = (s: string) => s.split(" ").filter((t) => t.length >= 3 && !NM_STOP.has(t));
+  const at = toks(a), bt = toks(b);
+  if (!at.length || !bt.length) return false;
+  // any distinctive token shared, or one contained in the other (Bros↔Brothers)
+  return at.some((x) => bt.some((y) => x === y || x.includes(y) || y.includes(x)));
 }
 
 async function insertOffers(
@@ -277,7 +284,8 @@ export async function collectBusiness(
   if (!attrs.social_resolved && hasTime() && platformActorConfigured("instagram")) {
     const haveIg = (identRows ?? []).some((i: any) => i.platform === "instagram");
     const haveFb = (identRows ?? []).some((i: any) => i.platform === "facebook");
-    if (!haveIg || !haveFb) {
+    const haveTt = (identRows ?? []).some((i: any) => i.platform === "tiktok");
+    if (!haveIg || !haveFb || !haveTt) {
       // Geo-guard: require a city/geo signal before accepting a name-matched
       // social handle, so a generic-named competitor can't grab a same-name
       // account in another city. City from the address, else reverse-geocoded.
@@ -290,6 +298,7 @@ export async function collectBusiness(
         const found = await findSocialHandles(biz.canonical_name, socialCity, {
           instagram: !haveIg,
           facebook: !haveFb,
+          tiktok: !haveTt,
         });
         for (const [platform, url] of Object.entries(found)) {
           if (platform === "searched" || !url || typeof url !== "string") continue;
