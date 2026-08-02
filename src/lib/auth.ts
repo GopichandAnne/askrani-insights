@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { grantTrialIfNeeded } from "@/lib/credits";
 
 /** Platform super-admins (comma-separated emails in SUPERADMIN_EMAILS). */
 export function isSuperAdmin(user: { email?: string | null } | null | undefined): boolean {
@@ -54,7 +55,11 @@ export async function ensureOrgForUser(userId: string, email?: string | null): P
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
-  if (existing?.organization_id) return existing.organization_id as string;
+  if (existing?.organization_id) {
+    const orgId = existing.organization_id as string;
+    await grantTrialIfNeeded(orgId); // idempotent — backfills trial for existing orgs too
+    return orgId;
+  }
 
   const orgName = email ? `${email.split("@")[0]}'s workspace` : "My workspace";
   const { data: org, error: orgErr } = await svc
@@ -71,5 +76,6 @@ export async function ensureOrgForUser(userId: string, email?: string | null): P
   });
   if (memErr) throw new Error(`create membership: ${memErr.message}`);
 
+  await grantTrialIfNeeded(org.id as string);
   return org.id as string;
 }

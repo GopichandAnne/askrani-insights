@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { collectBusiness, refreshRecommendations } from "@/lib/collect";
 import { detectEventsForBusiness } from "@/lib/events";
+import { spendForCost } from "@/lib/credits";
 
 /**
  * Background collection queue (guide §5.3). Enqueue jobs; a worker drains them
@@ -110,6 +111,7 @@ export async function processOneJob(): Promise<TickResult> {
 
   let outcome: "done" | "error" = "done";
   let offersWritten = 0;
+  const runStart = new Date().toISOString();
   try {
     const res = await collectBusiness(job.business_id);
     offersWritten = res.offersWritten;
@@ -132,6 +134,24 @@ export async function processOneJob(): Promise<TickResult> {
       await svc.from("collection_job").update({ status: "error", error: msg }).eq("id", job.id);
     }
     outcome = "error";
+  }
+
+  // Phase 1 credits (record-only, no gating): debit the org for what this
+  // collection actually cost, summed from the provider_run rows it wrote.
+  if (outcome === "done") {
+    try {
+      const { data: ws } = await svc.from("workspace").select("organization_id").eq("id", job.workspace_id).maybeSingle();
+      const orgId = ws?.organization_id as string | undefined;
+      if (orgId) {
+        const { data: runs } = await svc
+          .from("provider_run")
+          .select("cost_usd")
+          .like("input_hash", `${job.business_id}:%`)
+          .gte("finished_at", runStart);
+        const costUsd = (runs ?? []).reduce((a: number, r: any) => a + (Number(r.cost_usd) || 0), 0);
+        if (costUsd > 0) await spendForCost(orgId, costUsd, { business_id: job.business_id, workspace_id: job.workspace_id });
+      }
+    } catch { /* record-only — never fail the job on credits */ }
   }
 
   // When the workspace's queue is drained, refresh its recommendations.

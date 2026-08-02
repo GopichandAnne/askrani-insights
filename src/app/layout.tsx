@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/recommendations", label: "Recommendations", icon: "recommendations" },
   { href: "/reports", label: "Report", icon: "report" },
+  { href: "/billing", label: "Billing", icon: "billing" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
