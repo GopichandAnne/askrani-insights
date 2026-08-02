@@ -27,14 +27,22 @@ export function EdgeView() {
   }
 
   if (failed) return <p className="rounded-2xl border border-dashed border-line p-6 text-sm text-ink-faint">Set up a business first — then your edge appears here.</p>;
-  if (!edge) return (
+  if (!edge || !edge.headline) return (
     <div className="glass-strong flex items-center gap-3 rounded-3xl p-6">
       <span className="rani-dots" aria-hidden><span /><span /><span /></span>
       <span className="text-sm text-ink-soft">Reading your whole market — competitors, reviews, trends…</span>
     </div>
   );
 
-  const has = (a: unknown[]) => a && a.length > 0;
+  // defensive defaults so an unexpected payload can never crash the page
+  const competitorMoves = edge.competitorMoves ?? [];
+  const trends = edge.trends ?? [];
+  const winningOfferings = edge.winningOfferings ?? [];
+  const events = edge.events ?? [];
+  const sentiment = edge.sentiment ?? { loves: [], gripes: [], aboutYou: "", marketSummary: "" };
+  const loves = sentiment.loves ?? [];
+  const gripes = sentiment.gripes ?? [];
+  const has = (a: unknown[]) => Array.isArray(a) && a.length > 0;
 
   return (
     <div className="space-y-6">
@@ -62,10 +70,10 @@ export function EdgeView() {
       )}
 
       {/* competitor moves */}
-      {has(edge.competitorMoves) && (
+      {has(competitorMoves) && (
         <Section icon="🎯" title="What competitors are doing differently" sub="Moves your rivals are making that you aren't — and how to answer.">
           <div className="grid gap-3 md:grid-cols-2">
-            {edge.competitorMoves.map((m, i) => (
+            {competitorMoves.map((m, i) => (
               <div key={i} className="flex flex-col rounded-2xl bg-white/55 p-4">
                 <div className="flex items-center gap-2">
                   <span className="chip bg-brand-soft text-brand-deep">{m.competitor}</span>
@@ -81,22 +89,22 @@ export function EdgeView() {
       )}
 
       {/* sentiment */}
-      {(has(edge.sentiment.loves) || has(edge.sentiment.gripes) || edge.sentiment.aboutYou) && (
+      {(has(loves) || has(gripes) || sentiment.aboutYou) && (
         <Section icon="💬" title="What people really think" sub="Themes from reviews & social — beyond the star rating.">
-          {edge.sentiment.aboutYou && <p className="mb-3 text-sm text-ink-soft"><span className="font-semibold text-ink">About you:</span> {edge.sentiment.aboutYou}</p>}
+          {sentiment.aboutYou && <p className="mb-3 text-sm text-ink-soft"><span className="font-semibold text-ink">About you:</span> {sentiment.aboutYou}</p>}
           <div className="grid gap-3 sm:grid-cols-2">
-            <ThemeList tone="love" title="What they love" items={edge.sentiment.loves} />
-            <ThemeList tone="gripe" title="Gaps & gripes" items={edge.sentiment.gripes} />
+            <ThemeList tone="love" title="What they love" items={loves} />
+            <ThemeList tone="gripe" title="Gaps & gripes" items={gripes} />
           </div>
-          {edge.sentiment.marketSummary && <p className="mt-3 text-xs text-ink-faint">{edge.sentiment.marketSummary}</p>}
+          {sentiment.marketSummary && <p className="mt-3 text-xs text-ink-faint">{sentiment.marketSummary}</p>}
         </Section>
       )}
 
       {/* trends */}
-      {has(edge.trends) && (
+      {has(trends) && (
         <Section icon="📈" title="Trends to ride" sub="What's moving in your field — and how to use it.">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {edge.trends.map((t, i) => (
+            {trends.map((t, i) => (
               <div key={i} className="flex flex-col rounded-2xl bg-white/55 p-4">
                 <p className="text-sm font-semibold text-ink">{t.trend}</p>
                 <p className="mt-1 text-xs text-ink-faint">{t.why}</p>
@@ -108,10 +116,10 @@ export function EdgeView() {
       )}
 
       {/* winning offerings */}
-      {has(edge.winningOfferings) && (
+      {has(winningOfferings) && (
         <Section icon="🏆" title="Offerings that are winning" sub="Products & formats working in this market you could adopt.">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {edge.winningOfferings.map((o, i) => (
+            {winningOfferings.map((o, i) => (
               <div key={i} className="flex flex-col rounded-2xl bg-white/55 p-4">
                 <p className="text-sm font-semibold text-ink">{o.offering}</p>
                 <p className="mt-1 text-xs text-ink-faint">{o.evidence}</p>
@@ -123,10 +131,10 @@ export function EdgeView() {
       )}
 
       {/* events */}
-      {has(edge.events) && (
+      {has(events) && (
         <Section icon="📅" title="Moments to prepare for" sub="Upcoming events & seasonal peaks worth planning around.">
           <ul className="space-y-2">
-            {edge.events.map((e, i) => (
+            {events.map((e, i) => (
               <li key={i} className="rounded-2xl bg-white/55 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-ink">{e.title}</span>

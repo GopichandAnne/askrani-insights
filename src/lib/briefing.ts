@@ -63,18 +63,19 @@ export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
 /** Cached briefing, regenerated when older than maxAgeHours. */
 export async function getOrMakeBriefing(ws: WorkspaceRow, maxAgeHours = 12): Promise<Briefing> {
   const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("settings").eq("id", ws.id).maybeSingle();
-  const cached = (data?.settings as any)?.briefing as Briefing | undefined;
+  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const cached = (data?.goals as any)?.briefing as Briefing | undefined;
   if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.summary) {
     return cached;
   }
   const fresh = await generateBriefing(ws);
-  // persist with the service client (workspace.settings isn't member-writable via RLS)
+  // persist with the service client (workspace.goals isn't member-writable via RLS).
+  // Cache lives under goals.briefing (workspace has no dedicated settings column).
   const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("settings").eq("id", ws.id).maybeSingle();
+  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   await svc
     .from("workspace")
-    .update({ settings: { ...((cur?.settings as any) ?? {}), briefing: fresh } })
+    .update({ goals: { ...((cur?.goals as any) ?? {}), briefing: fresh } })
     .eq("id", ws.id);
   return fresh;
 }

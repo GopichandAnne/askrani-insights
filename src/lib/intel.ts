@@ -217,13 +217,14 @@ export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
 export async function getOrMakeEdge(ws: WorkspaceRow, opts: { maxAgeHours?: number; force?: boolean } = {}): Promise<Edge> {
   const { maxAgeHours = 24, force = false } = opts;
   const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("settings").eq("id", ws.id).maybeSingle();
-  const cached = (data?.settings as any)?.edge as Edge | undefined;
+  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const cached = (data?.goals as any)?.edge as Edge | undefined;
   if (!force && cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return deepStrip(cached);
 
   const fresh = await generateEdge(ws);
+  // Cache under goals.edge (workspace has no dedicated settings column).
   const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("settings").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ settings: { ...((cur?.settings as any) ?? {}), edge: fresh } }).eq("id", ws.id);
+  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  await svc.from("workspace").update({ goals: { ...((cur?.goals as any) ?? {}), edge: fresh } }).eq("id", ws.id);
   return fresh;
 }
