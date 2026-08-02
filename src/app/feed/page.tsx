@@ -5,6 +5,7 @@ import { ProvenanceBadge } from "@/components/TrustChip";
 import { getOrMakeNewsDigest } from "@/lib/newsdigest";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30; // room for the news-digest LLM call on first (uncached) load
 
 const GROUP_COLOR: Record<string, string> = {
   price: "bg-trust-inferred/10 text-trust-inferred",
