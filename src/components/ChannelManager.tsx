@@ -111,6 +111,8 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
           <div className="flex w-full flex-wrap items-center gap-2">
             <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="field w-auto py-1.5 text-sm">
               {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_META[p].label}</option>)}
+              <option value="doordash">DoorDash</option>
+              <option value="ubereats">Uber Eats</option>
               <option value="website">Website</option>
             </select>
             <input

@@ -199,6 +199,88 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   return pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
 }
 
+// ── Intelligent delivery store-URL discovery ────────────────────────────────
+// Delivery actors are unreliable with search-by-name; the store URL is reliable.
+// We already have each business's address, so we search "{name} {city} doordash"
+// and let the LLM pick the store page that matches THIS business at THIS location.
+const DELIVERY_HOST: Record<string, string> = { doordash: "doordash.com", ubereats: "ubereats.com" };
+const DELIVERY_WORD: Record<string, string> = { doordash: "doordash", ubereats: "uber eats" };
+
+function deliveryCandidates(results: SearchResult[], platform: string): { url: string; context: string }[] {
+  const host = DELIVERY_HOST[platform];
+  const out: { url: string; context: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of results) {
+    if (!r.url || !r.url.includes(host)) continue;
+    const isStore = platform === "doordash" ? /doordash\.com\/store\//i.test(r.url) : /ubereats\.com\/(store\/|[^/]+\/food-delivery\/)/i.test(r.url);
+    if (!isStore) continue;
+    const clean = r.url.split("?")[0];
+    if (seen.has(clean)) continue;
+    seen.add(clean);
+    out.push({ url: clean, context: `${r.title ?? ""} ${r.description ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 160) });
+  }
+  return out;
+}
+
+const DURL_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    url: { type: "string", description: "The exact store-page URL from the list that belongs to THIS business at THIS location, or empty string if none clearly match." },
+    confident: { type: "boolean", description: "true only if you're confident it's the same business (name + location fit)." },
+  },
+  required: ["url", "confident"],
+};
+
+async function pickDeliveryUrl(cands: { url: string; context: string }[], name: string, city: string, platform: string): Promise<string | undefined> {
+  if (!cands.length) return undefined;
+  if (!isLlmConfigured()) return cands[0].url;
+  try {
+    const list = cands.map((c, i) => `${i + 1}. ${c.url} — ${c.context || "(no description)"}`).join("\n");
+    const { data } = await getLlm().callStructured<{ url: string; confident: boolean }>({
+      system: `You match a local business to its ${platform} store page. Pick the URL that is THIS business at the given city. Only pick one you're confident is the same business (name + location). If none clearly match, return an empty url. Return an exact URL from the list.`,
+      text: `Business: "${name}"\nCity: ${city || "(unknown)"}\n\nCandidate ${platform} store pages:\n${list}`,
+      schema: DURL_SCHEMA,
+      tier: "classify",
+      maxTokens: 160,
+    });
+    const chosen = String(data.url ?? "").trim();
+    if (chosen && data.confident && cands.some((c) => c.url === chosen)) return chosen;
+    return undefined;
+  } catch {
+    return cands[0].url;
+  }
+}
+
+export interface DeliveryWant { doordash?: boolean; ubereats?: boolean }
+export interface DeliveryFound { doordash?: string; ubereats?: string; searched: boolean }
+
+/** Discover a business's DoorDash/UberEats store URL from name + city. */
+export async function findDeliveryUrls(name: string, city: string, want: DeliveryWant = { doordash: true, ubereats: true }): Promise<DeliveryFound> {
+  const out: DeliveryFound = { searched: false };
+  const clean = cleanName(name);
+  const loc = city ? ` ${city}` : "";
+  for (const platform of ["doordash", "ubereats"] as const) {
+    if (!want[platform]) continue;
+    const word = DELIVERY_WORD[platform];
+    const queries = [`${clean}${loc} ${word}`, `${clean} ${word} menu`];
+    const all: { url: string; context: string }[] = [];
+    const seen = new Set<string>();
+    for (const q of queries) {
+      const res = await search(q);
+      if (res.length) out.searched = true;
+      for (const c of deliveryCandidates(res, platform)) {
+        if (!seen.has(c.url)) { seen.add(c.url); all.push(c); }
+      }
+      if (all.length >= 5) break;
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    const u = await pickDeliveryUrl(all.slice(0, 6), name, city, platform);
+    if (u) out[platform] = u;
+  }
+  return out;
+}
+
 export interface SocialWant { instagram?: boolean; facebook?: boolean; tiktok?: boolean }
 export interface SocialFound { instagram?: string; facebook?: string; tiktok?: string; searched: boolean }
 

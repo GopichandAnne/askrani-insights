@@ -12,9 +12,14 @@ export const PLATFORM_META: Record<string, { label: string; icon: string; social
   tiktok: { label: "TikTok", icon: "🎵", social: true, placeholder: "tiktok.com/@yourhandle" },
   youtube: { label: "YouTube", icon: "▶️", social: true, placeholder: "youtube.com/@yourchannel" },
   website: { label: "Website", icon: "🌐", social: false, placeholder: "yourbusiness.com" },
+  doordash: { label: "DoorDash", icon: "🛵", social: false, placeholder: "doordash.com/store/…" },
+  ubereats: { label: "Uber Eats", icon: "🚗", social: false, placeholder: "ubereats.com/store/…" },
   google: { label: "Google", icon: "📍", social: false, placeholder: "Google Business Profile" },
   yelp: { label: "Yelp", icon: "⭐", social: false, placeholder: "yelp.com/biz/…" },
 };
+
+// delivery platforms the owner can attach a store URL for (menu → priced offers)
+export const DELIVERY_PLATFORMS = ["doordash", "ubereats"] as const;
 
 export interface ChannelIdentity {
   id: string;
@@ -44,9 +49,14 @@ export function normalizeSocial(platform: string, raw: string): { url: string; h
     tiktok: "tiktok.com",
     youtube: "youtube.com",
   };
-  if (platform === "website") {
+  if (platform === "website" || platform === "doordash" || platform === "ubereats") {
+    // keep the full URL (delivery store pages / websites); label with a readable slug
     const url = /^https?:\/\//i.test(v) ? v : `https://${v}`;
-    try { return { url, handle: new URL(url).host.replace(/^www\./, "") }; } catch { return null; }
+    try {
+      const u = new URL(url);
+      const slug = platform === "website" ? u.host.replace(/^www\./, "") : (u.pathname.match(/store\/([^/?]+)/)?.[1] ?? u.host.replace(/^www\./, ""));
+      return { url, handle: slug };
+    } catch { return null; }
   }
   const h = host[platform];
   if (!h) {

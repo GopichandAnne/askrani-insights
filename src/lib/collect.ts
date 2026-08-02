@@ -5,7 +5,7 @@ import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
 import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
 import { collectLocalNews, extractCity } from "@/lib/news";
-import { findSocialHandles, reverseGeoCity } from "@/lib/social-discovery";
+import { findSocialHandles, findDeliveryUrls, reverseGeoCity } from "@/lib/social-discovery";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -317,6 +317,33 @@ export async function collectBusiness(
     }
   }
 
+  // ── 1b) INTELLIGENT DELIVERY URL discovery — search the business by name+city
+  //    and let the LLM pick its DoorDash/UberEats store page, then attach it so
+  //    the delivery actor pulls the full priced menu (search-by-name is flaky). ─
+  if (!attrs.delivery_resolved && hasTime() && (platformActorConfigured("doordash") || platformActorConfigured("ubereats"))) {
+    const haveDd = (identRows ?? []).some((i: any) => i.platform === "doordash");
+    const haveUe = (identRows ?? []).some((i: any) => i.platform === "ubereats");
+    const wantDd = !haveDd && platformActorConfigured("doordash");
+    const wantUe = !haveUe && platformActorConfigured("ubereats");
+    if (wantDd || wantUe) {
+      let city = extractCity(attrs.address as string | undefined);
+      if (!city && geo) city = await reverseGeoCity(geo);
+      if (city) {
+        try {
+          const dfound = await findDeliveryUrls(biz.canonical_name, city, { doordash: wantDd, ubereats: wantUe });
+          for (const [platform, url] of Object.entries(dfound)) {
+            if (platform === "searched" || !url || typeof url !== "string") continue;
+            await svc.from("external_identity").insert({ business_id: businessId, platform, url, verification_state: "observed" }).then(() => {}, () => {});
+            (identRows ?? []).push({ platform, url, handle: null } as any);
+          }
+          if (dfound.searched) { attrs.delivery_resolved = true; attrsDirty = true; }
+        } catch {
+          /* best-effort — retry next run */
+        }
+      }
+    }
+  }
+
   // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");
   if (google?.isConfigured() && wants("google") && hasTime()) {
@@ -427,8 +454,11 @@ export async function collectBusiness(
     let target = url ?? "";
     let searchQuery: string | undefined;
     if (!url) {
-      if (isDelivery && attrs.address) searchQuery = biz.canonical_name; // fallback: search by name
-      else continue; // social w/o handle, or delivery w/o address → skip
+      // DoorDash blind search is cheap (~$0.0001) so keep it as a fallback; UberEats
+      // costs ~$0.008/run and returns nothing on blind name search, so require a URL
+      // (discovered in step 1b or attached in Channels) — no blind UberEats spend.
+      if (platform === "doordash" && attrs.address) searchQuery = biz.canonical_name;
+      else continue; // ubereats w/o URL, or social w/o handle → skip
     }
 
     const run = await startRun(svc, `apify:${platform}`, businessId);
