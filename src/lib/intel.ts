@@ -205,9 +205,29 @@ export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
       text: `Analyze this local business and its market, then produce the edge brief.\n\nDATA (JSON):\n${JSON.stringify(context)}`,
       schema: SCHEMA,
       tier: "extract",
-      maxTokens: 2200,
+      maxTokens: 4000,
     });
-    return { ...deepStrip(data), at };
+    // Normalize so a truncated/partial tool output can never yield undefined
+    // arrays (which would blank the page) — every field gets a safe default.
+    const d = (data ?? {}) as Partial<Edge>;
+    const s = (d.sentiment ?? {}) as Partial<Edge["sentiment"]>;
+    const norm: Edge = {
+      headline: d.headline || empty.headline,
+      theEdge: d.theEdge || empty.theEdge,
+      competitorMoves: Array.isArray(d.competitorMoves) ? d.competitorMoves : [],
+      sentiment: {
+        loves: Array.isArray(s.loves) ? s.loves : [],
+        gripes: Array.isArray(s.gripes) ? s.gripes : [],
+        aboutYou: s.aboutYou || "",
+        marketSummary: s.marketSummary || "",
+      },
+      trends: Array.isArray(d.trends) ? d.trends : [],
+      winningOfferings: Array.isArray(d.winningOfferings) ? d.winningOfferings : [],
+      events: Array.isArray(d.events) ? d.events : [],
+      dataThin: !!d.dataThin,
+      at,
+    };
+    return deepStrip(norm);
   } catch {
     return empty;
   }
