@@ -43,7 +43,26 @@ function useCommandKey(setOpen: (f: (o: boolean) => boolean) => void) {
   }, [setOpen]);
 }
 
-export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId = "" }: { items: NavItem[]; email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string }) {
+function fmtCredits(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}k` : String(n);
+}
+function CreditsPill({ credits }: { credits: number | null }) {
+  if (credits == null) return null;
+  const low = credits <= 20;
+  return (
+    <Link
+      href="/billing"
+      title={`${credits.toLocaleString()} monitoring credits · manage billing`}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold transition-all hover:shadow-glow ${low ? "bg-coral/15 text-coral-dark" : "glass text-brand-deep"}`}
+    >
+      <span aria-hidden>⚡</span>
+      <span className="tabular-nums">{fmtCredits(credits)}</span>
+      <span className="hidden text-xs font-normal text-ink-faint sm:inline">credits</span>
+    </Link>
+  );
+}
+
+export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId = "", credits = null }: { items: NavItem[]; email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string; credits?: number | null }) {
   const pathname = usePathname() || "/";
   const [open, setOpen] = useState(false);
   useCommandKey(setOpen);
@@ -97,7 +116,10 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
           <div className="glass-strong flex items-center gap-3 rounded-2xl px-3 py-2">
             {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
             <AskTrigger className="w-full max-w-md" />
-            {email && <span className="ml-auto truncate px-2 text-xs text-ink-faint" title={email}>{email}</span>}
+            <div className="ml-auto flex items-center gap-3">
+              <CreditsPill credits={credits} />
+              {email && <span className="hidden truncate px-1 text-xs text-ink-faint lg:inline" title={email}>{email}</span>}
+            </div>
           </div>
         </div>
       </header>
@@ -107,7 +129,8 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
         <div className="glass-strong flex items-center gap-2 px-4 py-2.5">
           <Link href="/" aria-label="home" className="shrink-0"><RaniMark size={26} /></Link>
           {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
-          <AskTrigger className="ml-auto max-w-[45%] flex-1" />
+          <AskTrigger className="max-w-[40%] flex-1" />
+          <span className="ml-auto"><CreditsPill credits={credits} /></span>
         </div>
       </header>
 

@@ -6,6 +6,7 @@ import { Landing } from "@/components/Landing";
 import { BriefingCard } from "@/components/BriefingCard";
 import { EdgeTeaser } from "@/components/EdgeTeaser";
 import { RaniMark } from "@/components/RaniSpinner";
+import { creditsSummary, PLANS } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,10 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const supabase = await createClient();
   const ids = await workspaceBusinessIds(workspace);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
+
+  // org credits/plan for the dashboard strip
+  const { data: wsOrg } = await supabase.from("workspace").select("organization_id").eq("id", workspace.id).maybeSingle();
+  const credits = wsOrg?.organization_id ? await creditsSummary(wsOrg.organization_id as string) : null;
 
   const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
@@ -238,6 +243,29 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         </div>
         <p className="text-sm text-ink-faint">Your market, at a glance. Press <kbd className="rounded-md bg-white/70 px-1.5 py-0.5 text-[11px] font-semibold">⌘K</kbd> to ask anything.</p>
       </header>
+
+      {/* 0 — monitoring & credits strip */}
+      <section className="glass flex flex-wrap items-center justify-between gap-x-8 gap-y-3 rounded-2xl px-5 py-3.5">
+        <div className="flex flex-wrap gap-x-8 gap-y-3">
+          <div>
+            <div className="text-xl font-extrabold text-brand-deep">{ids.all.length}</div>
+            <div className="text-xs text-ink-faint">Businesses monitored{ids.competitorIds.length ? ` · ${ids.competitorIds.length} rivals` : ""}</div>
+          </div>
+          <div>
+            <div className="text-xl font-extrabold text-brand-deep">{credits ? credits.balance.toLocaleString() : "—"}</div>
+            <div className="text-xs text-ink-faint">Credits left{credits ? ` · ≈ ${Math.floor(credits.balance / 5)} refreshes` : ""}</div>
+          </div>
+          <div>
+            <div className="text-xl font-extrabold text-brand-deep">{PLANS[credits?.plan ?? "free"]?.label ?? "Free"}</div>
+            <div className="text-xs text-ink-faint">Current plan</div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/explore" className="btn btn-secondary px-3 py-1.5 text-sm">🔎 Explore an area</Link>
+          <Link href="/onboarding" className="btn btn-secondary px-3 py-1.5 text-sm">+ Add business</Link>
+          <Link href="/billing" className="btn btn-primary px-3 py-1.5 text-sm">Buy credits</Link>
+        </div>
+      </section>
 
       {/* 1 — briefing + edge teaser */}
       <div className="grid gap-4 lg:grid-cols-3">

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
-import { getUser, isSuperAdmin } from "@/lib/auth";
+import { getUser, isSuperAdmin, ensureOrgForUser } from "@/lib/auth";
 import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 import { CreditBanner } from "@/components/CreditBanner";
+import { creditsSummary } from "@/lib/credits";
 
 export const metadata: Metadata = {
   title: "Ask Rani Insights — local market intelligence",
@@ -21,7 +22,6 @@ const NAV: NavItem[] = [
   { href: "/offers", label: "Offers", icon: "offers" },
   { href: "/competitors", label: "Competitors", icon: "competitors" },
   { href: "/channels", label: "Channels", icon: "channels" },
-  { href: "/recommendations", label: "Recommendations", icon: "recommendations" },
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
@@ -36,6 +36,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const workspaces = user ? await listWorkspaces() : [];
   const active = user ? await activeWorkspace() : null;
   const activeId = active?.status === "ok" ? active.workspace.id : "";
+
+  // remaining monitoring credits (shown in the nav)
+  let credits: number | null = null;
+  if (user) {
+    try { credits = (await creditsSummary(await ensureOrgForUser(user.id, user.email))).balance; } catch { /* non-fatal */ }
+  }
 
   return (
     <html lang="en">
@@ -59,6 +65,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               admin={admin}
               workspaces={workspaces.map((w) => ({ id: w.id, name: w.name, vertical: w.vertical }))}
               activeWorkspaceId={activeId}
+              credits={credits}
             />
             <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
               <CreditBanner />
