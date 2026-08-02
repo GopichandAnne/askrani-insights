@@ -70,6 +70,8 @@ const KIND_META: Record<string, { icon: string; label: string; tone: string }> =
   tiktok: { icon: "🎵", label: "TikTok", tone: "bg-surface-sunken text-ink-soft" },
   youtube: { icon: "▶️", label: "YouTube", tone: "bg-surface-sunken text-ink-soft" },
 };
+// compact number: 8300 -> "8.3k"
+const fmtN = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "")}k` : String(n));
 // caption keywords that mark a social post as an actual offer/promo
 const PROMO_RE = /\b(sale|deal|deals|offer|discount|%|\$\d|special|weekend|combo|bogo|buy one|save|saving|clearance|promo|coupon|off\b)/i;
 const PLATFORM_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube" };
@@ -116,7 +118,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
       .limit(6),
     supabase
       .from("content_item")
-      .select("id,text,url,platform,published_at,observed_at,business:business_id(canonical_name)")
+      .select("id,text,url,platform,media,published_at,observed_at,business:business_id(canonical_name)")
       .in("business_id", scope)
       .in("platform", ["instagram", "facebook", "tiktok", "youtube"])
       .order("observed_at", { ascending: false })
@@ -195,11 +197,13 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     if (n >= 2) continue;
     perBiz.set(biz, n + 1);
     const plat = (x.s as any).platform as string;
+    const mm = (Array.isArray((x.s as any).media) ? (x.s as any).media.find((m: any) => m?.type === "metrics") : null) as any;
+    const eng = mm ? [mm.views != null ? `👁 ${fmtN(mm.views)}` : "", mm.likes != null ? `❤️ ${fmtN(mm.likes)}` : ""].filter(Boolean).join(" ") : "";
     items.push({
       key: `s${(x.s as any).id}`,
       kind: x.promo ? "social_promo" : plat,
       title: `${biz} — ${x.cap.slice(0, 96)}${x.cap.length > 96 ? "…" : ""}`,
-      meta: x.promo ? PLATFORM_LABEL[plat] ?? "Social" : "posted",
+      meta: eng || (x.promo ? PLATFORM_LABEL[plat] ?? "Social" : "posted"),
       when: x.when,
       href: (x.s as any).url,
       external: true,

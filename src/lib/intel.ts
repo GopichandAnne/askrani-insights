@@ -86,6 +86,7 @@ const SYSTEM = [
   "Write ONLY from the DATA provided. Be concrete: use real competitor names, product names, and numbers from the data. Never invent figures, reviews, events, or trends that aren't supported.",
   "Every insight must be genuinely useful and specific to THIS business and market — no generic filler. Each item needs a concrete, doable 'leverage' action.",
   "Focus on what's DIFFERENT and ACTIONABLE: what rivals do that you don't, what customers actually say, what's demonstrably working, what's coming up.",
+  "When 'topPerformingPosts' is present, use it as hard evidence of what's WORKING (highest engagement) — call out the winning post/format and tell the owner to replicate it.",
   "If a section has little support in the data, return fewer (or zero) items and set dataThin=true rather than padding. Plain English, no jargon.",
 ].join(" ");
 
@@ -148,6 +149,20 @@ async function buildEdgeContext(ws: WorkspaceRow) {
     ((offersByBiz[name] ??= []).length < 16) && offersByBiz[name].push({ item, price: Number.isFinite(amt) && amt > 0 ? amt : undefined });
   }
 
+  // "what's working" — rank competitor social posts by engagement (likes/comments
+  // /views captured in media metrics) so the strategist can cite proven winners.
+  const metricsOf = (m: any[]) => (Array.isArray(m) ? m.find((x: any) => x?.type === "metrics") : null) || null;
+  const topPerformingPosts = (content ?? [])
+    .filter((c: any) => SOCIAL.has(c.platform) && c.business_id !== ids.targetId)
+    .map((c: any) => {
+      const mm = metricsOf(c.media);
+      const eng = (mm?.views || 0) + (mm?.likes || 0) * 3 + (mm?.comments || 0) * 5;
+      return { business: (nameOf.get(c.business_id) as string) || "A competitor", platform: c.platform, caption: clean(c.text).slice(0, 160), likes: mm?.likes, views: mm?.views, comments: mm?.comments, eng };
+    })
+    .filter((x) => x.eng > 0)
+    .sort((a, b) => b.eng - a.eng)
+    .slice(0, 10);
+
   // local market radar: trends / news / openings with article text
   const localNews = (content ?? [])
     .filter((c: any) => c.platform === "news")
@@ -167,6 +182,7 @@ async function buildEdgeContext(ws: WorkspaceRow) {
     reviewsAboutYou: yourReviews,
     competitorReviews: reviewsByBiz,
     offeringsByBusiness: offersByBiz,
+    topPerformingPosts,
     localTrendsNewsOpenings: localNews,
   };
 }

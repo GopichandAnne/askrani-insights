@@ -144,6 +144,16 @@ function mapItem(cfg: PlatformConfig, it: any): RawObservation {
   if (it.displayUrl) media.push({ type: "image", url: it.displayUrl });
   for (const img of it.images ?? []) media.push({ type: "image", url: img });
   if (it.videoUrl || it.webVideoUrl) media.push({ type: "video", url: it.videoUrl ?? it.webVideoUrl });
+  // Engagement metrics (IG likesCount/commentsCount/videoViewCount; TikTok
+  // diggCount/playCount…). Stored as a trailing media entry so it persists in
+  // content_item.media without a schema change and never displaces image[0].
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+  const likes = num(it.likesCount ?? it.likeCount ?? it.diggCount);
+  const comments = num(it.commentsCount ?? it.commentCount ?? it.comments);
+  const views = num(it.videoViewCount ?? it.videoPlayCount ?? it.playCount ?? it.viewCount);
+  if (likes != null || comments != null || views != null) {
+    media.push({ type: "metrics", likes, comments, views } as any);
+  }
   return {
     provider: "apify",
     provenance: cfg.provenance,

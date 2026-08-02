@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { RaniMark } from "@/components/RaniSpinner";
+import { DraftButton } from "@/components/DraftButton";
 import type { Edge } from "@/lib/intel";
 
 /** "Your Edge" — the synthesized value view. Fetches the cached brief, renders
@@ -81,7 +82,7 @@ export function EdgeView() {
                 </div>
                 <p className="mt-2 text-sm font-medium text-ink">{m.move}</p>
                 <p className="mt-1 text-xs text-ink-faint">vs you: {m.differsFromYou}</p>
-                <Leverage text={m.leverage} />
+                <Leverage text={m.leverage} context={`${m.competitor} is doing: ${m.move}`} />
               </div>
             ))}
           </div>
@@ -141,7 +142,7 @@ export function EdgeView() {
                   {e.when && <span className="chip bg-coral/15 text-coral-dark">{e.when}</span>}
                 </div>
                 <p className="mt-1 text-xs text-ink-faint">{e.why}</p>
-                <Leverage text={e.action} />
+                <Leverage text={e.action} context={`For: ${e.title}${e.when ? ` (${e.when})` : ""}`} />
               </li>
             ))}
           </ul>
@@ -168,12 +169,15 @@ function Section({ icon, title, sub, children }: { icon: string; title: string; 
   );
 }
 
-function Leverage({ text }: { text: string }) {
+function Leverage({ text, context }: { text: string; context?: string }) {
   if (!text) return null;
   return (
-    <div className="mt-2 flex items-start gap-1.5 rounded-xl bg-brand-soft/60 px-2.5 py-1.5 text-xs text-brand-deep">
-      <span aria-hidden>✦</span>
-      <span><span className="font-semibold">Leverage:</span> {text}</span>
+    <div className="mt-2 rounded-xl bg-brand-soft/60 px-2.5 py-1.5 text-xs text-brand-deep">
+      <div className="flex items-start gap-1.5">
+        <span aria-hidden>✦</span>
+        <span><span className="font-semibold">Leverage:</span> {text}</span>
+      </div>
+      <DraftButton move={text} context={context} />
     </div>
   );
 }
