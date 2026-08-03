@@ -7,6 +7,7 @@ import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 import { CreditBanner } from "@/components/CreditBanner";
 import { Analytics } from "@/components/Analytics";
+import { ConsentBanner } from "@/components/ConsentBanner";
 import { creditsSummary } from "@/lib/credits";
 
 export const metadata: Metadata = {
@@ -54,6 +55,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body>
         <Analytics />
+        <ConsentBanner />
         <div className="aurora-bg" aria-hidden />
 
         {user ? (

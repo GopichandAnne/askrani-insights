@@ -3,6 +3,7 @@ import { getUser, isSuperAdmin, isServiceConfigured } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { providerHealth } from "@/lib/providers/registry";
 import { isLlmConfigured, getLlm } from "@/lib/extraction/llm";
+import { analyticsSummary } from "@/lib/analytics";
 
 export const metadata = { title: "Super Admin — Ask Rani Insights" };
 export const dynamic = "force-dynamic";
@@ -57,6 +58,8 @@ export default async function AdminPage() {
     ? await svc.from("business").select("canonical_name,website,attributes").order("created_at", { ascending: false }).limit(8)
     : { data: [] as any[] };
 
+  const analytics = await analyticsSummary(30);
+
   return (
     <div className="space-y-8 animate-fade-in">
       <section>
@@ -87,6 +90,46 @@ export default async function AdminPage() {
           ))}
         </section>
       )}
+
+      {/* first-party funnel analytics (last 30 days) */}
+      <section>
+        <h2 className="mb-2 text-lg font-semibold">Funnel · last 30 days <span className="text-sm font-normal text-ink-faint">(first-party, cookieless)</span></h2>
+        {!analytics.ok ? (
+          <p className="card text-sm text-ink-faint">
+            No analytics yet. Create the <code className="rounded bg-surface-sunken px-1">analytics_event</code> table
+            (run <code className="rounded bg-surface-sunken px-1">supabase/migrations/0004_analytics_event.sql</code> in the
+            Supabase SQL editor) — events start recording immediately after.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                ["Explore searches", analytics.totals.explore_search ?? 0],
+                ["Signups", analytics.totals.signup ?? 0],
+                ["Workspaces created", analytics.totals.workspace_created ?? 0],
+                ["Monitoring started", analytics.totals.collect_started ?? 0],
+              ].map(([label, n]) => (
+                <div key={label as string} className="card">
+                  <div className="text-2xl font-extrabold text-brand-deep">{n as number}</div>
+                  <div className="mt-1 text-xs text-ink-faint">{label as string}</div>
+                </div>
+              ))}
+            </div>
+            {analytics.recentSearches.length > 0 && (
+              <div className="mt-3">
+                <h3 className="mb-1.5 text-sm font-semibold">What people searched (free Explore)</h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {analytics.recentSearches.map((s, i) => (
+                    <span key={i} className="chip bg-surface-sunken text-ink-soft" title={new Date(s.at).toLocaleString()}>
+                      {s.keyword || "—"}{s.area ? ` · ${s.area}` : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
       {/* providers & models */}
       <section>

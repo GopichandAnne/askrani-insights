@@ -3,6 +3,7 @@ import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createWorkspaceFromCandidate, autoDiscoverCompetitors } from "@/lib/discovery";
 import { inferVertical } from "@/lib/classify";
 import { createServiceClient } from "@/lib/supabase/server";
+import { logEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
       { radiusKm: 3, limit: 12, vertical },
     );
 
+    void logEvent("workspace_created", { vertical, competitors: competitors.length }, { orgId: auth.orgId, path: "/onboarding" });
     // NOTE: collection is NOT started here. The user reviews/edits the competitor
     // set first, then explicitly starts it (POST /api/collect/start).
     return NextResponse.json({

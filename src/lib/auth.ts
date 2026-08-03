@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { grantTrialIfNeeded } from "@/lib/credits";
+import { logEvent } from "@/lib/analytics";
 
 /** Platform super-admins (comma-separated emails in SUPERADMIN_EMAILS). */
 export function isSuperAdmin(user: { email?: string | null } | null | undefined): boolean {
@@ -77,5 +78,7 @@ export async function ensureOrgForUser(userId: string, email?: string | null): P
   if (memErr) throw new Error(`create membership: ${memErr.message}`);
 
   await grantTrialIfNeeded(org.id as string);
+  // First org for this user == a new signup (first authenticated action).
+  void logEvent("signup", {}, { orgId: org.id as string });
   return org.id as string;
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { exploreArea } from "@/lib/explore";
+import { logEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -13,5 +14,8 @@ export async function POST(req: Request) {
   const keyword = String(body.keyword ?? "").trim().slice(0, 60);
   if (area.length < 2) return NextResponse.json({ results: [], error: "Enter a zip code or city." });
   const data = await exploreArea({ area, keyword });
+  // Leading top-of-funnel signal (cookieless, first-party): someone tried the
+  // free tool. Fire-and-forget so it never delays the response.
+  void logEvent("explore_search", { keyword, area, results: data.results?.length ?? 0 }, { path: "/explore" });
   return NextResponse.json(data);
 }

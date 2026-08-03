@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api";
 import { enqueueWorkspaceCollection, nudgeWorker, requeuePausedForOrg } from "@/lib/jobs";
 import { hasCredits, getBalance } from "@/lib/credits";
+import { logEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
     }
     await requeuePausedForOrg(auth.orgId); // reactivate anything paused earlier
     const enqueued = await enqueueWorkspaceCollection(workspaceId);
+    void logEvent("collect_started", { workspaceId, enqueued }, { orgId: auth.orgId });
     // Nudge the worker so collection starts within seconds, not next cron tick.
     after(() => nudgeWorker());
     return NextResponse.json({ enqueued });
