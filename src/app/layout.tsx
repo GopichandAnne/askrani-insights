@@ -6,6 +6,7 @@ import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 import { CreditBanner } from "@/components/CreditBanner";
+import { Analytics } from "@/components/Analytics";
 import { creditsSummary } from "@/lib/credits";
 
 export const metadata: Metadata = {
@@ -52,6 +53,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body>
+        <Analytics />
         <div className="aurora-bg" aria-hidden />
 
         {user ? (

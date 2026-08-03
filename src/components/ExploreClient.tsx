@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
+import { track } from "@/components/Analytics";
 import type { MapPoint } from "@/components/MapPicker";
 import type { ExploreResponse, ExploreResult } from "@/lib/explore";
 
@@ -26,6 +27,8 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
   async function run(kw = keyword, ar = area) {
     if (ar.trim().length < 2) return;
     setLoading(true);
+    // Key top-of-funnel signal: someone tried the free tool (and what for).
+    track("explore_search", { keyword: kw, area: ar, signed_out: signedOut });
     try {
       const r = await fetch("/api/explore", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ keyword: kw, area: ar }) });
       setData(await r.json());
@@ -49,6 +52,8 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
       raw: { place_id: r.placeId, rating: r.rating, userRatingCount: r.reviews, formattedAddress: r.address, primaryType: r.category },
     };
     try { sessionStorage.setItem("ar_explore_pick", JSON.stringify(candidate)); } catch { /* ignore */ }
+    // Funnel step: explore → intent to monitor (→ signup for signed-out visitors).
+    track("monitor_intent", { business: r.name, vertical: r.vertical, signed_out: signedOut });
     window.location.href = signedOut ? "/login?next=/onboarding" : "/onboarding";
   }
 
