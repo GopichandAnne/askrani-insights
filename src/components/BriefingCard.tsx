@@ -5,8 +5,10 @@ import { RaniMark } from "@/components/RaniSpinner";
 
 /** The hero "weekly briefing" on Home — fetches the cached/generated summary and
  *  shows a friendly loading state so the page renders instantly. */
+type Link = { name: string; url: string; kind: "booking" | "website" };
+
 export function BriefingCard() {
-  const [b, setB] = useState<{ headline: string; summary: string } | null>(null);
+  const [b, setB] = useState<{ headline: string; summary: string; links?: Link[] } | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -39,6 +41,25 @@ export function BriefingCard() {
             <>
               <h2 className="mt-1 font-display text-2xl font-extrabold leading-tight tracking-tight">{b.headline}</h2>
               <p className="mt-2 max-w-3xl text-ink-soft">{b.summary}</p>
+              {b.links && b.links.length > 0 && (
+                <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-ink-faint">Go see a rival:</span>
+                  {b.links.map((l) => (
+                    <a
+                      key={l.url}
+                      href={l.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-brand-deep ring-1 ring-brand/15 transition-colors hover:bg-white hover:ring-brand/40"
+                      title={l.kind === "booking" ? `Book with ${l.name}` : `Visit ${l.name}`}
+                    >
+                      <span aria-hidden>{l.kind === "booking" ? "📅" : "🔗"}</span>
+                      {l.name}
+                      {l.kind === "booking" && <span className="text-[10px] font-semibold uppercase tracking-wide text-brand">book</span>}
+                    </a>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
-import type { WorkspaceRow } from "@/lib/workspace";
+import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
  * The at-a-glance "weekly briefing" for the Home command center — a plain-English
@@ -11,10 +11,63 @@ import type { WorkspaceRow } from "@/lib/workspace";
  * (settings.briefing) so Home stays fast and cheap.
  */
 
+export interface BriefingLink {
+  name: string;   // the competitor
+  url: string;    // where a client would book them (or their site)
+  kind: "booking" | "website";
+}
+
 export interface Briefing {
   headline: string;
   summary: string;
+  /** Competitors' real booking/website links (from our data, never invented by
+   *  the model) so the owner can go straight to a rival's booking page. */
+  links?: BriefingLink[];
   at: string;
+}
+
+// Known online-booking platforms med spas / salons use — a link on one of these
+// hosts is a real "book now" page, worth surfacing over the plain website.
+const BOOKING_HOST =
+  /vagaro|boulevard|blvd\.co|glossgenius|mindbody|squareup|square\.site|acuityscheduling|squarespace-scheduling|setmore|gettimely|timelyapp|zenoti|aestheticrecord|withcherry|gocherry|booksy|phorest|fresha|calendly|schedulicity|janeapp/i;
+
+/** Pick each competitor's best "go book them" link from our stored identities +
+ *  website. Deterministic — no LLM, so links are always real. Competitors that
+ *  appear in a recent change are prioritized (that's who the briefing calls out). */
+async function competitorLinks(ws: WorkspaceRow, priorityNames: string[]): Promise<BriefingLink[]> {
+  const svc = createServiceClient();
+  const ids = await workspaceBusinessIds(ws);
+  const compIds = ids.all.filter((id) => id !== ids.targetId);
+  if (!compIds.length) return [];
+  const [{ data: bizRows }, { data: idents }] = await Promise.all([
+    svc.from("business").select("id,canonical_name,website").in("id", compIds),
+    svc.from("external_identity").select("business_id,platform,url").in("business_id", compIds),
+  ]);
+  const identsByBiz = new Map<string, { platform: string; url: string }[]>();
+  for (const r of idents ?? []) {
+    const arr = identsByBiz.get(r.business_id as string) ?? [];
+    arr.push({ platform: r.platform as string, url: r.url as string });
+    identsByBiz.set(r.business_id as string, arr);
+  }
+  const links: BriefingLink[] = [];
+  for (const b of bizRows ?? []) {
+    const rows = identsByBiz.get(b.id as string) ?? [];
+    const booking = rows.find((r) => r.url && BOOKING_HOST.test(r.url));
+    const url = booking?.url ?? (b.website as string | undefined);
+    if (!url) continue;
+    links.push({ name: b.canonical_name as string, url, kind: booking ? "booking" : "website" });
+  }
+  // rank: mentioned-in-a-change first, then booking links, then the rest
+  const pri = new Set(priorityNames.map((n) => n.toLowerCase()));
+  links.sort((a, b) => {
+    const ap = pri.has(a.name.toLowerCase()) ? 0 : 1;
+    const bp = pri.has(b.name.toLowerCase()) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    const ab = a.kind === "booking" ? 0 : 1;
+    const bb = b.kind === "booking" ? 0 : 1;
+    return ab - bb;
+  });
+  return links.slice(0, 4);
 }
 
 const SCHEMA = {
@@ -44,6 +97,8 @@ export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
     return { headline: "Your market at a glance", summary: "Connect an AI key to get a written weekly briefing.", at };
   }
   const r = await buildWorkspaceReport(ws);
+  const changedNames = r.events.slice(0, 10).map((e) => e.business).filter(Boolean) as string[];
+  const links = await competitorLinks(ws, changedNames);
   const context = {
     you: r.pricing.find((p) => p.isTarget)?.name ?? ws.name,
     standing: {
@@ -62,9 +117,9 @@ export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
       tier: "extract",
       maxTokens: 350,
     });
-    return { headline: strip(data.headline) || "Your market at a glance", summary: strip(data.summary), at };
+    return { headline: strip(data.headline) || "Your market at a glance", summary: strip(data.summary), links, at };
   } catch {
-    return { headline: "Your market at a glance", summary: "We're still gathering enough to summarize — check back after the next scan.", at };
+    return { headline: "Your market at a glance", summary: "We're still gathering enough to summarize — check back after the next scan.", links, at };
   }
 }
 

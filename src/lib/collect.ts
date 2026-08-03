@@ -176,6 +176,10 @@ export async function collectBusiness(
     return { businessId, name: "?", ok: false, pagesFetched: 0, offersWritten: 0, reviews: 0, socialPosts: 0, sources: [], error: bErr?.message ?? "not found" };
   }
   const vertical = biz.vertical ?? "restaurant";
+  // Delivery apps (DoorDash/UberEats) only make sense for food. Med spas, salons
+  // etc. are never on them, so we skip all delivery discovery + Apify scraping for
+  // non-food verticals — that's wasted Apify compute/proxy spend otherwise.
+  const foodVertical = vertical === "restaurant" || vertical === "grocery";
   const attrs = (biz.attributes as any) ?? {};
   const geo = attrs.geo as { lat: number; lng: number } | undefined;
 
@@ -320,7 +324,7 @@ export async function collectBusiness(
   // ── 1b) INTELLIGENT DELIVERY URL discovery — search the business by name+city
   //    and let the LLM pick its DoorDash/UberEats store page, then attach it so
   //    the delivery actor pulls the full priced menu (search-by-name is flaky). ─
-  if (!attrs.delivery_resolved && hasTime() && (platformActorConfigured("doordash") || platformActorConfigured("ubereats"))) {
+  if (foodVertical && !attrs.delivery_resolved && hasTime() && (platformActorConfigured("doordash") || platformActorConfigured("ubereats"))) {
     const haveDd = (identRows ?? []).some((i: any) => i.platform === "doordash");
     const haveUe = (identRows ?? []).some((i: any) => i.platform === "ubereats");
     const wantDd = !haveDd && platformActorConfigured("doordash");
@@ -448,8 +452,9 @@ export async function collectBusiness(
   for (const platform of APIFY_PLATFORMS) {
     if (!platformActorConfigured(platform) || !wants(platform)) continue;
     if (!hasTime()) break; // out of time budget — remaining sources next scan
-    const url = identityUrl(platform);
     const isDelivery = DELIVERY.has(platform);
+    if (isDelivery && !foodVertical) continue; // no delivery apps for non-food verticals
+    const url = identityUrl(platform);
 
     let target = url ?? "";
     let searchQuery: string | undefined;

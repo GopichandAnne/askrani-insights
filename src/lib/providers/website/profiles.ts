@@ -23,6 +23,9 @@ const PLATFORMS: Array<{ platform: string; re: RegExp }> = [
   { platform: "ubereats", re: /(^|\.)ubereats\.com\// },
   { platform: "grubhub", re: /(^|\.)grubhub\.com\// },
   { platform: "yelp", re: /(^|\.)yelp\.com\/biz\// },
+  // Online-booking platforms (salons / med spas / wellness) — a link here is a
+  // real "Book now" page, more useful to surface than the plain website.
+  { platform: "booking", re: /(^|\.)(vagaro|boulevard|blvd\.co|glossgenius|mindbody(online)?|acuityscheduling|squarespace-scheduling|setmore|gettimely|timelyapp|zenoti|aestheticrecord|withcherry|gocherry|booksy|phorest|fresha|schedulicity|janeapp|book\.squareup)\.com\// },
 ];
 
 // Links that are share/intent/generic, not a business's own profile.
