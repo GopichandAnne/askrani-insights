@@ -102,19 +102,70 @@ export default async function AdminPage() {
           </p>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {[
-                ["Explore searches", analytics.totals.explore_search ?? 0],
-                ["Signups", analytics.totals.signup ?? 0],
-                ["Workspaces created", analytics.totals.workspace_created ?? 0],
-                ["Monitoring started", analytics.totals.collect_started ?? 0],
-              ].map(([label, n]) => (
-                <div key={label as string} className="card">
-                  <div className="text-2xl font-extrabold text-brand-deep">{n as number}</div>
-                  <div className="mt-1 text-xs text-ink-faint">{label as string}</div>
-                </div>
-              ))}
-            </div>
+            {(() => {
+              const explore = analytics.totals.explore_search ?? 0;
+              const signup = analytics.totals.signup ?? 0;
+              const created = analytics.totals.workspace_created ?? 0;
+              const collect = analytics.totals.collect_started ?? 0;
+              const pct = (num: number, den: number) => (den > 0 ? `${((num / den) * 100).toFixed(1)}%` : "—");
+              const steps = [
+                { label: "Explore searches", n: explore, sub: "top of funnel" },
+                { label: "Signups", n: signup, sub: `${pct(signup, explore)} of searches`, rate: true },
+                { label: "Monitoring started", n: collect, sub: `${pct(collect, signup)} of signups`, rate: true },
+              ];
+              return (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {[
+                      ["Explore searches", explore],
+                      ["Signups", signup],
+                      ["Workspaces created", created],
+                      ["Monitoring started", collect],
+                    ].map(([label, n]) => (
+                      <div key={label as string} className="card">
+                        <div className="text-2xl font-extrabold text-brand-deep">{n as number}</div>
+                        <div className="mt-1 text-xs text-ink-faint">{label as string}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* conversion funnel: explore → signup → monitoring */}
+                  <div className="mt-3 rounded-xl border border-line bg-surface p-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">Conversion</h3>
+                      <span className="text-xs text-ink-faint">
+                        Explore → signup <span className="font-semibold text-brand-deep">{pct(signup, explore)}</span>
+                        <span className="mx-1.5 text-line">·</span>
+                        overall Explore → monitoring <span className="font-semibold text-brand-deep">{pct(collect, explore)}</span>
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {steps.map((s, i) => {
+                        const width = explore > 0 ? Math.max((s.n / explore) * 100, s.n > 0 ? 4 : 0) : 0;
+                        return (
+                          <div key={s.label} className="flex items-center gap-3">
+                            <span className="w-36 shrink-0 text-xs text-ink-soft">{s.label}</span>
+                            <span className="relative h-6 flex-1 overflow-hidden rounded-md bg-surface-sunken">
+                              <span
+                                className={`block h-full rounded-md ${i === 0 ? "bg-brand-gradient" : "bg-brand/60"}`}
+                                style={{ width: `${width}%` }}
+                              />
+                            </span>
+                            <span className="w-28 shrink-0 text-right text-xs tabular-nums">
+                              <span className="font-semibold">{s.n}</span>
+                              {s.rate && <span className="ml-1 text-ink-faint">({s.sub})</span>}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] text-ink-faint">
+                      Note: Explore searches count actions, not unique visitors, so rates are directional — pair with GA4 unique-visitor counts for exact conversion.
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
             {analytics.recentSearches.length > 0 && (
               <div className="mt-3">
                 <h3 className="mb-1.5 text-sm font-semibold">What people searched (free Explore)</h3>
