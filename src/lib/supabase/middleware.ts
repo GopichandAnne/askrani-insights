@@ -13,7 +13,14 @@ export async function updateSession(request: NextRequest) {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return response;
 
+  // When Insights runs embedded in the Ask Rani host iframe (EMBED_ORIGIN set),
+  // its auth cookies are third-party, so the rotated session cookie must be
+  // SameSite=None; Secure or the browser drops it on the next request.
+  const embedded = !!process.env.EMBED_ORIGIN;
+  const embedCookie = embedded ? { sameSite: "none" as const, secure: true } : {};
+
   const supabase = createServerClient(url, anon, {
+    ...(embedded ? { cookieOptions: { sameSite: "none" as const, secure: true, path: "/" } } : {}),
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -24,7 +31,7 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options as any),
+          response.cookies.set(name, value, { ...(options as any), ...embedCookie }),
         );
       },
     },

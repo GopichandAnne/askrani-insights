@@ -14,6 +14,20 @@ const nextConfig = {
     // thumbnails/evidence we are permitted to display (see guide 13.1 copyright/media).
     remotePatterns: [{ protocol: "https", hostname: "**" }],
   },
+  // Allow the Ask Rani host to embed Insights in an iframe — but ONLY that origin
+  // (clickjacking-safe). Set EMBED_ORIGIN (e.g. https://app.askrani.ai) in the
+  // Insights project's env. When unset, the browser default (same-origin) applies
+  // and no one can frame us.
+  async headers() {
+    const embed = process.env.EMBED_ORIGIN;
+    if (!embed) return [];
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Content-Security-Policy", value: `frame-ancestors 'self' ${embed}` }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
