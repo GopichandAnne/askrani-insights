@@ -169,6 +169,12 @@ export function MarketingBar({ signedOut = true }: { signedOut?: boolean }) {
       <div className="glass-strong mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <Link href="/" aria-label="Ask Rani Insights home"><RaniWordmark /></Link>
         <div className="flex items-center gap-2">
+          <a
+            href="https://askrani.ai"
+            className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline"
+          >
+            ← Ask Rani
+          </a>
           <Link href="/onboarding" className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline">
             Try it free
           </Link>

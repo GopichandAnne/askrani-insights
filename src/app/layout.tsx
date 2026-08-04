@@ -86,7 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 </Link>
                 <span>
                   Local market intelligence · a product by{" "}
-                  <span className="font-semibold text-brand-deep">Ask Rani</span> · insights.askrani.ai
+                  <a href="https://askrani.ai" className="font-semibold text-brand-deep hover:underline">Ask Rani</a> · insights.askrani.ai
                 </span>
               </div>
             </footer>
