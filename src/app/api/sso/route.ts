@@ -35,14 +35,19 @@ export async function GET(req: Request) {
       return NextResponse.redirect(new URL("/login?sso=provision_failed", url.origin));
     }
 
-    // Cookie-writing client. SameSite=None + Secure so the session survives inside
-    // the host's iframe (third-party context).
+    // Cookie-writing client. When Insights is opened in its own tab (the default)
+    // the session is first-party, so a strict SameSite=Lax cookie is best. Only
+    // when embedded (EMBED_ORIGIN set — the host iframes us, a third-party context)
+    // do we need SameSite=None; Secure for the cookie to survive.
+    const embedded = !!process.env.EMBED_ORIGIN;
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        cookieOptions: { sameSite: "none", secure: true, path: "/" },
+        cookieOptions: embedded
+          ? { sameSite: "none", secure: true, path: "/" }
+          : { sameSite: "lax", path: "/" },
         cookies: {
           getAll: () => cookieStore.getAll(),
           setAll: (toSet: { name: string; value: string; options?: Record<string, unknown> }[]) => {
