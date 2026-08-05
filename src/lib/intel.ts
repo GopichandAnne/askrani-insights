@@ -221,7 +221,11 @@ export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
       text: `Analyze this local business and its market, then produce the edge brief.\n\nDATA (JSON):\n${JSON.stringify(context)}`,
       schema: SCHEMA,
       tier: "extract",
-      maxTokens: 4000,
+      // The full edge schema (6 moves + 5×sentiment/trends/offerings/events, all
+      // verbose) can exceed 4k output tokens on data-rich workspaces (e.g. 8
+      // restaurants w/ full delivery menus), truncating the JSON and blanking the
+      // page. 6.5k gives comfortable headroom.
+      maxTokens: 6500,
     });
     // Normalize so a truncated/partial tool output can never yield undefined
     // arrays (which would blank the page) — every field gets a safe default.
