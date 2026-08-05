@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
 import { BriefingCard } from "@/components/BriefingCard";
-import { EdgeTeaser } from "@/components/EdgeTeaser";
+import { EdgeThisWeek } from "@/components/EdgeThisWeek";
+import { DraftButton } from "@/components/DraftButton";
 import { RaniMark } from "@/components/RaniSpinner";
 import { creditsSummary, PLANS } from "@/lib/credits";
 
@@ -220,7 +221,31 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     });
   }
   items.sort((a, b) => b.when - a.when);
-  const whatsNew = items.slice(0, 12);
+  // Split "what's new" the way an owner thinks about it: their competitors vs
+  // what's happening around them (local news / openings / industry trends).
+  const AROUND = new Set(["opening", "trend", "local"]);
+  const competitorItems = items.filter((it) => !AROUND.has(it.kind)).slice(0, 8);
+  const aroundItems = items.filter((it) => AROUND.has(it.kind)).slice(0, 5);
+
+  const renderRow = (it: Item) => {
+    const m = KIND_META[it.kind] ?? KIND_META.local;
+    const inner = (
+      <>
+        <span className={`chip shrink-0 ${m.tone}`}>{m.icon} {m.label}</span>
+        <span className="min-w-0 flex-1 text-ink-soft"><span className="text-ink">{it.title}</span></span>
+        <span className="hidden shrink-0 text-[11px] text-ink-faint sm:block">{it.meta}</span>
+      </>
+    );
+    return (
+      <li key={it.key} className="flex items-center gap-2 rounded-2xl bg-white/55 p-2.5 text-sm">
+        {it.external && it.href ? (
+          <a href={it.href} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-2 hover:opacity-80">{inner}</a>
+        ) : (
+          <Link href={it.href ?? "/feed"} className="flex min-w-0 flex-1 items-center gap-2 hover:opacity-80">{inner}</Link>
+        )}
+      </li>
+    );
+  };
 
   // ── do-this-now: real recommendations, topped up with evergreen quick wins ──
   const wins = QUICK_WINS[workspace.vertical] ?? QUICK_WINS.restaurant;
@@ -272,10 +297,11 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         </div>
       </section>
 
-      {/* 1 — briefing + edge teaser */}
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2"><BriefingCard /></div>
-        <EdgeTeaser />
+      {/* 1 — This Week: the plain-English briefing + the edge synthesis, together */}
+      <div className="space-y-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-brand-deep">This week</p>
+        <BriefingCard />
+        <EdgeThisWeek />
       </div>
 
       {/* 2 — scorecard */}
@@ -305,43 +331,41 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
                 <span className={`chip ${a.tip ? "bg-surface-sunken text-ink-soft" : "bg-brand-soft text-brand"}`}>{a.tip ? "quick win" : a.category}</span>
                 <span className="text-sm font-semibold">{a.title}</span>
               </div>
-              <p className="mt-1 text-sm text-ink-soft">{a.action}</p>
+              <p className="mt-1 flex-1 text-sm text-ink-soft">{a.action}</p>
+              <DraftButton move={`${a.title}: ${a.action}`} />
             </div>
           ))}
         </div>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-5">
-        {/* 4 — what's new */}
+        {/* 4 — what's new, split into "your competitors" vs "around you" */}
         <section className="card lg:col-span-3">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🛰️</span>What&apos;s new</h2>
             <Link href="/feed" className="text-xs font-medium text-brand hover:underline">feed →</Link>
           </div>
-          {!whatsNew.length ? (
+          {!competitorItems.length && !aroundItems.length ? (
             <p className="mt-4 text-sm text-ink-faint">Nothing new yet — competitor moves, new openings and trends will show here.</p>
           ) : (
-            <ul className="mt-4 space-y-1.5">
-              {whatsNew.map((it) => {
-                const m = KIND_META[it.kind] ?? KIND_META.local;
-                const inner = (
-                  <>
-                    <span className={`chip shrink-0 ${m.tone}`}>{m.icon} {m.label}</span>
-                    <span className="min-w-0 flex-1 text-ink-soft"><span className="text-ink">{it.title}</span></span>
-                    <span className="hidden shrink-0 text-[11px] text-ink-faint sm:block">{it.meta}</span>
-                  </>
-                );
-                return (
-                  <li key={it.key} className="flex items-center gap-2 rounded-2xl bg-white/55 p-2.5 text-sm">
-                    {it.external && it.href ? (
-                      <a href={it.href} target="_blank" rel="noreferrer" className="flex min-w-0 flex-1 items-center gap-2 hover:opacity-80">{inner}</a>
-                    ) : (
-                      <Link href={it.href ?? "/feed"} className="flex min-w-0 flex-1 items-center gap-2 hover:opacity-80">{inner}</Link>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">Your competitors</p>
+                {competitorItems.length ? (
+                  <ul className="space-y-1.5">{competitorItems.map(renderRow)}</ul>
+                ) : (
+                  <p className="text-sm text-ink-faint">No competitor moves detected yet.</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">Around you</p>
+                {aroundItems.length ? (
+                  <ul className="space-y-1.5">{aroundItems.map(renderRow)}</ul>
+                ) : (
+                  <p className="text-sm text-ink-faint">No local news or openings yet.</p>
+                )}
+              </div>
+            </div>
           )}
         </section>
 
