@@ -114,9 +114,11 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const ids = await workspaceBusinessIds(workspace);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
 
-  // org credits/plan for the dashboard strip
-  const { data: wsOrg } = await supabase.from("workspace").select("organization_id").eq("id", workspace.id).maybeSingle();
+  // org credits/plan for the dashboard strip (+ cached local trends for the tease)
+  const { data: wsOrg } = await supabase.from("workspace").select("organization_id, goals").eq("id", workspace.id).maybeSingle();
   const credits = wsOrg?.organization_id ? await creditsSummary(wsOrg.organization_id as string) : null;
+  // Read the CACHED trends only (never generate here — keeps the home fast).
+  const topTrends = (((wsOrg?.goals as { localTrends?: { trends?: { topic: string; momentum: string }[] } } | null)?.localTrends?.trends) ?? []).slice(0, 3);
 
   const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
@@ -302,6 +304,18 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         <p className="text-xs font-semibold uppercase tracking-wide text-brand-deep">This week</p>
         <BriefingCard />
         <EdgeThisWeek />
+        {topTrends.length > 0 && (
+          <Link href="/around" className="card card-hover glow-hover block">
+            <div className="flex items-center gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-brand-gradient text-white shadow-brand" aria-hidden>🔥</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-brand-deep">Trending near you</div>
+                <p className="truncate text-sm text-ink-soft">{topTrends.map((t) => t.topic).join("  ·  ")}</p>
+              </div>
+              <span className="shrink-0 text-xs font-medium text-brand">See all →</span>
+            </div>
+          </Link>
+        )}
       </div>
 
       {/* 2 — scorecard */}
