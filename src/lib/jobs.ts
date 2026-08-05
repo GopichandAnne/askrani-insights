@@ -114,6 +114,27 @@ export async function nudgeWorker(): Promise<void> {
   }
 }
 
+/** Kick synthesis warm-up in its OWN function invocation (separate 300s budget).
+ *  Falls back to running inline when there's no worker URL/secret (local worker). */
+async function nudgeWarm(workspaceId: string): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  const secret = process.env.WORKER_SECRET;
+  if (!base || !secret) {
+    await warmWorkspaceSynthesis(workspaceId);
+    return;
+  }
+  try {
+    await fetch(`${base}/api/warm`, {
+      method: "POST",
+      headers: { "x-worker-secret": secret, "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // aborting our wait is expected — the warm function continues on its own
+  }
+}
+
 /** Claim and process one job. Returns processed:false when the queue is empty. */
 export async function processOneJob(): Promise<TickResult> {
   const svc = createServiceClient();
@@ -188,8 +209,11 @@ export async function processOneJob(): Promise<TickResult> {
     }
     // Warm the synthesis caches (briefing/edge/trends/news) now that collection
     // is done, so the owner's first page load is instant — not a ~40s edge wait.
+    // Kicked as a SEPARATE function invocation (via /api/warm) so it gets its own
+    // 300s budget instead of sharing this collection function's — a heavy
+    // workspace's collection would otherwise starve the warm.
     try {
-      await warmWorkspaceSynthesis(job.workspace_id);
+      await nudgeWarm(job.workspace_id);
     } catch {
       /* non-fatal — readers regenerate on demand if this didn't run */
     }
