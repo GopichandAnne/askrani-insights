@@ -249,8 +249,10 @@ export async function generateEdge(ws: WorkspaceRow, db?: RlsClient): Promise<Ed
       at,
     };
     return deepStrip(norm);
-  } catch {
-    return empty;
+  } catch (e) {
+    // TEMP DIAGNOSTIC: surface the swallowed error so we can see why warm-up
+    // edge generation fails. Revert after diagnosis.
+    return { ...empty, theEdge: `DIAG: ${(e as Error)?.name} :: ${(e as Error)?.message?.slice(0, 260)}` };
   }
 }
 
