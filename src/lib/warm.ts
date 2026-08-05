@@ -31,11 +31,13 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   // rather than caching an empty surface. Persist after each so a mid-run timeout
   // still saves what finished.
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // Edge FIRST — it's the priority (the ~40s surface) and running it before any
+  // Anthropic rate-limit budget is consumed by the others gives it the best shot.
   const steps: { key: string; run: () => Promise<any>; good: (v: any) => boolean }[] = [
-    { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
     { key: "edge", run: () => generateEdge(row, db), good: (v) => !!v?.headline && !/Collect your market|Connect an AI key/.test(v.headline) },
-    { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
+    { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
     { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
+    { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;
@@ -44,7 +46,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
         value = await run();
         if (good(value)) break; // got a real result
       } catch { /* fall through to retry */ }
-      if (attempt < 2) await sleep(5000); // transient (model overload) — back off
+      if (attempt < 2) await sleep(8000); // transient (model overload / rate limit) — back off
     }
     if (value == null) continue;
     const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
@@ -52,5 +54,6 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
       .from("workspace")
       .update({ goals: { ...((cur?.goals as object) ?? {}), [key]: value } })
       .eq("id", workspaceId);
+    await sleep(2000); // small gap between surfaces to avoid a rate-limit burst
   }
 }
