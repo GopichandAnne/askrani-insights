@@ -1,10 +1,40 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeNewsDigest, type DigestItem } from "@/lib/newsdigest";
+import { getOrMakeLocalTrends, type TrendItem } from "@/lib/trending";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30; // room for the digest LLM call on a cold cache
+export const maxDuration = 45; // room for the digest + trends LLM calls on a cold cache
+
+const MOMENTUM: Record<string, { chip: string; label: string }> = {
+  hot: { chip: "bg-coral/15 text-coral-dark", label: "🔥 Hot" },
+  rising: { chip: "bg-brand-soft text-brand", label: "📈 Rising" },
+  steady: { chip: "bg-surface-sunken text-ink-soft", label: "• Steady" },
+};
+
+function TrendCard({ t }: { t: TrendItem }) {
+  const m = MOMENTUM[t.momentum] ?? MOMENTUM.rising;
+  return (
+    <div className="rounded-2xl bg-white/55 p-3.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`chip ${m.chip}`}>{m.label}</span>
+        <span className="font-semibold">{t.topic}</span>
+      </div>
+      <p className="mt-1.5 text-sm text-ink-soft">{t.evidence}</p>
+      {t.competitors.length > 0 && (
+        <p className="mt-1 text-xs text-ink-faint">Seen at: {t.competitors.join(", ")}</p>
+      )}
+      {t.yourMove && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="flex-1 text-sm text-brand-deep"><span aria-hidden>✦</span> <span className="font-semibold">Your move:</span> {t.yourMove}</p>
+          <DraftButton move={t.yourMove} context={`Local trend: ${t.topic}`} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const KIND_META: Record<string, { icon: string; label: string }> = {
   opening: { icon: "✨", label: "New opening" },
@@ -35,8 +65,9 @@ export default async function AroundPage() {
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Around me" />;
 
   const supabase = await createClient();
-  const [digest, { data: target }] = await Promise.all([
+  const [digest, trends, { data: target }] = await Promise.all([
     getOrMakeNewsDigest(state.workspace),
+    getOrMakeLocalTrends(state.workspace),
     state.workspace.target_business_id
       ? supabase.from("business").select("attributes").eq("id", state.workspace.target_business_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -45,7 +76,7 @@ export default async function AroundPage() {
   const area = (target as { attributes?: { address?: string } } | null)?.attributes?.address;
   const local = digest.items.filter((i) => i.kind === "local" || i.kind === "opening");
   const national = digest.items.filter((i) => i.kind === "trend");
-  const nothing = !digest.summary && digest.items.length === 0;
+  const nothing = !digest.summary && digest.items.length === 0 && trends.trends.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -67,6 +98,23 @@ export default async function AroundPage() {
         </div>
       ) : (
         <>
+          {/* trending near you — from real local competitor engagement */}
+          {trends.trends.length > 0 && (
+            <section className="card">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-semibold">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🔥</span>
+                  Trending near you
+                </h2>
+                <span className="text-xs text-ink-faint">from your rivals&apos; engagement</span>
+              </div>
+              {trends.summary && <p className="mt-2 max-w-3xl text-sm text-ink-soft">{trends.summary}</p>}
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {trends.trends.map((t, i) => <TrendCard key={i} t={t} />)}
+              </div>
+            </section>
+          )}
+
           {digest.summary && (
             <section className="card">
               <h2 className="mb-1 flex items-center gap-2 font-semibold">
