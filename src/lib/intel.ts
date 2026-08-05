@@ -41,7 +41,7 @@ const SCHEMA = {
     headline: { type: "string", description: "≤12 words: the single biggest opportunity or threat right now." },
     theEdge: { type: "string", description: "2–3 sentences: where you stand vs the market and the one lever with the most upside. Plain, specific, names/numbers." },
     competitorMoves: {
-      type: "array", description: "Up to 6. What specific competitors are doing DIFFERENTLY (social campaigns, promo cadence, pricing, new products, activity level) that you are not.",
+      type: "array", description: "At most 4 — the most important. What specific competitors are doing DIFFERENTLY (social campaigns, promo cadence, pricing, new products, activity level) that you are not.",
       items: {
         type: "object", additionalProperties: false,
         properties: {
@@ -57,23 +57,23 @@ const SCHEMA = {
     sentiment: {
       type: "object", additionalProperties: false, description: "What people really think — themes mined from review & social text, not just ratings.",
       properties: {
-        loves: { type: "array", items: { type: "string" }, description: "Up to 5 things customers praise (about you if we have your reviews, else the market)." },
-        gripes: { type: "array", items: { type: "string" }, description: "Up to 5 recurring complaints/gaps to fix or exploit." },
+        loves: { type: "array", items: { type: "string" }, description: "At most 4 things customers praise (about you if we have your reviews, else the market)." },
+        gripes: { type: "array", items: { type: "string" }, description: "At most 4 recurring complaints/gaps to fix or exploit." },
         aboutYou: { type: "string", description: "1–2 sentences on how you're perceived; say if we don't have enough of YOUR reviews yet." },
         marketSummary: { type: "string", description: "1–2 sentences on what customers in this category care about most." },
       },
       required: ["loves", "gripes", "aboutYou", "marketSummary"],
     },
     trends: {
-      type: "array", description: "Up to 5 relevant industry/local trends worth acting on.",
+      type: "array", description: "At most 3 relevant industry/local trends worth acting on.",
       items: { type: "object", additionalProperties: false, properties: { trend: { type: "string" }, why: { type: "string", description: "Why it matters to you specifically." }, leverage: { type: "string" } }, required: ["trend", "why", "leverage"] },
     },
     winningOfferings: {
-      type: "array", description: "Up to 5 products/offerings/formats that are clearly working in this market (from competitor menus/offers/social).",
+      type: "array", description: "At most 3 products/offerings/formats that are clearly working in this market (from competitor menus/offers/social).",
       items: { type: "object", additionalProperties: false, properties: { offering: { type: "string" }, evidence: { type: "string", description: "What in the data shows it's working." }, leverage: { type: "string" } }, required: ["offering", "evidence", "leverage"] },
     },
     events: {
-      type: "array", description: "Up to 5 upcoming events/moments to prepare for (local happenings, openings nearby, seasonal peaks relevant to this business).",
+      type: "array", description: "At most 3 upcoming events/moments to prepare for (local happenings, openings nearby, seasonal peaks relevant to this business).",
       items: { type: "object", additionalProperties: false, properties: { title: { type: "string" }, when: { type: "string", description: "Approx timing if known, else ''." }, why: { type: "string" }, action: { type: "string" } }, required: ["title", "when", "why", "action"] },
     },
     dataThin: { type: "boolean", description: "true if there was little collected data to analyze, so recommendations are thin." },
@@ -88,6 +88,7 @@ const SYSTEM = [
   "Focus on what's DIFFERENT and ACTIONABLE: what rivals do that you don't, what customers actually say, what's demonstrably working, what's coming up.",
   "When 'topPerformingPosts' is present, use it as hard evidence of what's WORKING (highest engagement) — call out the winning post/format and tell the owner to replicate it.",
   "If a section has little support in the data, return fewer (or zero) items and set dataThin=true rather than padding. Plain English, no jargon.",
+  "Be concise — each field is a short phrase or one sentence, never a paragraph. Hard caps: at most 4 competitorMoves, 3 trends, 3 winningOfferings, 3 events, 4 loves and 4 gripes. Prioritize ruthlessly; quality over quantity.",
 ].join(" ");
 
 /** Assemble the grounded signal context the strategist reasons over. */
