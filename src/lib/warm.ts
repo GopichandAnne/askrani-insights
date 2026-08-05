@@ -25,25 +25,32 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   const db = svc as unknown as RlsClient;
 
   // Sequential, not parallel: this runs in the background worker, so reliability
-  // beats speed. Four concurrent report-builds + LLM calls contend (DB/model) and
-  // some fail; one at a time each completes cleanly. Persist after each so a
-  // mid-run function timeout still saves what finished.
-  const steps: [string, () => Promise<unknown>][] = [
-    ["briefing", () => generateBriefing(row, db)],
-    ["edge", () => generateEdge(row, db)],
-    ["localTrends", () => generateLocalTrends(row, 60, db)],
-    ["newsDigest", () => generateNewsDigest(row, db)],
+  // beats speed (parallel report-builds + LLM calls contend and some fail).
+  // Each step retries a few times — the generators catch LLM failures internally
+  // and return a fallback, so we detect that fallback via `good()` and re-run
+  // rather than caching an empty surface. Persist after each so a mid-run timeout
+  // still saves what finished.
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const steps: { key: string; run: () => Promise<any>; good: (v: any) => boolean }[] = [
+    { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
+    { key: "edge", run: () => generateEdge(row, db), good: (v) => !!v?.headline && !/Collect your market|Connect an AI key/.test(v.headline) },
+    { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || v?.empty) },
+    { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
   ];
-  for (const [key, run] of steps) {
-    try {
-      const value = await run();
-      const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
-      await svc
-        .from("workspace")
-        .update({ goals: { ...((cur?.goals as object) ?? {}), [key]: value } })
-        .eq("id", workspaceId);
-    } catch {
-      /* one failing never blocks the others; readers regenerate on demand */
+  for (const { key, run, good } of steps) {
+    let value: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        value = await run();
+        if (good(value)) break; // got a real result
+      } catch { /* fall through to retry */ }
+      if (attempt < 2) await sleep(5000); // transient (model overload) — back off
     }
+    if (value == null) continue;
+    const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
+    await svc
+      .from("workspace")
+      .update({ goals: { ...((cur?.goals as object) ?? {}), [key]: value } })
+      .eq("id", workspaceId);
   }
 }
