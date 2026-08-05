@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { WorkspaceRow, workspaceBusinessIds } from "@/lib/workspace";
 import { workspaceCostSummary, CostSummary } from "@/lib/costs";
 
@@ -68,9 +68,15 @@ export interface WorkspaceReport {
 
 const RATING_RE = /Rated\s+([\d.]+)\s*★.*?from\s+([\d,]+)\s+review/i;
 
-export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30): Promise<WorkspaceReport> {
-  const supabase = await createClient();
-  const ids = await workspaceBusinessIds(ws);
+// Optional pre-built client. Pass a service-role client to run OUTSIDE a request
+// (e.g. the collection worker warming caches) where there's no user session for
+// the RLS client. `any` because the SSR and service clients have distinct generic
+// types but identical query APIs. Defaults to the request-scoped RLS client.
+export type DbOverride = RlsClient;
+
+export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30, db?: DbOverride): Promise<WorkspaceReport> {
+  const supabase = db ?? (await createClient());
+  const ids = await workspaceBusinessIds(ws, supabase);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
 

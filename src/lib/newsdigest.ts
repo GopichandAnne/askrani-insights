@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
@@ -36,10 +36,10 @@ const SCHEMA = {
 
 const SYSTEM = "You are Ask Rani, briefing a busy local-business owner on what's happening around them. Summarize ONLY the provided articles — no outside knowledge, no invented facts. Be concrete and useful; always attribute each takeaway to its source. Plain English.";
 
-export async function generateNewsDigest(ws: WorkspaceRow): Promise<NewsDigest> {
+export async function generateNewsDigest(ws: WorkspaceRow, db?: RlsClient): Promise<NewsDigest> {
   const at = new Date().toISOString();
-  const supabase = await createClient();
-  const ids = await workspaceBusinessIds(ws);
+  const supabase = db ?? (await createClient());
+  const ids = await workspaceBusinessIds(ws, supabase);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
   const { data: news } = await supabase
     .from("content_item")

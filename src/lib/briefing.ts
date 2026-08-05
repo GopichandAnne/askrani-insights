@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
@@ -36,7 +36,7 @@ const BOOKING_HOST =
  *  appear in a recent change are prioritized (that's who the briefing calls out). */
 async function competitorLinks(ws: WorkspaceRow, priorityNames: string[]): Promise<BriefingLink[]> {
   const svc = createServiceClient();
-  const ids = await workspaceBusinessIds(ws);
+  const ids = await workspaceBusinessIds(ws, svc);
   const compIds = ids.all.filter((id) => id !== ids.targetId);
   if (!compIds.length) return [];
   const [{ data: bizRows }, { data: idents }] = await Promise.all([
@@ -91,12 +91,12 @@ function strip(s?: string): string {
   return (i >= 0 ? v.slice(0, i) : v).replace(/\s+/g, " ").trim();
 }
 
-export async function generateBriefing(ws: WorkspaceRow): Promise<Briefing> {
+export async function generateBriefing(ws: WorkspaceRow, db?: RlsClient): Promise<Briefing> {
   const at = new Date().toISOString();
   if (!isLlmConfigured()) {
     return { headline: "Your market at a glance", summary: "Connect an AI key to get a written weekly briefing.", at };
   }
-  const r = await buildWorkspaceReport(ws);
+  const r = await buildWorkspaceReport(ws, 30, db);
   const changedNames = r.events.slice(0, 10).map((e) => e.business).filter(Boolean) as string[];
   const links = await competitorLinks(ws, changedNames);
   const context = {

@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
@@ -64,10 +64,10 @@ const strip = (s?: string) => {
 const metricsOf = (m: unknown) => (Array.isArray(m) ? (m.find((x) => (x as { type?: string })?.type === "metrics") as { views?: number; likes?: number; comments?: number } | undefined) : undefined);
 const engOf = (mm?: { views?: number; likes?: number; comments?: number }) => (mm?.views || 0) + (mm?.likes || 0) * 3 + (mm?.comments || 0) * 5;
 
-export async function generateLocalTrends(ws: WorkspaceRow, days = 60): Promise<LocalTrends> {
+export async function generateLocalTrends(ws: WorkspaceRow, days = 60, db?: RlsClient): Promise<LocalTrends> {
   const at = new Date().toISOString();
-  const supabase = await createClient();
-  const ids = await workspaceBusinessIds(ws);
+  const supabase = db ?? (await createClient());
+  const ids = await workspaceBusinessIds(ws, supabase);
   const compScope = ids.competitorIds;
   if (!compScope.length) return { summary: "", trends: [], empty: true, at };
 

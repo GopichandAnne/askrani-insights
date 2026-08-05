@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { getUser, isSupabaseConfigured } from "@/lib/auth";
 
 /** Cookie that remembers which business (workspace) the user is currently viewing. */
@@ -72,12 +72,12 @@ export async function listWorkspaces(): Promise<WorkspaceRow[]> {
 }
 
 /** Business ids in a workspace: the target plus its competitor edges. */
-export async function workspaceBusinessIds(ws: WorkspaceRow): Promise<{
+export async function workspaceBusinessIds(ws: WorkspaceRow, db?: RlsClient): Promise<{
   targetId: string | null;
   competitorIds: string[];
   all: string[];
 }> {
-  const supabase = await createClient();
+  const supabase = db ?? (await createClient());
   const { data: edges } = await supabase
     .from("competitor_edge")
     .select("competitor_id")

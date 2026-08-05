@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { collectBusiness, refreshRecommendations } from "@/lib/collect";
 import { detectEventsForBusiness } from "@/lib/events";
 import { spendForCost, hasCredits } from "@/lib/credits";
+import { warmWorkspaceSynthesis } from "@/lib/warm";
 
 /** Error sentinel marking a job paused for lack of credits (re-queueable). */
 export const PAUSE_SENTINEL = "MONITORING_PAUSED_NO_CREDITS";
@@ -184,6 +185,13 @@ export async function processOneJob(): Promise<TickResult> {
       await refreshRecommendations(job.workspace_id);
     } catch {
       /* non-fatal */
+    }
+    // Warm the synthesis caches (briefing/edge/trends/news) now that collection
+    // is done, so the owner's first page load is instant — not a ~40s edge wait.
+    try {
+      await warmWorkspaceSynthesis(job.workspace_id);
+    } catch {
+      /* non-fatal — readers regenerate on demand if this didn't run */
     }
   }
 

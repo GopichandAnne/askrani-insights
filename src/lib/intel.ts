@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -92,10 +92,10 @@ const SYSTEM = [
 ].join(" ");
 
 /** Assemble the grounded signal context the strategist reasons over. */
-async function buildEdgeContext(ws: WorkspaceRow) {
-  const report = await buildWorkspaceReport(ws);
-  const supabase = await createClient();
-  const ids = await workspaceBusinessIds(ws);
+async function buildEdgeContext(ws: WorkspaceRow, db?: RlsClient) {
+  const report = await buildWorkspaceReport(ws, 30, db);
+  const supabase = db ?? (await createClient());
+  const ids = await workspaceBusinessIds(ws, supabase);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
   const youName = report.pricing.find((p) => p.isTarget)?.name ?? ws.name;
 
@@ -206,7 +206,7 @@ function deepStrip<T>(v: T): T {
   return v;
 }
 
-export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
+export async function generateEdge(ws: WorkspaceRow, db?: RlsClient): Promise<Edge> {
   const at = new Date().toISOString();
   const empty: Edge = {
     headline: "Collect your market to unlock your edge",
@@ -215,7 +215,7 @@ export async function generateEdge(ws: WorkspaceRow): Promise<Edge> {
   };
   if (!isLlmConfigured()) return { ...empty, headline: "Connect an AI key to unlock your edge", theEdge: "Add an AI key and Ask Rani will synthesize your market signals into an action plan." };
 
-  const context = await buildEdgeContext(ws);
+  const context = await buildEdgeContext(ws, db);
   try {
     const { data } = await getLlm().callStructured<Omit<Edge, "at">>({
       system: SYSTEM,

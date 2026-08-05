@@ -5,6 +5,11 @@ import { cookies } from "next/headers";
  * Server Supabase client (anon key + user session via cookies, RLS-enforced).
  * Use in server components / route handlers acting on behalf of a signed-in user.
  */
+/** The request-scoped RLS client type. Reused as an optional override param on
+ *  read helpers so the collection worker can pass a service-role client to run
+ *  outside a request (see lib/warm.ts) while keeping full query typing. */
+export type RlsClient = Awaited<ReturnType<typeof createClient>>;
+
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(
