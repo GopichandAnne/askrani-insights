@@ -34,7 +34,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   const steps: { key: string; run: () => Promise<any>; good: (v: any) => boolean }[] = [
     { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
     { key: "edge", run: () => generateEdge(row, db), good: (v) => !!v?.headline && !/Collect your market|Connect an AI key/.test(v.headline) },
-    { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || v?.empty) },
+    { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
     { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
   ];
   for (const { key, run, good } of steps) {

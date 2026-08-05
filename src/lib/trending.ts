@@ -22,7 +22,8 @@ export interface LocalTrends {
   summary: string;
   trends: TrendItem[];
   at: string;
-  empty?: boolean;
+  empty?: boolean;   // genuinely little data (few posts) — a valid terminal state
+  failed?: boolean;  // the LLM call errored — distinguishable so callers can retry
 }
 
 const SOCIAL = ["instagram", "facebook", "tiktok", "youtube"];
@@ -136,7 +137,9 @@ export async function generateLocalTrends(ws: WorkspaceRow, days = 60, db?: RlsC
     })).filter((t) => t.topic);
     return { summary: strip(data.summary), trends, at };
   } catch {
-    return { summary: "", trends: [], empty: true, at };
+    // LLM errored (e.g. transient overload) — mark failed so warm-up retries
+    // rather than caching this as a genuine "no trends" state.
+    return { summary: "", trends: [], empty: true, failed: true, at };
   }
 }
 
