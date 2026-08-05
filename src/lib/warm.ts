@@ -24,18 +24,26 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   // generic type; the read helpers accept the RLS type, so cast at this boundary.
   const db = svc as unknown as RlsClient;
 
-  const patch: Record<string, unknown> = {};
-  await Promise.allSettled([
-    generateBriefing(row, db).then((v) => { patch.briefing = v; }),
-    generateEdge(row, db).then((v) => { patch.edge = v; }),
-    generateLocalTrends(row, 60, db).then((v) => { patch.localTrends = v; }),
-    generateNewsDigest(row, db).then((v) => { patch.newsDigest = v; }),
-  ]);
-  if (!Object.keys(patch).length) return;
-
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
-  await svc
-    .from("workspace")
-    .update({ goals: { ...((cur?.goals as object) ?? {}), ...patch } })
-    .eq("id", workspaceId);
+  // Sequential, not parallel: this runs in the background worker, so reliability
+  // beats speed. Four concurrent report-builds + LLM calls contend (DB/model) and
+  // some fail; one at a time each completes cleanly. Persist after each so a
+  // mid-run function timeout still saves what finished.
+  const steps: [string, () => Promise<unknown>][] = [
+    ["briefing", () => generateBriefing(row, db)],
+    ["edge", () => generateEdge(row, db)],
+    ["localTrends", () => generateLocalTrends(row, 60, db)],
+    ["newsDigest", () => generateNewsDigest(row, db)],
+  ];
+  for (const [key, run] of steps) {
+    try {
+      const value = await run();
+      const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
+      await svc
+        .from("workspace")
+        .update({ goals: { ...((cur?.goals as object) ?? {}), [key]: value } })
+        .eq("id", workspaceId);
+    } catch {
+      /* one failing never blocks the others; readers regenerate on demand */
+    }
+  }
 }
