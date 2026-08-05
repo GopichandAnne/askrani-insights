@@ -32,7 +32,7 @@ const ICONS = {
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
 };
 const SHORT: Record<string, string> = {
-  "/": "Week", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/market": "Market", "/feed": "Feed", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
+  "/": "Week", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/market": "Market", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
   "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin",
 };
 

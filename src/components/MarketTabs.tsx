@@ -7,9 +7,9 @@ import { usePathname } from "next/navigation";
  *  three related views feel like one section under a single nav item. */
 const TABS: [string, string][] = [
   ["/market", "Overview"],
-  ["/feed", "Feed"],
-  ["/offers", "Offers & prices"],
   ["/competitors", "Competitors"],
+  ["/offers", "Offers & prices"],
+  ["/feed", "Changes"],
 ];
 
 export function MarketTabs() {
