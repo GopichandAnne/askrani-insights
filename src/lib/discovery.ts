@@ -33,6 +33,14 @@ function originOf(url?: string): string | undefined {
   }
 }
 
+/** True when a "name" is really a bare domain/URL (e.g. "desicircleusa.com",
+ *  "https://x.co") — a bad canonical_name we should replace with a display name. */
+function looksLikeDomain(name?: string | null): boolean {
+  const n = (name ?? "").trim();
+  if (!n) return false;
+  return /^https?:\/\//i.test(n) || (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(n) && !n.includes(" "));
+}
+
 function tokens(s?: string): Set<string> {
   return new Set(
     (s ?? "")
@@ -136,32 +144,33 @@ export async function upsertBusiness(
   vertical: string,
 ): Promise<string> {
   const website = originOf(cand.website);
+  const address = cand.raw?.address
+    ? Object.values(cand.raw.address).filter(Boolean).join(", ")
+    : undefined;
+  const subtype = extractSubtype(cand as any);
+  const format = extractFormat(cand as any);
 
-  let existingId: string | undefined;
+  const SEL = "id, canonical_name, attributes";
+  let existing: { id: string; canonical_name: string | null; attributes: any } | null = null;
   if (website) {
-    const { data } = await svc.from("business").select("id").eq("website", website).limit(1).maybeSingle();
-    existingId = data?.id;
+    const { data } = await svc.from("business").select(SEL).eq("website", website).limit(1).maybeSingle();
+    existing = (data as any) ?? null;
   }
-  if (!existingId) {
+  if (!existing) {
     const { data } = await svc
       .from("business")
-      .select("id")
+      .select(SEL)
       .ilike("canonical_name", cand.name)
       .eq("vertical", vertical)
       .limit(1)
       .maybeSingle();
-    existingId = data?.id;
+    existing = (data as any) ?? null;
   }
 
-  let businessId = existingId;
+  let businessId = existing?.id;
   if (!businessId) {
     // Store lat/lng in attributes (avoids PostGIS WKT-cast issues over PostgREST;
     // the geography column can be backfilled by a worker later).
-    const address = cand.raw?.address
-      ? Object.values(cand.raw.address).filter(Boolean).join(", ")
-      : undefined;
-    const subtype = extractSubtype(cand as any);
-    const format = extractFormat(cand as any);
     const { data, error } = await svc
       .from("business")
       .insert({
@@ -181,6 +190,28 @@ export async function upsertBusiness(
       .single();
     if (error) throw new Error(`business insert: ${error.message}`);
     businessId = data.id as string;
+  } else if (existing) {
+    // Backfill an EXISTING business (matched by website) with anything richer
+    // this candidate carries. upsertBusiness historically only set these on
+    // insert, so a business first created by another flow (e.g. named after its
+    // domain, or with no geo) stayed broken forever. Fill only what's missing —
+    // never overwrite a good value.
+    const attrs = (existing.attributes as any) ?? {};
+    const nextAttrs = { ...attrs };
+    let dirty = false;
+    if (cand.geo && !attrs.geo) { nextAttrs.geo = cand.geo; dirty = true; }
+    if (address && !attrs.address) { nextAttrs.address = address; dirty = true; }
+    if (subtype.length && !(attrs.subtype?.length)) { nextAttrs.subtype = subtype; dirty = true; }
+    if (format.length && !(attrs.format?.length)) { nextAttrs.format = format; dirty = true; }
+
+    const patch: Record<string, unknown> = {};
+    if (dirty) patch.attributes = nextAttrs;
+    // Replace a domain-ish stored name ("desicircleusa.com") with a real display
+    // name when this candidate has one.
+    if (looksLikeDomain(existing.canonical_name) && !looksLikeDomain(cand.name) && cand.name.trim())
+      patch.canonical_name = cand.name.trim();
+
+    if (Object.keys(patch).length) await svc.from("business").update(patch).eq("id", businessId);
   }
 
   // external identities: website + any social handles OSM/Google surfaced.
