@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { signIn, signUp, type AuthState } from "./actions";
+import { signIn, signUp, sendMagicLink, type AuthState } from "./actions";
 import { RaniMark } from "@/components/RaniSpinner";
 
 const initial: AuthState = {};
@@ -9,7 +9,11 @@ const initial: AuthState = {};
 export function LoginClient() {
   const [signInState, signInAction, signingIn] = useActionState(signIn, initial);
   const [signUpState, signUpAction, signingUp] = useActionState(signUp, initial);
-  const state = signInState.error || signInState.notice ? signInState : signUpState;
+  const [magicState, magicAction, sendingMagic] = useActionState(sendMagicLink, initial);
+  const state =
+    signInState.error || signInState.notice ? signInState :
+    magicState.error || magicState.notice ? magicState :
+    signUpState;
 
   return (
     <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center px-6 py-10">
@@ -35,13 +39,28 @@ export function LoginClient() {
               <input name="email" type="email" required placeholder="you@business.com" className="field" />
               <input name="password" type="password" required placeholder="Password" className="field" />
               <div className="flex gap-2 pt-1">
-                <button formAction={signInAction} disabled={signingIn || signingUp} className="btn btn-primary flex-1 py-3 disabled:opacity-60">
+                <button formAction={signInAction} disabled={signingIn || signingUp || sendingMagic} className="btn btn-primary flex-1 py-3 disabled:opacity-60">
                   {signingIn ? "Signing in…" : "Sign in"}
                 </button>
-                <button formAction={signUpAction} disabled={signingIn || signingUp} className="btn btn-secondary flex-1 py-3 disabled:opacity-60">
+                <button formAction={signUpAction} disabled={signingIn || signingUp || sendingMagic} className="btn btn-secondary flex-1 py-3 disabled:opacity-60">
                   {signingUp ? "Creating…" : "Create account"}
                 </button>
               </div>
+
+              {/* passwordless option — formNoValidate skips the required password field */}
+              <div className="flex items-center gap-3 pt-1">
+                <span className="h-px flex-1 bg-line" />
+                <span className="text-xs text-ink-faint">or</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+              <button
+                formAction={magicAction}
+                formNoValidate
+                disabled={signingIn || signingUp || sendingMagic}
+                className="btn btn-secondary w-full py-3 disabled:opacity-60"
+              >
+                {sendingMagic ? "Sending…" : "✉️ Email me a sign-in link (no password)"}
+              </button>
             </form>
 
             {state.error && (

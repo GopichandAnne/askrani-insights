@@ -9,6 +9,22 @@ export interface AuthState {
   notice?: string;
 }
 
+/** Passwordless sign-in: email a one-click magic link (PKCE flow → /auth/callback
+ *  exchanges the code for a session). No password needed. */
+export async function sendMagicLink(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  if (!isSupabaseConfigured()) return { error: "Supabase is not configured (set the env keys)." };
+  const email = String(formData.get("email") ?? "").trim();
+  if (!email) return { error: "Enter your email to get a sign-in link." };
+  const supabase = await createClient();
+  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://insights.askrani.ai").replace(/\/$/, "");
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: `${base}/auth/callback?next=/` },
+  });
+  if (error) return { error: error.message };
+  return { notice: `Check your inbox — we emailed a sign-in link to ${email}.` };
+}
+
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
   if (!isSupabaseConfigured()) return { error: "Supabase is not configured (set the env keys)." };
   const email = String(formData.get("email") ?? "").trim();
