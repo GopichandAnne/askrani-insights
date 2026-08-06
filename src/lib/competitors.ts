@@ -14,6 +14,9 @@ const SOCIAL = new Set(["instagram", "facebook", "tiktok", "youtube"]);
 const BOOKING_HOST =
   /vagaro|boulevard|blvd\.co|glossgenius|mindbody|squareup|square\.site|acuityscheduling|squarespace-scheduling|setmore|gettimely|timelyapp|zenoti|aestheticrecord|withcherry|gocherry|booksy|phorest|fresha|calendly|schedulicity|janeapp/i;
 
+export interface CompetitorPost { platform: string; url: string | null; caption: string; likes?: number; views?: number; comments?: number }
+export interface CompetitorChange { type: string; summary: string; at: string | null }
+
 export interface CompetitorCard {
   businessId: string;
   name: string;
@@ -22,9 +25,15 @@ export interface CompetitorCard {
   link: { url: string; kind: "booking" | "website" } | null;
   subtype: string[];
   rating: { score: number; reviewCount: number | null; source: string } | null;
-  price: { avg: number | null; items: number; vsYou: "higher" | "lower" | "similar" | null; deltaPct: number | null };
-  recentChange: { type: string; summary: string; at: string | null } | null;
-  topPost: { platform: string; url: string | null; caption: string; likes?: number; views?: number; comments?: number } | null;
+  /** every source's rating (Google, Yelp, …) — shown in the expanded detail. */
+  ratingSources: { source: string; rating: number; reviewCount: number | null }[];
+  price: { avg: number | null; min: number | null; max: number | null; items: number; vsYou: "higher" | "lower" | "similar" | null; deltaPct: number | null };
+  /** recent moves, newest first (card shows the first; the rest on expand). */
+  recentChanges: CompetitorChange[];
+  /** best-performing recent posts (card shows the first; the rest on expand). */
+  topPosts: CompetitorPost[];
+  /** a sample of what they sell + prices (menu items / services). */
+  offers: { item: string; price: number | null }[];
 }
 
 export interface CompetitorCardsResult {
@@ -64,7 +73,7 @@ export async function competitorCards(ws: WorkspaceRow): Promise<CompetitorCards
 
   if (!compIds.length) return { you, cards: [] };
 
-  const [{ data: edges }, { data: target }, { data: events }, { data: posts }, { data: idents }] =
+  const [{ data: edges }, { data: target }, { data: events }, { data: posts }, { data: idents }, { data: offerRows }] =
     await Promise.all([
       supabase
         .from("competitor_edge")
@@ -80,7 +89,7 @@ export async function competitorCards(ws: WorkspaceRow): Promise<CompetitorCards
         .eq("workspace_id", ws.id)
         .in("business_id", compIds)
         .order("time_start", { ascending: false })
-        .limit(400),
+        .limit(600),
       supabase
         .from("content_item")
         .select("business_id, platform, text, media, url, observed_at")
@@ -89,42 +98,76 @@ export async function competitorCards(ws: WorkspaceRow): Promise<CompetitorCards
         .order("observed_at", { ascending: false })
         .limit(1500),
       supabase.from("external_identity").select("business_id, platform, url").in("business_id", compIds),
+      supabase
+        .from("offer")
+        .select("business_id, entity_text, pricing, observed_at")
+        .in("business_id", compIds)
+        .order("observed_at", { ascending: false })
+        .limit(3000),
     ]);
 
   const targetGeo = (target as { attributes?: { geo?: { lat: number; lng: number } } } | null)?.attributes?.geo;
 
-  // latest change per competitor
-  const changeByBiz = new Map<string, { type: string; summary: string; at: string | null }>();
+  // recent changes per competitor (newest first, up to 6)
+  const changesByBiz = new Map<string, CompetitorChange[]>();
   for (const e of events ?? []) {
     const bid = (e as { business_id: string }).business_id;
-    if (!changeByBiz.has(bid)) {
-      changeByBiz.set(bid, {
+    const arr = changesByBiz.get(bid) ?? [];
+    if (arr.length < 6) {
+      arr.push({
         type: String((e as { event_type: string }).event_type),
         summary: (e as { summary: string }).summary ?? "",
         at: (e as { time_start: string | null }).time_start ?? null,
       });
+      changesByBiz.set(bid, arr);
     }
   }
 
-  // best-performing recent post per competitor
-  const topByBiz = new Map<string, CompetitorCard["topPost"] & { _eng: number }>();
+  // top-performing recent posts per competitor (by engagement, up to 4)
+  const postsByBiz = new Map<string, (CompetitorPost & { _eng: number })[]>();
   for (const p of posts ?? []) {
     const bid = (p as { business_id: string }).business_id;
     const mm = metricsOf((p as { media: unknown }).media);
     const score = eng(mm);
     if (score <= 0) continue;
-    const cur = topByBiz.get(bid);
-    if (!cur || score > cur._eng) {
-      topByBiz.set(bid, {
-        platform: (p as { platform: string }).platform,
-        url: (p as { url: string | null }).url ?? null,
-        caption: String((p as { text?: string }).text ?? "").replace(/\s+/g, " ").trim().slice(0, 140),
-        likes: mm?.likes,
-        views: mm?.views,
-        comments: mm?.comments,
-        _eng: score,
-      });
-    }
+    const arr = postsByBiz.get(bid) ?? [];
+    arr.push({
+      platform: (p as { platform: string }).platform,
+      url: (p as { url: string | null }).url ?? null,
+      caption: String((p as { text?: string }).text ?? "").replace(/\s+/g, " ").trim().slice(0, 160),
+      likes: mm?.likes,
+      views: mm?.views,
+      comments: mm?.comments,
+      _eng: score,
+    });
+    postsByBiz.set(bid, arr);
+  }
+  for (const [bid, arr] of postsByBiz) {
+    arr.sort((a, b) => b._eng - a._eng);
+    postsByBiz.set(bid, arr.slice(0, 4));
+  }
+
+  // a sample of what each competitor sells + prices (dedup by item, prefer priced)
+  const offersByBiz = new Map<string, { item: string; price: number | null }[]>();
+  const seenOffer = new Map<string, Set<string>>();
+  for (const o of offerRows ?? []) {
+    const bid = (o as { business_id: string }).business_id;
+    const item = String((o as { entity_text?: string }).entity_text ?? "").replace(/\s+/g, " ").trim();
+    if (!item) continue;
+    const key = item.toLowerCase();
+    const seen = seenOffer.get(bid) ?? new Set<string>();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    seenOffer.set(bid, seen);
+    const amt = Number((o as { pricing?: { amount?: number } }).pricing?.amount);
+    const arr = offersByBiz.get(bid) ?? [];
+    if (arr.length < 10) arr.push({ item, price: Number.isFinite(amt) && amt > 0 ? amt : null });
+    offersByBiz.set(bid, arr);
+  }
+  // prefer priced items first within each business's sample
+  for (const [bid, arr] of offersByBiz) {
+    arr.sort((a, b) => Number(b.price != null) - Number(a.price != null));
+    offersByBiz.set(bid, arr.slice(0, 8));
   }
 
   // best "go look" link per competitor (booking platform preferred over website)
@@ -156,8 +199,7 @@ export async function competitorCards(ws: WorkspaceRow): Promise<CompetitorCards
     const linkUrl = booking?.url ?? comp.website ?? null;
     const link = linkUrl ? { url: linkUrl, kind: (booking ? "booking" : "website") as "booking" | "website" } : null;
 
-    const top = topByBiz.get(bid);
-    const topPost = top ? { platform: top.platform, url: top.url, caption: top.caption, likes: top.likes, views: top.views, comments: top.comments } : null;
+    const topPosts = (postsByBiz.get(bid) ?? []).map(({ _eng, ...p }) => p);
 
     return {
       businessId: bid,
@@ -167,16 +209,18 @@ export async function competitorCards(ws: WorkspaceRow): Promise<CompetitorCards
       link,
       subtype: comp.attributes?.subtype ?? [],
       rating: rep?.rating != null ? { score: rep.rating, reviewCount: rep.reviewCount, source: rep.sources[0]?.source ?? "google" } : null,
-      price: { avg: price?.avgPrice ?? null, items: price?.offers ?? 0, vsYou, deltaPct },
-      recentChange: changeByBiz.get(bid) ?? null,
-      topPost,
+      ratingSources: (rep?.sources ?? []).map((s) => ({ source: s.source, rating: s.rating, reviewCount: s.reviewCount })),
+      price: { avg: price?.avgPrice ?? null, min: price?.minPrice ?? null, max: price?.maxPrice ?? null, items: price?.offers ?? 0, vsYou, deltaPct },
+      recentChanges: changesByBiz.get(bid) ?? [],
+      topPosts,
+      offers: offersByBiz.get(bid) ?? [],
     };
   });
 
   // rank: those with a recent move first, then by rating, then by name
   cards.sort((a, b) => {
-    const am = a.recentChange ? 0 : 1;
-    const bm = b.recentChange ? 0 : 1;
+    const am = a.recentChanges.length ? 0 : 1;
+    const bm = b.recentChanges.length ? 0 : 1;
     if (am !== bm) return am - bm;
     return (b.rating?.score ?? 0) - (a.rating?.score ?? 0);
   });
