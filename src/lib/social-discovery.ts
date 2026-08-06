@@ -136,8 +136,8 @@ async function pickIntelligent(
   try {
     const list = cands.map((c, i) => `${i + 1}. @${c.handle} — ${c.context || "(no description)"}`).join("\n");
     const { data } = await getLlm().callStructured<{ handle: string; confident: boolean }>({
-      system: `You verify social media accounts for local businesses. Pick the ${platform} account that belongs to the business named below, located in the given city. Only pick an account you're confident is the SAME business (name and, ideally, city must fit). If none clearly match, return an empty handle. Return the exact handle from the list, without '@'.`,
-      text: `Business: "${name}"\nCity: ${city || "(unknown)"}\n\nCandidate ${platform} accounts:\n${list}`,
+      system: `You verify the official ${platform} account for a SPECIFIC local business location. Many brands and franchises run a SEPARATE account per city/metro (e.g. "@indiabazaraustin" vs "@indiabazardfw", or a page whose bio says "Frisco, TX"). Your job: pick the account for THIS business in THIS city, and REJECT any account whose handle or description points to a DIFFERENT city/metro/region — even when the brand name matches exactly. A same-name account for another metro is WRONG, not a fallback. Only return a handle you're confident is this business at this location (name AND locality must fit). If every candidate belongs to another city, or you can't tell, return an empty handle. Return the exact handle from the list, without '@'.`,
+      text: `Business: "${name}"\nCity: ${city || "(unknown)"}\n\nCandidate ${platform} accounts (handle — page name/description):\n${list}`,
       schema: PICK_SCHEMA,
       tier: "classify",
       maxTokens: 120,

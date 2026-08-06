@@ -6,7 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 export async function POST(req: Request) {
   const auth = await requireOrg();
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const competitors = await autoDiscoverCompetitors(
       ws.workspaceId,
       { businessId: ws.businessId, name: candidate.name, geo: ws.geo, category: candidate.category, subtype: ws.subtype },
-      { radiusKm: 3, limit: 12, vertical },
+      { radiusKm: 6, limit: 12, vertical },
     );
 
     void logEvent("workspace_created", { vertical, competitors: competitors.length }, { orgId: auth.orgId, path: "/onboarding" });

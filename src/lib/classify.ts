@@ -256,6 +256,75 @@ export function subtypeSimilarity(a: string[], b: string[]): number {
   return 0;
 }
 
+// ── format / service-model ──────────────────────────────────────────────────
+// SEPARATE from cuisine: *what kind* of food business this is — a food truck, an
+// ice-cream shop, a bakery, a cafe, a bar. A truck's real rivals are trucks and
+// quick-serve; an ice-cream shop's are dessert places — not every sit-down
+// restaurant within 3km. Kept apart from cuisine so it never muddies the cuisine
+// families (an Indian truck is still "indian" for cuisine + "food_truck" here).
+const FORMAT_NAME: [RegExp, string][] = [
+  [/\b(food|taco|coffee|ice\s*cream|burger)\s*truck\b|\btaqueria\s*truck\b|\bfood\s*cart\b|\bfood\s*trailer\b/i, "food_truck"],
+  [/\b(ice\s*cream|gelato|gelateria|creamery|scoop\s*shop|frozen\s*yogurt|froyo|kulfi|paleta|soft\s*serve|snow\s*cone|shave[d]?\s*ice)\b/i, "ice_cream"],
+  [/\b(dessert|donut|doughnut|cupcake|patisserie|p[aâ]tisserie|mithai|confection|chocolatier|macaron|churro|cheesecake)\b/i, "dessert"],
+  [/\b(bakery|bakehouse|bake\s*shop|boulangerie|bagel)\b/i, "bakery"],
+  [/\b(caf[eé]|coffee|espresso|roaster|tea\s*house|chai\s*(bar|house|point)|boba|bubble\s*tea)\b/i, "cafe"],
+  [/\b(pub|brewery|brewing|brewpub|taproom|tavern|cantina|cocktail|wine\s*bar|beer\s*garden)\b/i, "bar"],
+  [/\b(buffet|all\s*you\s*can\s*eat)\b/i, "buffet"],
+  [/\b(fine\s*dining|steakhouse|steak\s*house|chophouse)\b/i, "fine_dining"],
+];
+// Google Places (New) type signals — authoritative single-word format types.
+const FORMAT_GTYPE: [RegExp, string][] = [
+  [/ice_cream/, "ice_cream"],
+  [/dessert|donut|candy_store|chocolate|confectionery/, "dessert"],
+  [/bakery|bagel/, "bakery"],
+  [/coffee_shop|\bcafe\b|tea_house|cat_cafe/, "cafe"],
+  [/\bbar\b|\bpub\b|brewery|wine_bar|beer_garden|night_club/, "bar"],
+  [/fast_food/, "fast_food"],
+  [/meal_takeaway|meal_delivery/, "quick_serve"],
+  [/buffet/, "buffet"],
+  [/fine_dining|steak_house/, "fine_dining"],
+];
+// OSM amenity / shop tag → format.
+const FORMAT_OSM_AMENITY: Record<string, string> = {
+  ice_cream: "ice_cream", cafe: "cafe", fast_food: "fast_food",
+  bar: "bar", pub: "bar", biergarten: "bar", food_truck: "food_truck",
+};
+const FORMAT_OSM_SHOP: Record<string, string> = {
+  bakery: "bakery", pastry: "dessert", confectionery: "dessert", chocolate: "dessert", coffee: "cafe",
+};
+
+/** The service-model / format tokens describing a food business (may be empty).
+ *  Signals: OSM amenity/shop, Google Places types, then the name. */
+export function extractFormat(cand: CandidateLike): string[] {
+  const found = new Set<string>();
+  const { amenity, shop, gtypes } = tagBits(cand);
+  if (amenity && FORMAT_OSM_AMENITY[amenity]) found.add(FORMAT_OSM_AMENITY[amenity]);
+  if (shop && FORMAT_OSM_SHOP[shop]) found.add(FORMAT_OSM_SHOP[shop]);
+  for (const gt of gtypes) for (const [re, key] of FORMAT_GTYPE) if (re.test(gt)) found.add(key);
+  const name = cand.name ?? "";
+  for (const [re, key] of FORMAT_NAME) if (re.test(name)) found.add(key);
+  return [...found];
+}
+
+// Broad families so near-formats still count as similar (ice cream ↔ bakery).
+const FORMAT_FAMILY: Record<string, string> = {
+  ice_cream: "sweets", dessert: "sweets", bakery: "sweets",
+  cafe: "drinks", bar: "drinks",
+  fast_food: "quick", quick_serve: "quick", food_truck: "quick",
+};
+
+/** 0..1 similarity between two format sets. 1 = same format, 0.6 = same family. */
+export function formatSimilarity(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+  const sa = new Set(a);
+  for (const x of b) if (sa.has(x)) return 1;
+  const fam = (arr: string[]) => new Set(arr.map((x) => FORMAT_FAMILY[x]).filter(Boolean) as string[]);
+  const fa = fam(a);
+  const fb = fam(b);
+  for (const x of fb) if (fa.has(x)) return 0.6;
+  return 0;
+}
+
 // Clearly non-food retail/service Google place types (and OSM shops) — used to
 // drop off-vertical hits (a clothing store, salon…) from a food search without
 // nuking generic-typed food businesses. Matches on TYPE, never the name (a
@@ -288,18 +357,40 @@ export function verticalLabel(v: Vertical | string | null | undefined): string {
   }
 }
 
-/** A category phrase to seed a Google/Places text query when discovering
- *  competitors for a vertical. Beauty needs an explicit query (OSM's category
- *  mapping only covers food); food verticals lean on OSM and pass undefined so
- *  their tuned behaviour is unchanged. Subtype sharpens the beauty query. */
-export function verticalQuery(v: Vertical | string, subtype: string[] = []): string | undefined {
-  if (v !== "salon") return undefined;
-  const s = new Set(subtype);
-  if (s.has("injectables") || s.has("laser_body") || s.has("skincare") || s.has("medspa"))
-    return "med spa aesthetics clinic";
-  if (s.has("nails")) return "nail salon";
-  if (s.has("hair")) return "hair salon";
-  if (s.has("lash_brow")) return "lash brow studio";
-  if (s.has("wellness")) return "day spa wellness";
-  return "med spa OR day spa OR beauty salon OR aesthetics";
+/** A category phrase to seed a Google Places text query when discovering
+ *  competitors for a vertical. EVERY vertical now returns a real query: food
+ *  verticals used to return undefined, which sent Google an empty textQuery so
+ *  Places returned nothing and discovery fell back to OSM/Nominatim alone (poor
+ *  recall — it missed obvious nearby rivals). Cuisine + format sharpen the query
+ *  so Places surfaces like-for-like ("indian restaurant", "ice cream shop").
+ *  OSM's nearby mode ignores this query (it uses its own category terms), so its
+ *  tuned behaviour is unchanged — this only wakes Google up for food. */
+export function verticalQuery(v: Vertical | string, subtype: string[] = [], format: string[] = []): string | undefined {
+  if (v === "salon") {
+    const s = new Set(subtype);
+    if (s.has("injectables") || s.has("laser_body") || s.has("skincare") || s.has("medspa"))
+      return "med spa aesthetics clinic";
+    if (s.has("nails")) return "nail salon";
+    if (s.has("hair")) return "hair salon";
+    if (s.has("lash_brow")) return "lash brow studio";
+    if (s.has("wellness")) return "day spa wellness";
+    return "med spa OR day spa OR beauty salon OR aesthetics";
+  }
+
+  const cuisine = subtype.find((s) => CUISINES.includes(s));
+  const cw = cuisine ? cuisine.replace(/_/g, " ") : "";
+  const clean = (q: string) => q.trim().replace(/\s+/g, " ");
+
+  if (v === "grocery") return clean(`${cw} grocery store supermarket`);
+
+  // restaurant — the format decides which kind of place to look for.
+  const f = new Set(format);
+  const base =
+    f.has("ice_cream") ? "ice cream shop" :
+    f.has("dessert") || f.has("bakery") ? "bakery dessert shop" :
+    f.has("cafe") ? "cafe coffee shop" :
+    f.has("bar") ? "bar brewery" :
+    f.has("food_truck") ? "food truck" :
+    "restaurant";
+  return clean(`${cw} ${base}`);
 }
