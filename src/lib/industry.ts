@@ -95,6 +95,17 @@ const strip = (s?: string) => {
   const j = v.search(/<\/|<(parameter|function|antml|invoke)\b/i);
   return (j >= 0 ? v.slice(0, j) : v).replace(/\s+/g, " ").trim();
 };
+// Scraped Instagram captions carry lone/unpaired UTF-16 surrogates (broken
+// emoji) that serialize to INVALID JSON in the LLM request body (Anthropic 400
+// "no low surrogate in string"). toWellFormed() replaces them with U+FFFD;
+// fall back to a regex strip on older runtimes.
+const sanitize = (s?: string): string => {
+  const v = String(s ?? "");
+  const tw = (v as unknown as { toWellFormed?: () => string }).toWellFormed;
+  return typeof tw === "function"
+    ? tw.call(v)
+    : v.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/g, "");
+};
 
 const SCHEMA = {
   type: "object", additionalProperties: false,
@@ -145,7 +156,7 @@ export async function generateIndustryBest(ws: WorkspaceRow, _db?: RlsClient): P
   const wsSub: string[] = ((ws as any).subtype as string[]) ?? [];
   const match = (r: any) => (wsSub.length ? (Array.isArray(r.subtype) && r.subtype.some((s: string) => wsSub.includes(s)) ? 0 : 1) : 0);
   const ranked = rows
-    .map((r) => ({ authorHandle: r.author_handle ?? undefined, url: r.url ?? undefined, caption: String(r.caption ?? "").replace(/\s+/g, " ").trim(), likes: r.likes ?? undefined, comments: r.comments ?? undefined, views: r.views ?? undefined, eng: Number(r.eng ?? 0), _m: match(r) }))
+    .map((r) => ({ authorHandle: sanitize(r.author_handle) || undefined, url: r.url ?? undefined, caption: sanitize(r.caption).replace(/\s+/g, " ").trim(), likes: r.likes ?? undefined, comments: r.comments ?? undefined, views: r.views ?? undefined, eng: Number(r.eng ?? 0), _m: match(r) }))
     .filter((r) => r.caption.length > 6)
     .sort((a, b) => a._m - b._m || b.eng - a.eng)
     .slice(0, 24);
@@ -156,7 +167,7 @@ export async function generateIndustryBest(ws: WorkspaceRow, _db?: RlsClient): P
   try {
     const { data } = await getLlm().callStructured<{ summary: string; best: { index: number; format: string; whyItWorks: string; yourVersion: string }[] }>({
       system: SYSTEM,
-      text: `Business: "${ws.name}" (vertical: ${ws.vertical}${wsSub.length ? `, ${wsSub.join("/")}` : ""}).\n\nTOP NATIONAL INDUSTRY POSTS BY ENGAGEMENT:\n${list}\n\nPick the best formats to borrow.`,
+      text: sanitize(`Business: "${ws.name}" (vertical: ${ws.vertical}${wsSub.length ? `, ${wsSub.join("/")}` : ""}).\n\nTOP NATIONAL INDUSTRY POSTS BY ENGAGEMENT:\n${list}\n\nPick the best formats to borrow.`),
       schema: SCHEMA, tier: "extract", maxTokens: 1800,
     });
     const best: IndustryBestPost[] = (data.best ?? [])
@@ -168,7 +179,8 @@ export async function generateIndustryBest(ws: WorkspaceRow, _db?: RlsClient): P
       .filter((b): b is IndustryBestPost => !!b && !!b.yourVersion)
       .slice(0, 8);
     return { summary: strip(data.summary), best, corpusSize: rows.length, at };
-  } catch {
+  } catch (e) {
+    if (process.env.INDUSTRY_DEBUG) console.error("generateIndustryBest error:", (e as Error).message);
     return empty(at, true);
   }
 }
