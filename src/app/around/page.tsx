@@ -23,6 +23,9 @@ function TrendCard({ t }: { t: TrendItem }) {
         <span className="font-semibold">{t.topic}</span>
       </div>
       <p className="mt-1.5 text-sm text-ink-soft">{t.evidence}</p>
+      {t.window && (
+        <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-brand-deep"><span aria-hidden>⏱️</span>{t.window}</p>
+      )}
       {t.competitors.length > 0 && (
         <p className="mt-1 text-xs text-ink-faint">Seen at: {t.competitors.join(", ")}</p>
       )}
@@ -109,9 +112,26 @@ export default async function AroundPage() {
                 <span className="text-xs text-ink-faint">from your rivals&apos; engagement</span>
               </div>
               {trends.summary && <p className="mt-2 max-w-3xl text-sm text-ink-soft">{trends.summary}</p>}
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {trends.trends.map((t, i) => <TrendCard key={i} t={t} />)}
-              </div>
+              {(() => {
+                const coming = trends.trends.filter((t) => t.tense === "coming");
+                const now = trends.trends.filter((t) => t.tense !== "coming");
+                return (
+                  <div className="mt-4 space-y-4">
+                    {now.length > 0 && (
+                      <div>
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-coral-dark"><span aria-hidden>🔥</span>Happening now — act</p>
+                        <div className="grid gap-3 md:grid-cols-2">{now.map((t, i) => <TrendCard key={i} t={t} />)}</div>
+                      </div>
+                    )}
+                    {coming.length > 0 && (
+                      <div>
+                        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand"><span aria-hidden>🔜</span>Coming — get ahead</p>
+                        <div className="grid gap-3 md:grid-cols-2">{coming.map((t, i) => <TrendCard key={i} t={t} />)}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
           )}
 

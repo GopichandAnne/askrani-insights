@@ -14,6 +14,10 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 export interface TrendItem {
   topic: string;
   momentum: "hot" | "rising" | "steady";
+  /** time-horizon: "coming" = emerging/building (get ahead), "now" = peaking (act). */
+  tense: "coming" | "now";
+  /** the owner's window to act — timing + urgency in plain words. */
+  window: string;
   evidence: string;
   competitors: string[];
   yourMove: string;
@@ -29,11 +33,18 @@ export interface LocalTrends {
 const SOCIAL = ["instagram", "facebook", "tiktok", "youtube"];
 const NEW_TYPES = /new_dish|new_item|new_product|new_treatment|promo|sale|combo|special/i;
 
+// The owner's "window to act", derived from the trend's momentum (kept out of the
+// LLM schema — asking the model for it made it drop the trends array entirely).
+const WINDOW_BY_MOMENTUM: Record<TrendItem["momentum"], string> = {
+  hot: "Act this week — it's peaking now",
+  rising: "Next few weeks — get in before rivals pile on",
+  steady: "Ongoing — a staple worth leaning on",
+};
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    summary: { type: "string", description: "1–2 plain sentences: what's catching on in this local category right now." },
     trends: {
       type: "array",
       description: "3–6 concrete, category-level trends gaining traction LOCALLY — specific dishes/services/products/formats/themes, not generic advice. Fewer is better than inventing.",
@@ -42,7 +53,7 @@ const SCHEMA = {
         additionalProperties: false,
         properties: {
           topic: { type: "string", description: "The trend, concrete + plain (e.g. 'Birria tacos', 'Weekend brunch reels', 'Lip filler day promos')." },
-          momentum: { type: "string", enum: ["hot", "rising", "steady"], description: "hot = big engagement now; rising = building; steady = consistently popular." },
+          momentum: { type: "string", enum: ["hot", "rising", "steady"], description: "hot = big engagement now (peaking); rising = building/emerging; steady = consistently popular." },
           evidence: { type: "string", description: "Why it's trending, grounded in the data — which rivals, engagement numbers, recency. No invented figures." },
           competitors: { type: "array", items: { type: "string" }, description: "Rival names driving it (from the data)." },
           yourMove: { type: "string", description: "One concrete thing THIS owner could do about it this week." },
@@ -50,12 +61,13 @@ const SCHEMA = {
         required: ["topic", "momentum", "evidence", "competitors", "yourMove"],
       },
     },
+    summary: { type: "string", description: "OPTIONAL — one short sentence; only after the trends array." },
   },
-  required: ["summary", "trends"],
+  required: ["trends"],
 };
 
 const SYSTEM =
-  "You are Ask Rani, spotting what's trending in a local business category RIGHT NOW — strictly from the provided local competitor social posts (with engagement numbers) and their recent new items/promos. Identify concrete, category-level trends gaining traction locally: specific dishes, services, products, formats or themes. NOT generic marketing advice. Ground every trend in the evidence (which rivals, engagement, recency) and never invent numbers. Plain English. If the evidence is thin, return fewer trends.";
+  "You are Ask Rani, spotting what's trending in a local business category RIGHT NOW — strictly from the provided local competitor social posts (with engagement numbers) and their recent new items/promos. Identify concrete, category-level trends gaining traction locally: specific dishes, services, products, formats or themes. NOT generic marketing advice. Set `momentum` honestly: 'rising' for something emerging/early (a rival or two, building), 'hot' for something already peaking (several rivals, high engagement), 'steady' for an established staple. Ground every trend in the evidence (which rivals, engagement, recency) and never invent numbers. Plain English. If the evidence is thin, return fewer trends.";
 
 const strip = (s?: string) => {
   const v = String(s ?? "");
@@ -120,27 +132,42 @@ export async function generateLocalTrends(ws: WorkspaceRow, days = 60, db?: RlsC
   if (rankedPosts.length < 3 && recentMoves.length < 3) return { summary: "", trends: [], empty: true, at };
   if (!isLlmConfigured()) return { summary: "", trends: [], empty: true, at };
 
-  try {
-    const { data } = await getLlm().callStructured<{ summary: string; trends: TrendItem[] }>({
-      system: SYSTEM,
-      text: `Business: "${ws.name}" (vertical: ${ws.vertical}). Spot what's trending locally.\n\nTOP LOCAL COMPETITOR POSTS BY ENGAGEMENT (JSON):\n${JSON.stringify(rankedPosts)}\n\nRECENT COMPETITOR NEW ITEMS / PROMOS (JSON):\n${JSON.stringify(recentMoves)}`,
-      schema: SCHEMA,
-      tier: "extract",
-      maxTokens: 1300,
-    });
-    const trends = (data.trends ?? []).slice(0, 6).map((t) => ({
-      topic: strip(t.topic),
-      momentum: (["hot", "rising", "steady"].includes(t.momentum) ? t.momentum : "rising") as TrendItem["momentum"],
-      evidence: strip(t.evidence),
-      competitors: Array.isArray(t.competitors) ? t.competitors.map(strip).filter(Boolean).slice(0, 5) : [],
-      yourMove: strip(t.yourMove),
-    })).filter((t) => t.topic);
-    return { summary: strip(data.summary), trends, at };
-  } catch {
-    // LLM errored (e.g. transient overload) — mark failed so warm-up retries
-    // rather than caching this as a genuine "no trends" state.
-    return { summary: "", trends: [], empty: true, failed: true, at };
+  const prompt = `Business: "${ws.name}" (vertical: ${ws.vertical}). Spot what's trending locally.\n\nTOP LOCAL COMPETITOR POSTS BY ENGAGEMENT (JSON):\n${JSON.stringify(rankedPosts)}\n\nRECENT COMPETITOR NEW ITEMS / PROMOS (JSON):\n${JSON.stringify(recentMoves)}`;
+  // Big structured calls occasionally bleed the array as a JSON string under the
+  // field (or the whole object) — recover, then retry a couple times.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { data } = await getLlm().callStructured<{ summary: string; trends: TrendItem[] | string }>({
+        system: SYSTEM, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 1300,
+      });
+      let rows: any[] = Array.isArray(data.trends) ? data.trends : [];
+      let summaryStr = strip(data.summary);
+      if (!rows.length && typeof data.trends === "string") {
+        try { const p = JSON.parse(data.trends); if (Array.isArray(p?.trends)) { rows = p.trends; summaryStr = summaryStr || strip(p.summary); } else if (Array.isArray(p)) rows = p; } catch { /* not JSON */ }
+      }
+      const trends = rows.slice(0, 6).map((t) => {
+        const momentum = (["hot", "rising", "steady"].includes(t.momentum) ? t.momentum : "rising") as TrendItem["momentum"];
+        return {
+          topic: strip(t.topic),
+          momentum,
+          // three-tense framing derived from the (reliable) momentum signal:
+          // rising = emerging → "coming" (get ahead); hot/steady = "now" (act).
+          tense: (momentum === "rising" ? "coming" : "now") as TrendItem["tense"],
+          window: WINDOW_BY_MOMENTUM[momentum],
+          evidence: strip(t.evidence),
+          competitors: Array.isArray(t.competitors) ? t.competitors.map(strip).filter(Boolean).slice(0, 5) : [],
+          yourMove: strip(t.yourMove),
+        };
+      }).filter((t) => t.topic);
+      if (trends.length) {
+        if (!summaryStr) summaryStr = `${trends.slice(0, 3).map((t) => t.topic).join(" · ")} are catching on locally right now.`;
+        return { summary: summaryStr, trends, at };
+      }
+    } catch { /* transient — retry */ }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 4000));
   }
+  // Couldn't get real trends — mark failed so warm-up retries rather than caching empty.
+  return { summary: "", trends: [], empty: true, failed: true, at };
 }
 
 /** Cached local trends (regenerated when older than maxAgeHours). */
