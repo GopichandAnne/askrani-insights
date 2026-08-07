@@ -4,6 +4,7 @@ import { generateEdge } from "@/lib/intel";
 import { generateBriefing } from "@/lib/briefing";
 import { generateLocalTrends } from "@/lib/trending";
 import { generateNewsDigest } from "@/lib/newsdigest";
+import { generateYou, youIsGood } from "@/lib/you";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -35,6 +36,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   // Anthropic rate-limit budget is consumed by the others gives it the best shot.
   const steps: { key: string; run: () => Promise<any>; good: (v: any) => boolean }[] = [
     { key: "edge", run: () => generateEdge(row, db), good: (v) => !!v?.headline && !/Collect your market|Connect an AI key/.test(v.headline) },
+    { key: "you", run: () => generateYou(row, db), good: (v) => youIsGood(v) },
     { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
     { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
     { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
