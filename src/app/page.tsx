@@ -109,6 +109,25 @@ const QUICK_WINS: Record<string, { category: string; title: string; action: stri
   ],
 };
 
+const HEALTH_TEASE: Record<string, { icon: string; label: string }> = {
+  strong: { icon: "💪", label: "Strong" }, watch: { icon: "👀", label: "Worth watching" }, at_risk: { icon: "⚠️", label: "Needs attention" },
+};
+
+/** A compact "peek" card that links to one of the deeper surfaces. */
+function Tease({ href, icon, eyebrow, text }: { href: string; icon: string; eyebrow: string; text: string }) {
+  return (
+    <Link href={href} className="card card-hover glow-hover block">
+      <div className="flex items-start gap-2.5">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand" aria-hidden>{icon}</span>
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-brand-deep">{eyebrow}</div>
+          <p className="mt-0.5 line-clamp-2 text-sm text-ink-soft">{text}</p>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const supabase = await createClient();
   const ids = await workspaceBusinessIds(workspace);
@@ -117,8 +136,14 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   // org credits/plan for the dashboard strip (+ cached local trends for the tease)
   const { data: wsOrg } = await supabase.from("workspace").select("organization_id, goals").eq("id", workspace.id).maybeSingle();
   const credits = wsOrg?.organization_id ? await creditsSummary(wsOrg.organization_id as string) : null;
-  // Read the CACHED trends only (never generate here — keeps the home fast).
-  const topTrends = (((wsOrg?.goals as { localTrends?: { trends?: { topic: string; momentum: string }[] } } | null)?.localTrends?.trends) ?? []).slice(0, 3);
+  // Read the CACHED syntheses only (never generate here — keeps the home fast).
+  const goals = (wsOrg?.goals as Record<string, any> | null) ?? {};
+  const topTrends = ((goals.localTrends?.trends as { topic: string; momentum: string }[] | undefined) ?? []).slice(0, 3);
+  const youSyn = goals.you?.synthesis as { health?: string; headline?: string } | undefined;
+  const winList = (goals.winning?.winning as { name: string; onYourMenu: boolean; signal?: string }[] | undefined) ?? [];
+  const topGap = winList.find((w) => !w.onYourMenu) ?? winList[0];
+  const topSwipe = goals.content?.swipe?.[0] as { format?: string; yourVersion?: string } | undefined;
+  const industryBest = goals.industryBest?.best?.[0] as { format?: string; yourVersion?: string } | undefined;
 
   const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
@@ -315,6 +340,36 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
               <span className="shrink-0 text-xs font-medium text-brand">See all →</span>
             </div>
           </Link>
+        )}
+
+        {/* peeks into the deeper lenses — from cached syntheses (no generation) */}
+        {(youSyn?.headline || topGap || topSwipe?.format || industryBest?.format) && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {youSyn?.headline && (
+              <Tease
+                href="/you"
+                icon={HEALTH_TEASE[youSyn.health ?? "watch"]?.icon ?? "🙂"}
+                eyebrow={`How you're doing${youSyn.health ? ` · ${HEALTH_TEASE[youSyn.health]?.label ?? ""}` : ""}`}
+                text={youSyn.headline}
+              />
+            )}
+            {topGap && (
+              <Tease
+                href="/winning"
+                icon="🏆"
+                eyebrow={topGap.onYourMenu ? "What's winning · yours" : "What's winning · gap to grab"}
+                text={topGap.signal ? `${topGap.name} — ${topGap.signal}` : topGap.name}
+              />
+            )}
+            {(topSwipe?.format || industryBest?.format) && (
+              <Tease
+                href="/content"
+                icon={topSwipe?.format ? "🎬" : "🌎"}
+                eyebrow={topSwipe?.format ? "Content idea" : "Trending in your industry"}
+                text={(topSwipe?.yourVersion || topSwipe?.format || industryBest?.yourVersion || industryBest?.format) as string}
+              />
+            )}
+          </div>
         )}
       </div>
 
