@@ -282,3 +282,68 @@ export async function collectApifyPlatform(
 }
 
 export const APIFY_PLATFORMS = Object.keys(CONFIG);
+
+// ── Hashtag discovery (the national industry corpus) ────────────────────────
+// Scrapes the TOP posts under a category hashtag so the best content + accounts
+// EMERGE from engagement (discovery-first), rather than a hand-curated account
+// list. Dormant unless APIFY_TOKEN is set; the Actor id is env-overridable.
+export interface IndustryPost {
+  externalRef: string; url?: string; authorHandle?: string; caption: string;
+  likes?: number; comments?: number; views?: number; publishedAt?: string;
+}
+export function hashtagActorConfigured(): boolean {
+  return !!process.env.APIFY_TOKEN;
+}
+
+export async function collectApifyHashtag(
+  tag: string,
+  opts: { limit?: number; maxMs?: number } = {},
+): Promise<{ items: IndustryPost[]; costUsd: number }> {
+  const empty = { items: [] as IndustryPost[], costUsd: 0 };
+  const token = process.env.APIFY_TOKEN;
+  if (!token) return empty;
+  const actor = process.env.APIFY_INSTAGRAM_HASHTAG_ACTOR ?? "apify~instagram-hashtag-scraper";
+  const clean = tag.replace(/^#/, "").trim();
+  if (!clean) return empty;
+  const maxMs = opts.maxMs ?? 90000;
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+
+  try {
+    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hashtags: [clean], resultsType: "posts", resultsLimit: opts.limit ?? 30 }),
+    });
+    if (!runRes.ok) return empty;
+    const runId = ((await runRes.json()) as any).data?.id;
+    if (!runId) return empty;
+
+    const deadline = Date.now() + maxMs;
+    let datasetId: string | undefined;
+    let costUsd = 0;
+    while (Date.now() < deadline) {
+      const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
+      costUsd = st.data?.usageTotalUsd ?? costUsd;
+      const s = st.data?.status;
+      if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!datasetId) return { items: [], costUsd };
+
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`).then((r) => r.json())) as any[];
+    const items: IndustryPost[] = (raw ?? []).map((it) => ({
+      externalRef: String(it.id ?? it.shortCode ?? it.url ?? it.postUrl ?? Math.random()),
+      url: it.url ?? it.postUrl ?? it.webVideoUrl,
+      authorHandle: it.ownerUsername ?? it.username ?? it.ownerFullName,
+      caption: String(it.caption ?? it.text ?? it.title ?? "").replace(/\s+/g, " ").trim(),
+      likes: num(it.likesCount ?? it.likeCount),
+      comments: num(it.commentsCount ?? it.commentCount),
+      views: num(it.videoViewCount ?? it.videoPlayCount ?? it.viewCount),
+      publishedAt: it.timestamp ?? it.createTimeISO ?? it.date,
+    })).filter((p) => p.caption.length > 0 || p.url);
+    return { items, costUsd };
+  } catch {
+    return empty;
+  }
+}

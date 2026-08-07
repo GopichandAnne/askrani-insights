@@ -2,6 +2,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
+import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the content LLM read on a cold cache
@@ -51,12 +52,40 @@ function Collab({ c }: { c: CollabItem }) {
   );
 }
 
+function IndustrySwipe({ p }: { p: IndustryBestPost }) {
+  return (
+    <div className="card flex flex-col gap-2.5">
+      <div className="flex items-center justify-between gap-2 text-xs text-ink-faint">
+        <span className="flex items-center gap-1.5"><span aria-hidden>🌎</span>@{p.authorHandle ?? "creator"}</span>
+        <span className="flex items-center gap-2">
+          {num(p.views) && <span>👁 {num(p.views)}</span>}
+          {num(p.likes) && <span>❤ {num(p.likes)}</span>}
+          {num(p.comments) && <span>💬 {num(p.comments)}</span>}
+        </span>
+      </div>
+      <span className="chip w-fit bg-brand-soft text-brand">{p.format}</span>
+      <p className="line-clamp-2 text-sm text-ink-soft">{p.caption || "(no caption)"}</p>
+      <p className="text-xs text-ink-faint"><span className="font-medium text-ink-soft">Why it works:</span> {p.whyItWorks}</p>
+      <div className="mt-auto rounded-2xl bg-brand-soft/50 p-2.5">
+        <p className="text-sm text-brand-deep"><span className="font-semibold">Your version:</span> {p.yourVersion}</p>
+        <div className="mt-2 flex items-center gap-2">
+          <DraftButton move={p.yourVersion} context={`National industry format: ${p.format}`} />
+          {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">See the original ↗</a>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
 
-  const c = await getOrMakeContent(state.workspace);
-  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0;
+  const [c, industry] = await Promise.all([
+    getOrMakeContent(state.workspace),
+    getOrMakeIndustryBest(state.workspace),
+  ]);
+  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -95,6 +124,22 @@ export default async function ContentPage() {
               </h2>
               <div className="grid items-start gap-4 md:grid-cols-2">
                 {c.swipe.map((p, i) => <Swipe key={i} p={p} />)}
+              </div>
+            </section>
+          )}
+
+          {industry.best.length > 0 && (
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-semibold">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🌎</span>
+                  Winning in your industry — nationally
+                </h2>
+                <span className="text-xs text-ink-faint">from top hashtag content, not a follow list</span>
+              </div>
+              {industry.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{industry.summary}</p>}
+              <div className="grid items-start gap-4 md:grid-cols-2">
+                {industry.best.map((p, i) => <IndustrySwipe key={i} p={p} />)}
               </div>
             </section>
           )}
