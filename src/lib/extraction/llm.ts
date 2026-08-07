@@ -41,6 +41,21 @@ export interface LlmClient {
   streamText(call: StreamCall): AsyncIterable<string>;
 }
 
+// Scraped/user text (esp. Instagram captions) can contain lone/unpaired UTF-16
+// surrogates — broken emoji — that serialize to INVALID JSON in a provider
+// request body (Anthropic 400 "no low surrogate in string"), blanking the whole
+// call. Normalize outgoing prompt strings to well-formed UTF-16 centrally so
+// every caller (briefing, edge, you, content, winning, industry, trending…) is
+// protected without per-call sanitizing. toWellFormed() replaces lone surrogates
+// with U+FFFD; regex fallback strips them on older runtimes.
+export function wellFormed(s: string): string {
+  const v = String(s ?? "");
+  const tw = (v as unknown as { toWellFormed?: () => string }).toWellFormed;
+  return typeof tw === "function"
+    ? tw.call(v)
+    : v.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+
 const MODELS = {
   anthropic: {
     classify: process.env.LLM_CLASSIFY_MODEL ?? "claude-haiku-4-5-20251001",
@@ -62,7 +77,7 @@ class AnthropicClient implements LlmClient {
 
   async callStructured<T>(call: StructuredCall) {
     const model = this.modelFor(call.tier ?? "extract");
-    const content: Anthropic.MessageParam["content"] = [{ type: "text", text: call.text }];
+    const content: Anthropic.MessageParam["content"] = [{ type: "text", text: wellFormed(call.text) }];
     for (const img of call.images ?? []) {
       if (img.url) {
         content.push({ type: "image", source: { type: "url", url: img.url } } as any);
@@ -89,7 +104,7 @@ class AnthropicClient implements LlmClient {
     const res = await this.client.messages.create({
       model,
       max_tokens: call.maxTokens ?? 2000,
-      system: call.system,
+      system: wellFormed(call.system),
       tools: [
         {
           name: "emit_result",
@@ -113,8 +128,8 @@ class AnthropicClient implements LlmClient {
     const stream = await this.client.messages.create({
       model,
       max_tokens: call.maxTokens ?? 600,
-      system: call.system,
-      messages: [{ role: "user", content: [{ type: "text", text: call.text }] }],
+      system: wellFormed(call.system),
+      messages: [{ role: "user", content: [{ type: "text", text: wellFormed(call.text) }] }],
       stream: true,
     });
     for await (const ev of stream) {
@@ -132,7 +147,7 @@ class OpenAiClient implements LlmClient {
   }
   async callStructured<T>(call: StructuredCall) {
     const model = this.modelFor(call.tier ?? "extract");
-    const userContent: any[] = [{ type: "text", text: call.text }];
+    const userContent: any[] = [{ type: "text", text: wellFormed(call.text) }];
     for (const img of call.images ?? []) {
       if (img.url) userContent.push({ type: "image_url", image_url: { url: img.url } });
       else if (img.base64)
@@ -150,7 +165,7 @@ class OpenAiClient implements LlmClient {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: call.system },
+          { role: "system", content: wellFormed(call.system) },
           { role: "user", content: userContent },
         ],
         response_format: {
@@ -173,8 +188,8 @@ class OpenAiClient implements LlmClient {
         model,
         max_tokens: call.maxTokens ?? 600,
         messages: [
-          { role: "system", content: call.system },
-          { role: "user", content: call.text },
+          { role: "system", content: wellFormed(call.system) },
+          { role: "user", content: wellFormed(call.text) },
         ],
         stream: true,
       }),
