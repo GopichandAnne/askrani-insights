@@ -13,6 +13,12 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 const RATING_RE = /Rated\s+([\d.]+)\s*★.*?from\s+([\d,]+)\s+review/i;
 
+export interface ReviewVelocity {
+  reviewsAdded: number;   // new reviews since the earliest snapshot in-window
+  perWeek: number;        // reviewsAdded normalized to a weekly rate
+  windowDays: number;     // span the trend is measured over
+  ratingDelta: number | null; // rating change over the same window
+}
 export interface YouReputation {
   rating: number | null;
   reviewCount: number | null;
@@ -21,7 +27,15 @@ export interface YouReputation {
   delta: number | null;          // you − market
   rank: number | null;           // your position by rating among the market (1 = best)
   total: number;                 // businesses with a rating (you + rivals)
+  /** review velocity + rating trend from captured daily snapshots (null until we
+   *  have ≥2 snapshots spanning ≥1 day). */
+  velocity: ReviewVelocity | null;
+  /** true once we've started capturing snapshots (so the UI can say "tracking"). */
+  tracking: boolean;
 }
+
+/** One captured point in workspace.goals.repHistory (self-contained, no table). */
+interface RepPoint { d: string; source: string; rating: number | null; count: number }
 export interface YouPrice {
   avg: number | null;
   marketAvg: number | null;
@@ -124,6 +138,33 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
   const marketAvg = rivalRatings.length ? Number((rivalRatings.reduce((a, b) => a + b, 0) / rivalRatings.length).toFixed(2)) : null;
   const rated = report.reputation.filter((r) => r.rating != null).sort((a, b) => (b.rating as number) - (a.rating as number));
   const rank = youRep?.rating != null ? rated.findIndex((r) => r.isTarget) + 1 : null;
+  // ── review velocity + rating trend from captured daily snapshots ──
+  // History lives in workspace.goals.repHistory (self-contained; no extra table).
+  // We measure the primary source (most-reviewed) from the oldest snapshot we
+  // have to the current reading, then append today's point so it accrues.
+  const primarySource = youRep?.sources?.[0]?.source ?? "google";
+  const today = new Date().toISOString().slice(0, 10);
+  const curCount = youRep?.reviewCount ?? null;
+  const curRating = youRep?.rating ?? null;
+  const { data: gRow } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const history: RepPoint[] = (((gRow?.goals as any)?.repHistory as RepPoint[]) ?? []).filter(
+    (h) => h && h.source === primarySource && typeof h.count === "number" && h.d < today,
+  );
+  let velocity: ReviewVelocity | null = null;
+  if (curCount != null && history.length) {
+    const oldest = history.reduce((a, b) => (a.d <= b.d ? a : b));
+    const days = (Date.parse(today) - Date.parse(oldest.d)) / 86_400_000;
+    if (days >= 1 && curCount >= oldest.count) {
+      const reviewsAdded = curCount - oldest.count;
+      velocity = {
+        reviewsAdded,
+        perWeek: Number(((reviewsAdded / days) * 7).toFixed(1)),
+        windowDays: Math.round(days),
+        ratingDelta: curRating != null && oldest.rating != null ? Number((curRating - oldest.rating).toFixed(2)) : null,
+      };
+    }
+  }
+
   const reputation: YouReputation = {
     rating: youRep?.rating ?? null,
     reviewCount: youRep?.reviewCount ?? null,
@@ -132,7 +173,19 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
     delta: youRep?.rating != null && marketAvg != null ? Number((youRep.rating - marketAvg).toFixed(2)) : null,
     rank: rank && rank > 0 ? rank : null,
     total: rated.length,
+    velocity,
+    tracking: curCount != null,
   };
+
+  // Append today's snapshot (dedup per source+day, keep ~120 days) so the trend
+  // fills in over time. Service client — goals isn't member-writable via RLS.
+  if (curCount != null) {
+    const svc0 = createServiceClient();
+    const { data: cur0 } = await svc0.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+    const prev: RepPoint[] = (((cur0?.goals as any)?.repHistory as RepPoint[]) ?? []).filter((h) => !(h.source === primarySource && h.d === today));
+    const next = [...prev, { d: today, source: primarySource, rating: curRating, count: curCount }].slice(-120);
+    await svc0.from("workspace").update({ goals: { ...((cur0?.goals as object) ?? {}), repHistory: next } }).eq("id", ws.id);
+  }
 
   const youPrice = report.pricing.find((p) => p.isTarget)?.avgPrice ?? null;
   const rivalPrices = report.pricing.filter((p) => !p.isTarget && p.avgPrice != null).map((p) => p.avgPrice as number);

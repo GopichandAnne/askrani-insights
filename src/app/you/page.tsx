@@ -67,6 +67,21 @@ function Reputation({ r }: { r: YouReport["reputation"] }) {
           </div>
         )}
       </div>
+
+      {r.velocity ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line/60 pt-3 text-sm">
+          <span className="chip bg-trust-direct/12 text-trust-direct">📈 Review velocity</span>
+          <span className="text-ink-soft">
+            <span className="font-semibold text-brand-deep">+{r.velocity.reviewsAdded}</span> reviews in {r.velocity.windowDays} day{r.velocity.windowDays === 1 ? "" : "s"}
+            {r.velocity.perWeek > 0 && <> · ~<span className="font-medium">{r.velocity.perWeek}/wk</span></>}
+            {r.velocity.ratingDelta != null && r.velocity.ratingDelta !== 0 && (
+              <> · rating <span className={`font-medium ${r.velocity.ratingDelta > 0 ? "text-trust-direct" : "text-coral-dark"}`}>{r.velocity.ratingDelta > 0 ? "▲" : "▼"} {Math.abs(r.velocity.ratingDelta).toFixed(1)}</span></>
+            )}
+          </span>
+        </div>
+      ) : r.tracking ? (
+        <p className="mt-4 border-t border-line/60 pt-3 text-xs text-ink-faint">⏳ Tracking your review trend — it appears here once we&apos;ve captured a few days of history.</p>
+      ) : null}
     </section>
   );
 }
