@@ -2,6 +2,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
+import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // room for the fusion LLM read on a cold cache
@@ -11,6 +12,38 @@ const MOMENTUM: Record<string, { chip: string; label: string }> = {
   rising: { chip: "bg-brand-soft text-brand", label: "📈 Rising" },
   steady: { chip: "bg-surface-sunken text-ink-soft", label: "• Steady" },
 };
+
+const HEAT: Record<string, { chip: string; label: string }> = {
+  high: { chip: "bg-coral/15 text-coral-dark", label: "🔥 High demand" },
+  medium: { chip: "bg-brand-soft text-brand", label: "Demand" },
+  low: { chip: "bg-surface-sunken text-ink-soft", label: "Some demand" },
+};
+const SERVED: Record<string, { chip: string; label: string }> = {
+  no: { chip: "bg-coral/12 text-coral-dark", label: "nobody nearby offers this" },
+  few: { chip: "bg-brand-soft text-brand", label: "few nearby offer it" },
+  some: { chip: "bg-surface-sunken text-ink-faint", label: "some already offer it" },
+};
+
+function DemandRow({ d }: { d: DemandItem }) {
+  const h = HEAT[d.heat] ?? HEAT.medium;
+  const s = SERVED[d.servedLocally] ?? SERVED.few;
+  return (
+    <div className="rounded-2xl bg-white/55 p-3.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`chip ${h.chip}`}>{h.label}</span>
+        <span className="font-semibold">{d.need}</span>
+        <span className={`chip ${s.chip}`}>{s.label}</span>
+      </div>
+      <p className="mt-1.5 text-sm text-ink-soft">{d.signal}</p>
+      {d.move && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="flex-1 text-sm text-brand-deep"><span aria-hidden>✦</span> <span className="font-semibold">Your move:</span> {d.move}</p>
+          <DraftButton move={d.move} context={`Unmet demand: ${d.need}`} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Row({ w }: { w: WinningEntity }) {
   const m = MOMENTUM[w.momentum] ?? MOMENTUM.steady;
@@ -41,10 +74,13 @@ export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
 
-  const w = await getOrMakeWinning(state.workspace);
+  const [w, demand] = await Promise.all([
+    getOrMakeWinning(state.workspace),
+    getOrMakeDemand(state.workspace),
+  ]);
   const gaps = w.winning.filter((x) => !x.onYourMenu);
   const yours = w.winning.filter((x) => x.onYourMenu);
-  const nothing = !w.summary && w.winning.length === 0;
+  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -94,6 +130,19 @@ export default async function WinningPage() {
               </h2>
               <p className="mb-3 text-xs text-ink-faint">Things you already offer that are winning market-wide — lean into them.</p>
               <div className="space-y-2.5">{yours.map((x, i) => <Row key={i} w={x} />)}</div>
+            </section>
+          )}
+
+          {/* unmet demand — the demand-side complement */}
+          {demand.demands.length > 0 && (
+            <section className="card">
+              <h2 className="mb-1 flex items-center gap-2 font-semibold">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🗣️</span>
+                Unmet demand — what customers ask for
+              </h2>
+              <p className="mb-3 text-xs text-ink-faint">Wants showing up in the market&apos;s reviews that few or no nearby businesses meet.</p>
+              {demand.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{demand.summary}</p>}
+              <div className="space-y-2.5">{demand.demands.map((d, i) => <DemandRow key={i} d={d} />)}</div>
             </section>
           )}
 
