@@ -5,6 +5,7 @@ import { generateBriefing } from "@/lib/briefing";
 import { generateLocalTrends } from "@/lib/trending";
 import { generateNewsDigest } from "@/lib/newsdigest";
 import { generateYou, youIsGood } from "@/lib/you";
+import { generateContent, contentIsGood } from "@/lib/content";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -40,6 +41,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
     { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
     { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
+    { key: "content", run: () => generateContent(row, 90, db), good: (v) => contentIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;
