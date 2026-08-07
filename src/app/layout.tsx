@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { href: "/explore", label: "Explore", icon: "explore" },
   { href: "/around", label: "Around me", icon: "around" },
   { href: "/content", label: "Content", icon: "content" },
+  { href: "/winning", label: "What's winning", icon: "winning" },
   { href: "/market", label: "Market", icon: "market", match: ["/feed", "/offers", "/competitors"] },
   { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/reports", label: "Report", icon: "report" },
