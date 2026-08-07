@@ -1,0 +1,112 @@
+import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
+import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { collectApifyAdLibrary, adLibraryConfigured, type RivalAd } from "@/lib/providers/apify/platforms";
+
+/**
+ * "What rivals are paying to promote" — competitor ads from the Meta Ad Library.
+ * Meta's official API only returns political/EU ads, so US commercial ads come
+ * from scraping the Ad Library (Apify) — gated + cost-bearing, so this refreshes
+ * on demand (never on render), keyed by each competitor's Facebook page/name.
+ * The raw ads + a light LLM read (what offers/angles rivals push + your move) are
+ * cached on workspace.goals.ads. Many local businesses run NO ads → often empty.
+ */
+
+export interface AdsReport {
+  summary: string;
+  ads: RivalAd[];                              // the raw active ads (deduped)
+  patterns: { pattern: string; example?: string }[];
+  moves: string[];
+  advertisers: string[];                       // rivals found running ads
+  at: string;
+  empty?: boolean;
+}
+
+const strip = (s?: string) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
+const fbSlug = (url?: string) => {
+  if (!url) return undefined;
+  const m = /facebook\.com\/([^/?#]+)/i.exec(url);
+  const slug = m?.[1];
+  return slug && !/^(pages|profile\.php|people)$/i.test(slug) ? slug.replace(/[-.]/g, " ") : undefined;
+};
+
+const SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: {
+    summary: { type: "string", description: "ONE sentence — what your rivals are pushing in paid ads right now." },
+    patterns: {
+      type: "array", maxItems: 6, description: "The recurring angles/offers across the ads (e.g. '$99 new-client Botox', 'free consult', 'weekend BOGO'). Ground in the ads.",
+      items: { type: "object", additionalProperties: false, properties: { pattern: { type: "string" }, example: { type: "string", description: "a short real snippet from an ad" } }, required: ["pattern"] },
+    },
+    moves: { type: "array", maxItems: 4, items: { type: "string" }, description: "Concrete moves for THIS owner given what rivals are advertising (match an offer, counter-position, promote a differentiator)." },
+  },
+  required: ["summary", "patterns", "moves"],
+};
+
+const SYSTEM =
+  "You are Ask Rani. From the competitor ADS below (real Meta Ad Library ads), tell a local-business owner what rivals are paying to promote — the offers, hooks and CTAs — and what to do about it. Ground everything in the ads; never invent an offer. Plain English.";
+
+const empty = (at: string): AdsReport => ({ summary: "", ads: [], patterns: [], moves: [], advertisers: [], at, empty: true });
+
+/** Scrape each competitor's active ads, synthesize, and cache. COST-BEARING —
+ *  only called from the gated /api/ads/refresh endpoint, never on render. */
+export async function refreshCompetitorAds(
+  ws: WorkspaceRow, opts: { maxCompetitors?: number; limitPerAdvertiser?: number } = {},
+): Promise<{ activated: boolean; scraped: number; advertisers: number; costUsd: number }> {
+  if (!adLibraryConfigured()) return { activated: false, scraped: 0, advertisers: 0, costUsd: 0 };
+  const svc = createServiceClient();
+  const ids = await workspaceBusinessIds(ws, svc as unknown as RlsClient);
+  const compIds = ids.competitorIds.slice(0, opts.maxCompetitors ?? 8);
+  if (!compIds.length) return { activated: true, scraped: 0, advertisers: 0, costUsd: 0 };
+
+  const [{ data: biz }, { data: idents }] = await Promise.all([
+    svc.from("business").select("id, canonical_name").in("id", compIds),
+    svc.from("external_identity").select("business_id, platform, url").in("business_id", compIds).eq("platform", "facebook"),
+  ]);
+  const fbByBiz = new Map<string, string>();
+  for (const r of idents ?? []) if (!fbByBiz.has((r as any).business_id)) fbByBiz.set((r as any).business_id, (r as any).url);
+
+  const all: RivalAd[] = [];
+  let costUsd = 0;
+  for (const b of biz ?? []) {
+    const query = fbSlug(fbByBiz.get((b as any).id)) ?? String((b as any).canonical_name ?? "");
+    if (!query) continue;
+    const { items, costUsd: c } = await collectApifyAdLibrary(query, { limit: opts.limitPerAdvertiser ?? 15 });
+    costUsd += c;
+    for (const ad of items) all.push({ ...ad, advertiser: ad.advertiser === "A rival" ? String((b as any).canonical_name) : ad.advertiser });
+  }
+  // dedup by advertiser+text
+  const seen = new Set<string>();
+  const ads = all.filter((a) => { const k = `${a.advertiser}|${a.text.slice(0, 80)}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 40);
+  const advertisers = [...new Set(ads.map((a) => a.advertiser))];
+
+  let report: AdsReport = { summary: "", ads, patterns: [], moves: [], advertisers, at: new Date().toISOString() };
+  if (ads.length && isLlmConfigured()) {
+    const list = ads.slice(0, 24).map((a, i) => `[${i}] ${a.advertiser}${a.cta ? ` (CTA: ${a.cta})` : ""}: ${a.text.slice(0, 200)}`).join("\n");
+    try {
+      const { data } = await getLlm().callStructured<{ summary: string; patterns: { pattern: string; example?: string }[]; moves: string[] }>({
+        system: SYSTEM,
+        text: `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nCOMPETITOR ADS (Meta Ad Library):\n${list}\n\nWhat are rivals promoting, and what should the owner do?`,
+        schema: SCHEMA, tier: "extract", maxTokens: 1200,
+      });
+      report = {
+        ...report,
+        summary: strip(data.summary),
+        patterns: (data.patterns ?? []).map((p) => ({ pattern: strip(p.pattern), example: strip(p.example) || undefined })).filter((p) => p.pattern).slice(0, 6),
+        moves: (data.moves ?? []).map(strip).filter(Boolean).slice(0, 4),
+      };
+    } catch { /* keep the raw ads even if synthesis fails */ }
+  }
+  if (!ads.length) report.empty = true;
+
+  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), ads: report } }).eq("id", ws.id);
+  return { activated: true, scraped: ads.length, advertisers: advertisers.length, costUsd: Number(costUsd.toFixed(4)) };
+}
+
+/** Read the cached ads report (populated by the gated refresh; never generates). */
+export async function getAdsReport(ws: WorkspaceRow): Promise<AdsReport> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  return ((data?.goals as { ads?: AdsReport } | null)?.ads) ?? empty(new Date().toISOString());
+}

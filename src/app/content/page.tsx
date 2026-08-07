@@ -3,6 +3,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
+import { getAdsReport } from "@/lib/ads";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the content LLM read on a cold cache
@@ -81,11 +82,12 @@ export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
 
-  const [c, industry] = await Promise.all([
+  const [c, industry, ads] = await Promise.all([
     getOrMakeContent(state.workspace),
     getOrMakeIndustryBest(state.workspace),
+    getAdsReport(state.workspace),
   ]);
-  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0;
+  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -141,6 +143,42 @@ export default async function ContentPage() {
               <div className="grid items-start gap-4 md:grid-cols-2">
                 {industry.best.map((p, i) => <IndustrySwipe key={i} p={p} />)}
               </div>
+            </section>
+          )}
+
+          {ads.ads.length > 0 && (
+            <section className="card">
+              <div className="mb-1 flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-semibold">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📣</span>
+                  What rivals are paying to promote
+                </h2>
+                <span className="text-xs text-ink-faint">{ads.advertisers.length} advertiser{ads.advertisers.length === 1 ? "" : "s"} · Meta Ad Library</span>
+              </div>
+              {ads.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{ads.summary}</p>}
+              {ads.patterns.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {ads.patterns.map((p, i) => <span key={i} className="chip bg-brand-soft text-brand" title={p.example ?? ""}>{p.pattern}</span>)}
+                </div>
+              )}
+              <div className="grid items-start gap-3 md:grid-cols-2">
+                {ads.ads.slice(0, 8).map((a, i) => (
+                  <div key={i} className="rounded-2xl bg-white/55 p-3 text-sm">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs text-ink-faint">
+                      <span className="font-medium text-ink-soft">{a.advertiser}</span>
+                      {a.cta && <span className="chip bg-surface-sunken text-ink-faint">{a.cta}</span>}
+                    </div>
+                    <p className="line-clamp-3 text-ink-soft">{a.text || "(image ad)"}</p>
+                    {a.snapshotUrl && <a href={a.snapshotUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex text-xs font-medium text-brand hover:underline">See the ad ↗</a>}
+                  </div>
+                ))}
+              </div>
+              {ads.moves.length > 0 && (
+                <div className="mt-3 rounded-2xl bg-brand-soft/50 p-3">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-deep">Your moves</p>
+                  <ul className="space-y-1 text-sm text-brand-deep">{ads.moves.map((m, i) => <li key={i}>✦ {m}</li>)}</ul>
+                </div>
+              )}
             </section>
           )}
 

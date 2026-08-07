@@ -295,6 +295,74 @@ export function hashtagActorConfigured(): boolean {
   return !!process.env.APIFY_TOKEN;
 }
 
+// ── Meta Ad Library (what rivals are PAYING to promote) ─────────────────────
+// Meta's official Ad Library API only returns political/issue ads (or EU
+// commercial ads), so US commercial ads must come from scraping the Ad Library
+// site. Dormant unless APIFY_TOKEN + APIFY_AD_LIBRARY_ACTOR are set (no default —
+// Ad Library actors vary; the owner picks a working one).
+export interface RivalAd {
+  advertiser: string; text: string; cta?: string; link?: string; snapshotUrl?: string;
+  platforms?: string[]; since?: string;
+}
+export function adLibraryConfigured(): boolean {
+  return !!process.env.APIFY_TOKEN && !!process.env.APIFY_AD_LIBRARY_ACTOR;
+}
+
+export async function collectApifyAdLibrary(
+  query: string,
+  opts: { limit?: number; maxMs?: number; country?: string } = {},
+): Promise<{ items: RivalAd[]; costUsd: number }> {
+  const empty = { items: [] as RivalAd[], costUsd: 0 };
+  const token = process.env.APIFY_TOKEN;
+  const actor = process.env.APIFY_AD_LIBRARY_ACTOR;
+  if (!token || !actor || !query.trim()) return empty;
+  const country = opts.country ?? "US";
+  const searchUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
+  const maxMs = opts.maxMs ?? 90000;
+
+  try {
+    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // pass several common input shapes; actors ignore the keys they don't use
+      body: JSON.stringify({ urls: [{ url: searchUrl }], startUrls: [{ url: searchUrl }], searchTerms: [query], count: opts.limit ?? 20, activeStatus: "active", country }),
+    });
+    if (!runRes.ok) return empty;
+    const runId = ((await runRes.json()) as any).data?.id;
+    if (!runId) return empty;
+
+    const deadline = Date.now() + maxMs;
+    let datasetId: string | undefined;
+    let costUsd = 0;
+    while (Date.now() < deadline) {
+      const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
+      costUsd = st.data?.usageTotalUsd ?? costUsd;
+      const s = st.data?.status;
+      if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!datasetId) return { items: [], costUsd };
+
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`).then((r) => r.json())) as any[];
+    const pickText = (it: any) =>
+      it.ad_creative_body ?? it.adText ?? it.body ?? it.text ?? it.snapshot?.body?.text ?? it.snapshot?.body ??
+      (Array.isArray(it.ad_creative_bodies) ? it.ad_creative_bodies[0] : undefined) ?? "";
+    const items: RivalAd[] = (raw ?? []).map((it) => ({
+      advertiser: it.page_name ?? it.advertiser ?? it.pageName ?? it.snapshot?.page_name ?? "A rival",
+      text: String(pickText(it)).replace(/\s+/g, " ").trim(),
+      cta: it.cta_type ?? it.ctaText ?? it.snapshot?.cta_text ?? undefined,
+      link: it.link_url ?? it.snapshot?.link_url ?? undefined,
+      snapshotUrl: it.ad_snapshot_url ?? it.snapshotUrl ?? it.url ?? undefined,
+      platforms: it.publisher_platforms ?? it.platforms ?? undefined,
+      since: it.ad_delivery_start_time ?? it.startDate ?? it.start_date ?? undefined,
+    })).filter((a) => a.text.length > 0 || a.snapshotUrl);
+    return { items, costUsd };
+  } catch {
+    return empty;
+  }
+}
+
 export async function collectApifyHashtag(
   tag: string,
   opts: { limit?: number; maxMs?: number } = {},
