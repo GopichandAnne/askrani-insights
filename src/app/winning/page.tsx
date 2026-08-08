@@ -5,6 +5,7 @@ import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
 import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
 import { getOrMakeMenuLens, type PricePosition, type Differentiator } from "@/lib/menu";
 import { getOrMakeDeals, type DealItem } from "@/lib/deals";
+import { getFlyerDeals, type FlyerDeal } from "@/lib/flyers";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // room for the fusion LLM read on a cold cache
@@ -98,15 +99,19 @@ export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
 
-  const [w, demand, menu, deals] = await Promise.all([
+  const [w, demand, menu, deals, flyers] = await Promise.all([
     getOrMakeWinning(state.workspace),
     getOrMakeDemand(state.workspace),
     getOrMakeMenuLens(state.workspace),
     getOrMakeDeals(state.workspace),
+    getFlyerDeals(state.workspace),
   ]);
   const gaps = w.winning.filter((x) => !x.onYourMenu);
   const yours = w.winning.filter((x) => x.onYourMenu);
-  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0 && menu.pricePositions.length === 0 && menu.differentiators.length === 0 && deals.deals.length === 0;
+  // flyer deals grouped by rival for display
+  const flyersByRival = new Map<string, FlyerDeal[]>();
+  for (const d of flyers.deals) { const a = flyersByRival.get(d.rival) ?? []; a.push(d); flyersByRival.set(d.rival, a); }
+  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0 && menu.pricePositions.length === 0 && menu.differentiators.length === 0 && deals.deals.length === 0 && flyers.deals.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -181,6 +186,33 @@ export default async function WinningPage() {
               <div className="flex flex-wrap gap-2">
                 {menu.differentiators.map((d, i) => (
                   <span key={i} className="chip bg-trust-direct/12 text-trust-direct">{d.item} <span className="ml-1 font-semibold">${d.yourPrice.toFixed(0)}</span></span>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* sale flyers — vision-read prices from rivals' poster images (grocery goldmine) */}
+          {flyers.deals.length > 0 && (
+            <section className="card">
+              <h2 className="mb-1 flex items-center gap-2 font-semibold">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🧾</span>
+                From their sale flyers — real prices
+              </h2>
+              <p className="mb-3 text-xs text-ink-faint">Read straight from rivals&apos; posted sale flyers — the items they&apos;re promoting and at what price.</p>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[...flyersByRival.entries()].slice(0, 4).map(([rival, items], gi) => (
+                  <div key={gi} className="rounded-2xl bg-white/55 p-3">
+                    <p className="mb-1.5 text-sm font-semibold text-brand-deep">{rival}</p>
+                    <ul className="divide-y divide-line/50">
+                      {items.slice(0, 12).map((d, i) => (
+                        <li key={i} className="flex items-center justify-between gap-2 py-1 text-sm">
+                          <span className="min-w-0 truncate text-ink-soft">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
+                          {d.price && <span className="shrink-0 font-semibold text-coral-dark">{d.price}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                    {items[0]?.imageUrl && <a href={items[0].imageUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex text-xs font-medium text-brand hover:underline">see flyer ↗</a>}
+                  </div>
                 ))}
               </div>
             </section>
