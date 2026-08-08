@@ -1,5 +1,6 @@
 import { getProvider } from "@/lib/providers/registry";
 import { inferVertical, extractSubtype, subtypeLabel } from "@/lib/classify";
+import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
  * "Explore an area" — a no-setup market scan. Enter a zip/city + what you're
@@ -109,4 +110,102 @@ export async function exploreArea(input: { area: string; keyword?: string }): Pr
   results.sort((a, b) => score(b) - score(a));
 
   return { center: geo ?? undefined, areaLabel: geo?.label, results };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Intelligent market-read — the "one screen that sizes up the area" that turns
+ * Explore from a list into a decision tool (and the top-of-funnel hook into
+ * Monitor). Deterministic aggregates + one cheap LLM narrative that reads like a
+ * local-market analyst. Grounded strictly in the results we found — no invention.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface MarketStats {
+  count: number;
+  avgRating: number | null;
+  ratedShare: number;                                    // 0..1 with a rating
+  topRated: { name: string; rating: number | null; reviews: number | null }[];
+  mostReviewed: { name: string; reviews: number } | null;
+  subtypeMix: { label: string; count: number }[];        // top cuisine/subtypes
+  highPerformers: number;                                // ≥4.5★ with ≥50 reviews
+}
+export interface MarketRead {
+  stats: MarketStats;
+  headline: string;                                      // the market in one sentence
+  readout: string[];                                     // 2–4 analyst bullets
+  opportunity: string;                                   // the clearest opening
+}
+
+/** Deterministic aggregates over the explored results (no LLM, no cost). */
+export function computeMarketStats(results: ExploreResult[]): MarketStats {
+  const rated = results.filter((r) => typeof r.rating === "number");
+  const avgRating = rated.length ? Number((rated.reduce((s, r) => s + (r.rating as number), 0) / rated.length).toFixed(2)) : null;
+  const topRated = results.slice(0, 3).map((r) => ({ name: r.name, rating: r.rating, reviews: r.reviews }));
+  const mostReviewed = [...results].sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0))[0];
+  const mix = new Map<string, number>();
+  for (const r of results) { const k = r.subtype || ""; if (k) mix.set(k, (mix.get(k) ?? 0) + 1); }
+  const subtypeMix = [...mix.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count).slice(0, 4);
+  const highPerformers = results.filter((r) => (r.rating ?? 0) >= 4.5 && (r.reviews ?? 0) >= 50).length;
+  return {
+    count: results.length,
+    avgRating,
+    ratedShare: results.length ? Number((rated.length / results.length).toFixed(2)) : 0,
+    topRated,
+    mostReviewed: mostReviewed && mostReviewed.reviews != null ? { name: mostReviewed.name, reviews: mostReviewed.reviews } : null,
+    subtypeMix,
+    highPerformers,
+  };
+}
+
+const READ_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    headline: { type: "string", description: "One plain-English sentence sizing up this local market at a glance (how crowded, how strong). ≤22 words." },
+    readout: { type: "array", items: { type: "string" }, minItems: 2, maxItems: 4, description: "2–4 short analyst observations grounded ONLY in the data given: how competitive it is, who leads and why, the rating bar to clear, any concentration in one cuisine/subtype." },
+    opportunity: { type: "string", description: "The single clearest opening for someone opening or competing here — a concrete, specific angle (a gap, an under-served subtype, a quality/reviews bar rivals aren't meeting). 1–2 sentences." },
+  },
+  required: ["headline", "readout", "opportunity"],
+};
+
+const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
+
+function deterministicRead(area: string, keyword: string, stats: MarketStats): Pick<MarketRead, "headline" | "readout" | "opportunity"> {
+  const what = keyword || "places";
+  const density = stats.count >= 15 ? "a crowded market" : stats.count >= 6 ? "a moderately competitive market" : "a thin, wide-open market";
+  const readout: string[] = [`${stats.count} ${what}${area ? ` near ${area}` : ""} — ${density}.`];
+  if (stats.avgRating != null) readout.push(`Average rating is ${stats.avgRating}★; ${stats.highPerformers} clear standouts (4.5★+ with real review volume).`);
+  if (stats.topRated[0]) readout.push(`Best-rated: ${stats.topRated[0].name}${stats.topRated[0].rating ? ` (${stats.topRated[0].rating}★)` : ""}.`);
+  if (stats.subtypeMix[0]) readout.push(`Most common: ${stats.subtypeMix[0].label} (${stats.subtypeMix[0].count}).`);
+  return {
+    headline: `${stats.count} ${what}${area ? ` in ${area}` : ""} — ${density}${stats.avgRating != null ? `, averaging ${stats.avgRating}★` : ""}.`,
+    readout: readout.slice(0, 4),
+    opportunity: stats.avgRating != null
+      ? `Clearing ${(Math.min(5, stats.avgRating + 0.3)).toFixed(1)}★ with strong review volume would put you above most rivals here.`
+      : `Ratings are sparse here — being the visibly best-reviewed option is an open lane.`,
+  };
+}
+
+/** Build the intelligent market-read. Cheap LLM narrative over deterministic
+ *  stats; falls back to a deterministic read when the LLM is off or errors. */
+export async function marketRead(input: { area: string; keyword?: string; results: ExploreResult[] }): Promise<MarketRead> {
+  const keyword = (input.keyword ?? "").trim();
+  const stats = computeMarketStats(input.results);
+  if (!stats.count) return { stats, ...deterministicRead(input.area, keyword, stats) };
+  if (!isLlmConfigured()) return { stats, ...deterministicRead(input.area, keyword, stats) };
+
+  const list = input.results.slice(0, 15).map((r, i) =>
+    `${i + 1}. ${r.name} — ${r.rating != null ? `${r.rating}★` : "no rating"}, ${r.reviews ?? 0} reviews${r.subtype ? `, ${r.subtype}` : ""}`,
+  ).join("\n");
+  const system = "You are a sharp local-market analyst. Given the businesses found in an area, size up the market for someone opening or competing there. Be specific and grounded ONLY in the data provided — never invent names, numbers, or facts. Plain English, no fluff.";
+  const text = `AREA: ${input.area}\nLOOKING FOR: ${keyword || "local businesses"}\nFOUND ${stats.count} (avg ${stats.avgRating ?? "n/a"}★, ${stats.highPerformers} standouts). Ranked by quality × popularity:\n${list}`;
+  try {
+    const { data } = await getLlm().callStructured<{ headline: string; readout: string[]; opportunity: string }>({ system, text, schema: READ_SCHEMA, tier: "classify", maxTokens: 500 });
+    const readout = (Array.isArray(data.readout) ? data.readout : []).map(clean).filter(Boolean).slice(0, 4);
+    const headline = clean(data.headline);
+    const opportunity = clean(data.opportunity);
+    if (!headline || readout.length < 2 || !opportunity) return { stats, ...deterministicRead(input.area, keyword, stats) };
+    return { stats, headline, readout, opportunity };
+  } catch {
+    return { stats, ...deterministicRead(input.area, keyword, stats) };
+  }
 }
