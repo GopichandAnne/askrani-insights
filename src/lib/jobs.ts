@@ -135,6 +135,38 @@ async function nudgeWarm(workspaceId: string): Promise<void> {
   }
 }
 
+/** Kick the deep-read finalize (competitor ads + flyer scans) in its OWN function
+ *  invocation once a deep read's collection is done. Falls back to inline when
+ *  there's no worker URL/secret (local worker). */
+async function nudgeDeepReadFinalize(workspaceId: string): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  const secret = process.env.WORKER_SECRET;
+  if (!base || !secret) {
+    // inline fallback (local dev): run the scans directly
+    try {
+      const svc = createServiceClient();
+      const { data } = await svc.from("workspace").select("id,name,vertical,target_business_id").eq("id", workspaceId).maybeSingle();
+      if (data) {
+        const { refreshCompetitorAds } = await import("@/lib/ads");
+        const { refreshFlyers } = await import("@/lib/flyers");
+        await refreshCompetitorAds(data as any).catch(() => {});
+        await refreshFlyers(data as any).catch(() => {});
+      }
+    } catch { /* best-effort */ }
+    return;
+  }
+  try {
+    await fetch(`${base}/api/deep-read/finalize`, {
+      method: "POST",
+      headers: { "x-worker-secret": secret, "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // aborting our wait is expected — the finalize function continues on its own
+  }
+}
+
 /** Claim and process one job. Returns processed:false when the queue is empty. */
 export async function processOneJob(): Promise<TickResult> {
   const svc = createServiceClient();
@@ -144,9 +176,10 @@ export async function processOneJob(): Promise<TickResult> {
   if (error) throw new Error(`claim: ${error.message}`);
   if (!job || !job.id) return { processed: false, remaining: await pendingCount(svc) };
 
-  // Resolve the owning org once (used for the credit gate + debit).
-  const { data: wsRow } = await svc.from("workspace").select("organization_id").eq("id", job.workspace_id).maybeSingle();
+  // Resolve the owning org once (used for the credit gate + debit + deep-read finalize).
+  const { data: wsRow } = await svc.from("workspace").select("organization_id, goals").eq("id", job.workspace_id).maybeSingle();
   const orgId = (wsRow?.organization_id as string | undefined) ?? undefined;
+  const isDeepRead = !!(wsRow?.goals as any)?.ephemeral;
 
   // ── Phase 2 gate: don't run collection when the org is out of credits ──
   if (orgId && !(await hasCredits(orgId))) {
@@ -216,6 +249,15 @@ export async function processOneJob(): Promise<TickResult> {
       await nudgeWarm(job.workspace_id);
     } catch {
       /* non-fatal — readers regenerate on demand if this didn't run */
+    }
+    // A deep read is the COMPLETE picture — run competitor ads + flyer scans now
+    // that collection is done (part of the paid scan, not a subscription extra).
+    if (isDeepRead) {
+      try {
+        await nudgeDeepReadFinalize(job.workspace_id);
+      } catch {
+        /* non-fatal — ads/flyers just stay empty if this didn't run */
+      }
     }
   }
 

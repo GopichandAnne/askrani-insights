@@ -243,7 +243,7 @@ function MarketReadPanel({
 
         {/* conversion CTAs — deep read (pay-per-scan) + monitor (ongoing) */}
         <div className="mt-4 flex flex-col gap-2 border-t border-line/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-ink-soft">Go deeper — pull the full picture (social, deals, prices, reviews) for this market now, or watch it ongoing.</p>
+          <p className="text-sm text-ink-soft">Go deeper — pull the full picture (social, deals, prices, reviews, competitor ads &amp; sale flyers) for this market now, or watch it ongoing.</p>
           <div className="flex shrink-0 flex-wrap gap-2">
             <button onClick={onDeep} className="btn btn-primary px-4 py-2.5 text-sm">🔬 Deep read this market</button>
             <button onClick={onMonitor} className="btn btn-secondary px-4 py-2.5 text-sm">
@@ -317,8 +317,8 @@ function DeepReadModal({
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <ScopeCard active={scope === "single"} onClick={() => { setScope("single"); setPhase("idle"); setQuote(null); }} title="This business" desc="Full profile: reviews, social, deals & pricing" />
-          <ScopeCard active={scope === "area"} onClick={() => { setScope("area"); setPhase("idle"); setQuote(null); }} title="This + local rivals" desc="The whole market — a deep competitive report" />
+          <ScopeCard active={scope === "single"} onClick={() => { setScope("single"); setPhase("idle"); setQuote(null); }} title="This business" desc="Full profile: reviews, social, deals, ads, flyers & pricing" />
+          <ScopeCard active={scope === "area"} onClick={() => { setScope("area"); setPhase("idle"); setQuote(null); }} title="This + local rivals" desc="The whole market — incl. competitor ads & sale flyers" />
         </div>
 
         <p className="mt-3 text-sm text-ink-soft">
@@ -380,7 +380,7 @@ function ResultRow({ r, rank, onMonitor, onDeep }: { r: ExploreResult; rank: num
         <div className="text-[11px] text-ink-faint">{r.reviews != null ? `${r.reviews.toLocaleString()} reviews` : "no reviews"}</div>
       </div>
       <div className="flex shrink-0 flex-col gap-1">
-        <button onClick={onDeep} className="btn btn-primary px-3 py-1.5 text-xs" title="Pay to pull this business's full profile — reviews, social, deals & pricing">🔬 Deep read</button>
+        <button onClick={onDeep} className="btn btn-primary px-3 py-1.5 text-xs" title="Pay to pull this business's full profile — reviews, social, deals, ads, flyers & pricing">🔬 Deep read</button>
         <button onClick={onMonitor} className="btn btn-secondary px-3 py-1.5 text-xs" title="Track this business + its competitors, ongoing">Monitor →</button>
       </div>
     </li>
