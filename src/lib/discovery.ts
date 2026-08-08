@@ -2,6 +2,67 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
 import { extractSubtype, subtypeSimilarity, extractFormat, formatSimilarity, inferVertical, structuredVertical, isNonFood, verticalQuery, type Vertical } from "@/lib/classify";
+import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+
+/**
+ * Intelligent like-for-like judgment — instead of matching competitors by keyword
+ * cuisine/format aliases, ask the model (as a human would) which nearby businesses
+ * are genuine competitors the target's customers would choose between. Works for
+ * ANY vertical (cuisine for food, service line for salons/med-spas, product mix
+ * for grocery) without maintaining alias lists. Returns a 0..1 relevance + reason
+ * per candidate index, or null if the LLM is unavailable (caller falls back to
+ * the deterministic keyword score).
+ */
+export async function llmCompetitorRelevance(
+  target: { name: string; vertical: string; category?: string; subtype?: string[] },
+  cands: { name: string; category?: string; distanceKm?: number }[],
+): Promise<Map<number, { relevance: number; reason: string }> | null> {
+  if (!isLlmConfigured() || !cands.length) return null;
+  const list = cands
+    .map((c, i) => `[${i}] ${c.name}${c.category ? ` — ${c.category}` : ""}${c.distanceKm != null ? ` (${c.distanceKm}km)` : ""}`)
+    .join("\n");
+  const SCHEMA = {
+    type: "object", additionalProperties: false,
+    properties: {
+      scores: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false,
+          properties: {
+            i: { type: "integer", description: "the candidate's [index]" },
+            relevance: { type: "number", description: "0..1 like-for-like competitor score" },
+            reason: { type: "string", description: "≤10 words why" },
+          },
+          required: ["i", "relevance"],
+        },
+      },
+    },
+    required: ["scores"],
+  };
+  const SYSTEM =
+    "You judge whether nearby businesses are genuine LIKE-FOR-LIKE local competitors to a given business — the kind a customer would realistically choose between. Score each 0..1: 1 = direct competitor (same specialty AND similar format/positioning), ~0.5 = same broad category but a different niche, 0 = not really a competitor. Judge by SPECIALTY (cuisine for restaurants, service line for salons/med-spas, product mix for grocery), format/service model, and positioning — the way a knowledgeable local would. Proximity alone is NOT enough. Score EVERY candidate by its [index].";
+  try {
+    const { data } = await getLlm().callStructured<{ scores: unknown }>({
+      system: SYSTEM,
+      text: `Owner's business: "${target.name}" — ${target.vertical}${target.category ? ` (${target.category})` : ""}${target.subtype?.length ? `, specialty: ${target.subtype.join("/")}` : ""}.\n\nNearby candidates (same vertical):\n${list}\n\nScore each candidate's like-for-like relevance.`,
+      schema: SCHEMA, tier: "classify", maxTokens: 1600,
+    });
+    let rows: any[] = Array.isArray((data as any).scores) ? (data as any).scores : [];
+    if (!rows.length && typeof (data as any).scores === "string") {
+      try { const p = JSON.parse((data as any).scores); rows = Array.isArray(p) ? p : Array.isArray(p?.scores) ? p.scores : []; } catch { /* not JSON */ }
+    }
+    if (!rows.length) return null;
+    const m = new Map<number, { relevance: number; reason: string }>();
+    for (const r of rows) {
+      const i = Number(r.i);
+      const rel = Math.max(0, Math.min(1, Number(r.relevance)));
+      if (Number.isInteger(i) && Number.isFinite(rel)) m.set(i, { relevance: rel, reason: String(r.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 140) });
+    }
+    return m.size ? m : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Discovery service — guide §2.2 (onboarding) + §9 (competitor graph).
@@ -429,10 +490,37 @@ export async function autoDiscoverCompetitors(
   // Vertical consistency: the like-for-like passes are free-text and can pull in
   // same-cuisine businesses of another vertical; keep only candidates whose own
   // type matches the target vertical (a restaurant's rivals are restaurants).
-  const scored = cands
+  const filtered = cands
     .filter((c) => c.name.toLowerCase().trim() !== targetName)
-    .filter((c) => inferVertical(c as any) === vertical)
-    .map((c) => ({ cand: c, ...scoreCompetitor({ category: target.category, subtype, format }, c, baseRadius) }))
+    .filter((c) => inferVertical(c as any) === vertical);
+
+  // Intelligent like-for-like: let the model judge which are true competitors
+  // (vertical-agnostic). Falls back to the keyword cuisine/format score if off.
+  const llm = await llmCompetitorRelevance(
+    { name: target.name, vertical, category: target.category, subtype },
+    filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm })),
+  );
+  const scored = filtered
+    .map((c, i) => {
+      if (llm) {
+        const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
+        const prominence = Math.max(0, Math.min(1, c.prominence ?? 0));
+        const r = llm.get(i) ?? { relevance: 0.3, reason: "" };
+        const score = Number((0.5 * r.relevance + 0.32 * geoOverlap + 0.18 * prominence).toFixed(4));
+        return {
+          cand: c,
+          score,
+          components: {
+            llm_relevance: Number(r.relevance.toFixed(3)),
+            rationale: r.reason,
+            geo_overlap: Number(geoOverlap.toFixed(3)),
+            prominence: Number(prominence.toFixed(3)),
+            note: "discovery v4: intelligent LLM like-for-like + geo + prominence",
+          } as Record<string, unknown>,
+        };
+      }
+      return { cand: c, ...scoreCompetitor({ category: target.category, subtype, format }, c, baseRadius) };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 
@@ -446,10 +534,12 @@ export async function autoDiscoverCompetitors(
     if (compId === target.businessId) continue;
     const relation = i < 5 ? "primary" : "secondary";
     const tier = i < 5 ? "priority" : "standard";
+    const why = (s.components as any).rationale as string | undefined;
     const matched = (s.components as any).subtype_matched as string[] | undefined;
     const fmt = (s.components as any).format_matched as string[] | undefined;
     const tags = [...(matched ?? []), ...(fmt ?? [])];
-    const like = tags.length ? `same type (${tags.join(", ").replace(/_/g, " ")}) · ` : "";
+    // prefer the model's like-for-like reason; fall back to the keyword "same type" label
+    const like = why ? `${why} · ` : tags.length ? `same type (${tags.join(", ").replace(/_/g, " ")}) · ` : "";
     const { data, error } = await svc
       .from("competitor_edge")
       .upsert(

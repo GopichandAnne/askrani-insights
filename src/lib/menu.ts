@@ -22,9 +22,16 @@ const norm = (s: string) =>
 // generic words that don't signal a distinctive dish (used only to VALIDATE the
 // LLM's "differentiators" against the FULL rival menu, catching false uniqueness).
 const GENERIC = new Set([
+  // food
   "chicken", "mutton", "goat", "lamb", "beef", "fish", "prawn", "shrimp", "egg", "paneer", "veg", "vegetable", "vegetarian",
   "rice", "curry", "masala", "gravy", "fried", "grill", "grilled", "roast", "tandoori", "spicy", "plain", "combo", "meal",
-  "plate", "bowl", "special", "house", "style", "with", "and", "plus", "the", "our", "side", "extra", "family", "regular", "box", "lunch", "dinner",
+  "plate", "bowl", "lunch", "dinner", "box",
+  // beauty / med-spa modifiers
+  "treatment", "session", "sessions", "area", "areas", "unit", "units", "syringe", "syringes", "package", "add",
+  // grocery / units
+  "gallon", "gal", "pack", "count", "dozen", "bottle", "can", "jar", "bag",
+  // universal
+  "special", "house", "style", "with", "and", "plus", "the", "our", "side", "extra", "family", "regular", "small", "large", "mini", "classic", "signature", "deluxe",
 ]);
 const distinctive = (name: string) => norm(name).split(" ").filter((t) => t.length >= 4 && !GENERIC.has(t));
 
@@ -126,7 +133,7 @@ const SCHEMA = {
 };
 
 const SYSTEM =
-  "You compare a local business's menu to its rivals' menus the way a knowledgeable human would. Match dishes by MEANING, not spelling: 'Chicken Dum Biryani', 'Hyderabadi Chicken Biryani' and 'Chicken Biryani' are the SAME dish; 'Paneer 65' and 'Chilli Paneer' are NOT. For each of the owner's priced items that a rival also sells, return the owner's price and the rivals' prices for that same dish (use ONLY prices present in the data — never invent). Items with no rival equivalent are differentiators (skip truly generic staples like plain water/soda). Return the biggest price gaps first.";
+  "You compare a local business's OFFERINGS to its rivals' the way a knowledgeable human would — for ANY vertical (restaurant dishes, salon/med-spa treatments, grocery products). Match offerings by MEANING, not spelling — the same thing regardless of name variants: e.g. 'Chicken Dum Biryani' = 'Hyderabadi Chicken Biryani' = 'Chicken Biryani' (restaurant); 'Lip Filler 1 Syringe' = 'Lip Filler' = 'Lip Injections' (med spa); '2% Milk 1 Gallon' = 'Milk' (grocery). Keep genuinely different things separate ('Paneer 65' ≠ 'Chilli Paneer'; 'Botox' ≠ 'Lip Filler'; 'Whole Milk' ≠ '2% Milk'). For each of the owner's priced offerings a rival also sells, return the owner's price and the rivals' prices for that same offering (use ONLY prices present in the data — never invent). Offerings with no rival equivalent are differentiators (skip truly generic staples). Return the biggest price gaps first.";
 
 function parseArrays(v: unknown): any[] {
   if (Array.isArray(v)) return v;
@@ -160,7 +167,7 @@ export async function buildMenuLens(ws: WorkspaceRow, db?: RlsClient): Promise<M
       try {
         const { data } = await getLlm().callStructured<{ pricePositions: any; differentiators: any }>({
           system: SYSTEM,
-          text: `YOUR MENU (${ws.name}):\n${yourLines}\n\nRIVAL MENUS:\n${rivalLines}\n\nMatch dishes by meaning and compare.`,
+          text: `YOUR OFFERINGS (${ws.name} — ${ws.vertical}):\n${yourLines}\n\nRIVAL OFFERINGS:\n${rivalLines}\n\nMatch offerings by meaning and compare.`,
           schema: SCHEMA, tier: "extract", maxTokens: 1800,
         });
         const pp = parseArrays(data.pricePositions)
