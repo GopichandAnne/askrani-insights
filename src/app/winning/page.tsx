@@ -3,6 +3,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
 import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
+import { getOrMakeMenuLens, type PricePosition, type Differentiator } from "@/lib/menu";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // room for the fusion LLM read on a cold cache
@@ -45,6 +46,28 @@ function DemandRow({ d }: { d: DemandItem }) {
   );
 }
 
+function PricePosRow({ p }: { p: PricePosition }) {
+  const over = p.position === "over";
+  const under = p.position === "under";
+  const tone = over ? "text-coral-dark" : under ? "text-trust-direct" : "text-ink-soft";
+  const move = over
+    ? `You're ${p.deltaPct}% above the market — justify with value/portion or consider trimming.`
+    : under
+      ? `You're ${Math.abs(p.deltaPct)}% below — room to raise toward ~$${p.marketAvg.toFixed(2)}.`
+      : "Priced in line with the market.";
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-white/55 p-3 text-sm">
+      <span className="min-w-0 flex-1 font-medium text-ink">{p.item}</span>
+      <span className="tabular-nums text-ink-soft">
+        <span className="font-semibold text-brand-deep">${p.yourPrice.toFixed(2)}</span>
+        <span className="text-ink-faint"> vs ${p.marketAvg.toFixed(2)} avg</span>
+      </span>
+      <span className={`shrink-0 font-semibold ${tone}`}>{p.deltaPct > 0 ? "+" : ""}{p.deltaPct}%</span>
+      <span className="w-full text-xs text-ink-faint">{move} <span className="text-ink-faint">· {p.rivalCount} rival{p.rivalCount === 1 ? "" : "s"} priced</span></span>
+    </li>
+  );
+}
+
 function Row({ w }: { w: WinningEntity }) {
   const m = MOMENTUM[w.momentum] ?? MOMENTUM.steady;
   return (
@@ -74,13 +97,14 @@ export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
 
-  const [w, demand] = await Promise.all([
+  const [w, demand, menu] = await Promise.all([
     getOrMakeWinning(state.workspace),
     getOrMakeDemand(state.workspace),
+    getOrMakeMenuLens(state.workspace),
   ]);
   const gaps = w.winning.filter((x) => !x.onYourMenu);
   const yours = w.winning.filter((x) => x.onYourMenu);
-  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0;
+  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0 && menu.pricePositions.length === 0 && menu.differentiators.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -130,6 +154,33 @@ export default async function WinningPage() {
               </h2>
               <p className="mb-3 text-xs text-ink-faint">Things you already offer that are winning market-wide — lean into them.</p>
               <div className="space-y-2.5">{yours.map((x, i) => <Row key={i} w={x} />)}</div>
+            </section>
+          )}
+
+          {/* your menu edge — per-item pricing + differentiators (deterministic) */}
+          {menu.pricePositions.length > 0 && (
+            <section className="card">
+              <h2 className="mb-1 flex items-center gap-2 font-semibold">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🏷️</span>
+                Your prices vs the market — item by item
+              </h2>
+              <p className="mb-3 text-xs text-ink-faint">Same dish, your price vs what nearby rivals charge. Biggest gaps first.</p>
+              <ul className="space-y-1.5">{menu.pricePositions.map((p, i) => <PricePosRow key={i} p={p} />)}</ul>
+            </section>
+          )}
+
+          {menu.differentiators.length > 0 && (
+            <section className="card">
+              <h2 className="mb-1 flex items-center gap-2 font-semibold">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-trust-direct/15 text-trust-direct">✦</span>
+                Only you offer this — your differentiators
+              </h2>
+              <p className="mb-3 text-xs text-ink-faint">Items on your menu that no nearby rival has — lean on these to stand out.</p>
+              <div className="flex flex-wrap gap-2">
+                {menu.differentiators.map((d, i) => (
+                  <span key={i} className="chip bg-trust-direct/12 text-trust-direct">{d.item} <span className="ml-1 font-semibold">${d.yourPrice.toFixed(0)}</span></span>
+                ))}
+              </div>
             </section>
           )}
 
