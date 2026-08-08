@@ -6,6 +6,8 @@ import { Landing } from "@/components/Landing";
 import { BriefingCard } from "@/components/BriefingCard";
 import { EdgeThisWeek } from "@/components/EdgeThisWeek";
 import { DraftButton } from "@/components/DraftButton";
+import { DigestFeed } from "@/components/DigestFeed";
+import { buildDigest } from "@/lib/digest";
 import { RaniMark } from "@/components/RaniSpinner";
 import { creditsSummary, PLANS } from "@/lib/credits";
 
@@ -144,6 +146,9 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const topGap = winList.find((w) => !w.onYourMenu) ?? winList[0];
   const topSwipe = goals.content?.swipe?.[0] as { format?: string; yourVersion?: string } | undefined;
   const industryBest = goals.industryBest?.best?.[0] as { format?: string; yourVersion?: string } | undefined;
+  // The digest — "what changed & what to do," built from the cached pillars (pure,
+  // no I/O). Same content that gets pushed to the owner's inbox each week.
+  const digest = buildDigest({ name: workspace.name, vertical: workspace.vertical }, goals, (goals.digestSeen?.ids as string[]) ?? []);
 
   const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
@@ -324,9 +329,10 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         </div>
       </section>
 
-      {/* 1 — This Week: the plain-English briefing + the edge synthesis, together */}
+      {/* 1 — This Week: what needs you (digest), then the briefing + edge synthesis */}
       <div className="space-y-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-brand-deep">This week</p>
+        <DigestFeed digest={digest} />
         <BriefingCard />
         <EdgeThisWeek />
         {topTrends.length > 0 && (

@@ -1,6 +1,7 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { getOrMakeYou, platformLabel, type YouReport } from "@/lib/you";
+import { ActOnIt } from "@/components/ActOnIt";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the reviews LLM read on a cold cache
@@ -171,11 +172,14 @@ export default async function YouPage() {
                 <div className="mt-2 rounded-xl bg-brand-soft/60 p-2.5 text-sm text-brand-deep">
                   <span className="font-semibold">Suggested reply:</span> {r.reply}
                 </div>
-                {r.url && (
-                  <a href={r.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-medium text-brand hover:underline">
-                    Open the review to respond ↗
-                  </a>
-                )}
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <ActOnIt kind="reply" move={`Reply to this ${you.name} review: "${r.quote}"`} context={r.why} small />
+                  {r.url && (
+                    <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex text-xs font-medium text-brand hover:underline">
+                      Open the review to respond ↗
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </div>

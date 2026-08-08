@@ -1,0 +1,69 @@
+import { NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase/server";
+import { buildDigest, markDigestSeen } from "@/lib/digest";
+import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
+
+/**
+ * Weekly digest push. A cron calls this; for each workspace due for a digest
+ * (per goals.lastDigestAt, weekly cadence), it builds the digest from the cached
+ * pillars (no scrape, no cost), stores it on goals.digest for the in-app feed,
+ * emails it to the owner if email is configured, and stamps the seen set so the
+ * next digest only flags what's new. Auth mirrors the scheduler tick.
+ */
+export const dynamic = "force-dynamic";
+export const maxDuration = 120;
+
+const WEEK = 7 * 86_400_000;
+const SLACK = 60 * 60 * 1000;
+
+function authorized(req: Request): boolean {
+  const worker = process.env.WORKER_SECRET;
+  const cron = process.env.CRON_SECRET;
+  const auth = req.headers.get("authorization");
+  const provided = req.headers.get("x-worker-secret") ?? new URL(req.url).searchParams.get("secret");
+  if (worker && provided === worker) return true;
+  if (cron && auth === `Bearer ${cron}`) return true;
+  if (cron && req.headers.get("x-vercel-cron") === "1") return true;
+  return false;
+}
+
+export async function GET(req: Request) {
+  if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const force = new URL(req.url).searchParams.get("force") === "1";
+  const onlyWs = new URL(req.url).searchParams.get("workspaceId") || undefined;
+
+  const svc = createServiceClient();
+  let q = svc.from("workspace").select("id, name, vertical, organization_id, goals, target_business_id");
+  if (onlyWs) q = q.eq("id", onlyWs);
+  const { data: wss } = await q;
+  const workspaces = (wss ?? []).filter((w: any) => w.target_business_id);
+
+  const now = Date.now();
+  let due = 0, built = 0, emailed = 0, empty = 0;
+
+  for (const w of workspaces as any[]) {
+    const goals = (w.goals as Record<string, any>) ?? {};
+    const last = goals.lastDigestAt ? Date.parse(goals.lastDigestAt) : 0;
+    if (!force && last && now - last < WEEK - SLACK) continue;
+    due++;
+
+    const digest = buildDigest({ name: w.name, vertical: w.vertical }, goals, (goals.digestSeen?.ids as string[]) ?? [], new Date(now));
+    if (!digest.items.length) { empty++; continue; }
+    built++;
+
+    // store the digest for the in-app feed + stamp cadence
+    await svc.from("workspace").update({ goals: { ...goals, digest, lastDigestAt: new Date(now).toISOString() } }).eq("id", w.id);
+
+    // push via email if configured + a recipient resolves
+    if (emailConfigured()) {
+      const to = await digestRecipient(svc, w.organization_id, goals);
+      if (to && (await sendDigest(to, w.name, digest))) emailed++;
+    }
+
+    await markDigestSeen(w.id, digest.items.map((i) => i.id), new Date(now));
+  }
+
+  return NextResponse.json({ checked: workspaces.length, due, built, emailed, empty, emailConfigured: emailConfigured() });
+}
+
+export const POST = GET;
