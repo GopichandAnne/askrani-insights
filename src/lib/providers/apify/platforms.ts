@@ -304,8 +304,11 @@ export interface RivalAd {
   advertiser: string; text: string; cta?: string; link?: string; snapshotUrl?: string;
   platforms?: string[]; since?: string;
 }
+// Default to the validated pay-per-item Ad Library scraper so the feature needs
+// only APIFY_TOKEN (override with APIFY_AD_LIBRARY_ACTOR to use a different one).
+const AD_LIBRARY_ACTOR = () => process.env.APIFY_AD_LIBRARY_ACTOR ?? "apify~facebook-ads-scraper";
 export function adLibraryConfigured(): boolean {
-  return !!process.env.APIFY_TOKEN && !!process.env.APIFY_AD_LIBRARY_ACTOR;
+  return !!process.env.APIFY_TOKEN;
 }
 
 /** Map one Ad Library dataset row (apify/facebook-ads-scraper shape) → RivalAd.
@@ -331,8 +334,8 @@ export async function collectApifyAdLibrary(
 ): Promise<{ items: RivalAd[]; costUsd: number }> {
   const empty = { items: [] as RivalAd[], costUsd: 0 };
   const token = process.env.APIFY_TOKEN;
-  const actor = process.env.APIFY_AD_LIBRARY_ACTOR;
-  if (!token || !actor || !query.trim()) return empty;
+  const actor = AD_LIBRARY_ACTOR();
+  if (!token || !query.trim()) return empty;
   const country = opts.country ?? "US";
   const searchUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
   const maxMs = opts.maxMs ?? 90000;
