@@ -490,8 +490,15 @@ export async function autoDiscoverCompetitors(
   // Vertical consistency: the like-for-like passes are free-text and can pull in
   // same-cuisine businesses of another vertical; keep only candidates whose own
   // type matches the target vertical (a restaurant's rivals are restaurants).
+  // A business isn't its own competitor: drop the target and its name-variants
+  // (Google/OSM list "Man Pasand Supermarket" separately from "Manpasand …
+  // Supermarket" — a near-name match at ~the same spot is the target itself).
+  const isSelf = (c: ProfileCandidate) => {
+    if (c.name.toLowerCase().trim() === targetName) return true;
+    return c.distanceKm != null && c.distanceKm < 0.3 && nameRelevance(target.name, c.name) >= 0.55;
+  };
   const filtered = cands
-    .filter((c) => c.name.toLowerCase().trim() !== targetName)
+    .filter((c) => !isSelf(c))
     .filter((c) => inferVertical(c as any) === vertical);
 
   // Intelligent like-for-like: let the model judge which are true competitors
@@ -500,7 +507,7 @@ export async function autoDiscoverCompetitors(
     { name: target.name, vertical, category: target.category, subtype },
     filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm })),
   );
-  const scored = filtered
+  const scoredAll = filtered
     .map((c, i) => {
       if (llm) {
         const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
@@ -521,8 +528,19 @@ export async function autoDiscoverCompetitors(
       }
       return { cand: c, ...scoreCompetitor({ category: target.category, subtype, format }, c, baseRadius) };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score);
+
+  // Dedup near-identical competitor names (Google + OSM often list the same store
+  // twice), keeping the highest-scored, then cap to the limit.
+  const seenNames = new Set<string>();
+  const scored: typeof scoredAll = [];
+  for (const s of scoredAll) {
+    const k = s.cand.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!k || seenNames.has(k)) continue;
+    seenNames.add(k);
+    scored.push(s);
+    if (scored.length >= limit) break;
+  }
 
   const rows: CompetitorRow[] = [];
   for (const [i, s] of scored.entries()) {
