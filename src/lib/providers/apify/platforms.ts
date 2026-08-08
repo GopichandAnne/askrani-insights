@@ -308,6 +308,23 @@ export function adLibraryConfigured(): boolean {
   return !!process.env.APIFY_TOKEN && !!process.env.APIFY_AD_LIBRARY_ACTOR;
 }
 
+/** Map one Ad Library dataset row (apify/facebook-ads-scraper shape) → RivalAd.
+ *  Exported so a one-off can re-map already-scraped datasets without re-paying. */
+export function mapAdItem(it: any): RivalAd {
+  const s = it.snapshot ?? {};
+  const card = Array.isArray(s.cards) ? s.cards[0] : undefined;
+  const id = it.adArchiveID ?? it.adArchiveId ?? it.adarchiveid;
+  return {
+    advertiser: it.pageName ?? s.pageName ?? it.page_name ?? it.advertiser ?? "A rival",
+    text: String(s.body?.text ?? s.body ?? card?.body ?? it.ad_creative_body ?? it.text ?? "").replace(/\s+/g, " ").trim(),
+    cta: s.ctaText ?? card?.ctaText ?? it.cta_type ?? undefined,
+    link: s.linkUrl ?? card?.linkUrl ?? it.link_url ?? undefined,
+    snapshotUrl: id ? `https://www.facebook.com/ads/library/?id=${id}` : (it.ad_snapshot_url ?? it.url ?? undefined),
+    platforms: it.publisherPlatform ?? it.publisher_platforms ?? s.platforms ?? undefined,
+    since: it.startDateFormatted ?? it.ad_delivery_start_time ?? it.start_date ?? undefined,
+  };
+}
+
 export async function collectApifyAdLibrary(
   query: string,
   opts: { limit?: number; maxMs?: number; country?: string } = {},
@@ -345,18 +362,7 @@ export async function collectApifyAdLibrary(
     if (!datasetId) return { items: [], costUsd };
 
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`).then((r) => r.json())) as any[];
-    const pickText = (it: any) =>
-      it.ad_creative_body ?? it.adText ?? it.body ?? it.text ?? it.snapshot?.body?.text ?? it.snapshot?.body ??
-      (Array.isArray(it.ad_creative_bodies) ? it.ad_creative_bodies[0] : undefined) ?? "";
-    const items: RivalAd[] = (raw ?? []).map((it) => ({
-      advertiser: it.page_name ?? it.advertiser ?? it.pageName ?? it.snapshot?.page_name ?? "A rival",
-      text: String(pickText(it)).replace(/\s+/g, " ").trim(),
-      cta: it.cta_type ?? it.ctaText ?? it.snapshot?.cta_text ?? undefined,
-      link: it.link_url ?? it.snapshot?.link_url ?? undefined,
-      snapshotUrl: it.ad_snapshot_url ?? it.snapshotUrl ?? it.url ?? undefined,
-      platforms: it.publisher_platforms ?? it.platforms ?? undefined,
-      since: it.ad_delivery_start_time ?? it.startDate ?? it.start_date ?? undefined,
-    })).filter((a) => a.text.length > 0 || a.snapshotUrl);
+    const items: RivalAd[] = (raw ?? []).map((it) => mapAdItem(it)).filter((a) => a.text.length > 0 || a.snapshotUrl);
     return { items, costUsd };
   } catch {
     return empty;

@@ -66,14 +66,24 @@ export async function refreshCompetitorAds(
   const fbByBiz = new Map<string, string>();
   for (const r of idents ?? []) if (!fbByBiz.has((r as any).business_id)) fbByBiz.set((r as any).business_id, (r as any).url);
 
+  const toks = (s: string) => new Set(String(s).toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((t) => t.length > 2));
   const all: RivalAd[] = [];
   let costUsd = 0;
   for (const b of biz ?? []) {
-    const query = fbSlug(fbByBiz.get((b as any).id)) ?? String((b as any).canonical_name ?? "");
+    const name = String((b as any).canonical_name ?? "");
+    const query = fbSlug(fbByBiz.get((b as any).id)) ?? name;
     if (!query) continue;
     const { items, costUsd: c } = await collectApifyAdLibrary(query, { limit: opts.limitPerAdvertiser ?? 15 });
     costUsd += c;
-    for (const ad of items) all.push({ ...ad, advertiser: ad.advertiser === "A rival" ? String((b as any).canonical_name) : ad.advertiser });
+    // Ad Library keyword search returns any advertiser matching the term, so keep
+    // only ads whose advertiser actually overlaps this competitor's name (drops
+    // unrelated brands the keyword happened to match).
+    const want = toks(name);
+    for (const ad of items) {
+      const adv = toks(ad.advertiser);
+      const relevant = want.size === 0 || [...adv].some((t) => want.has(t));
+      if (relevant) all.push({ ...ad, advertiser: ad.advertiser === "A rival" ? name : ad.advertiser });
+    }
   }
   // dedup by advertiser+text
   const seen = new Set<string>();
