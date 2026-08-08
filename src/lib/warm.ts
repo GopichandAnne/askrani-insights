@@ -9,6 +9,7 @@ import { generateContent, contentIsGood } from "@/lib/content";
 import { generateWinning, winningIsGood } from "@/lib/winning";
 import { generateDemand, demandIsGood } from "@/lib/demand";
 import { buildMenuLens } from "@/lib/menu";
+import { generateDeals, dealsIsGood } from "@/lib/deals";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -48,6 +49,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     { key: "winning", run: () => generateWinning(row, db), good: (v) => winningIsGood(v) && !v?.failed },
     { key: "demand", run: () => generateDemand(row, db), good: (v) => demandIsGood(v) && !v?.failed },
     { key: "menu", run: () => buildMenuLens(row, db), good: (v) => !!v }, // deterministic — no retry needed
+    { key: "deals", run: () => generateDeals(row, db), good: (v) => dealsIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;

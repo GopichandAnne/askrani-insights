@@ -4,6 +4,7 @@ import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
 import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
 import { getOrMakeMenuLens, type PricePosition, type Differentiator } from "@/lib/menu";
+import { getOrMakeDeals, type DealItem } from "@/lib/deals";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // room for the fusion LLM read on a cold cache
@@ -97,14 +98,15 @@ export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
 
-  const [w, demand, menu] = await Promise.all([
+  const [w, demand, menu, deals] = await Promise.all([
     getOrMakeWinning(state.workspace),
     getOrMakeDemand(state.workspace),
     getOrMakeMenuLens(state.workspace),
+    getOrMakeDeals(state.workspace),
   ]);
   const gaps = w.winning.filter((x) => !x.onYourMenu);
   const yours = w.winning.filter((x) => x.onYourMenu);
-  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0 && menu.pricePositions.length === 0 && menu.differentiators.length === 0;
+  const nothing = !w.summary && w.winning.length === 0 && demand.demands.length === 0 && menu.pricePositions.length === 0 && menu.differentiators.length === 0 && deals.deals.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -181,6 +183,33 @@ export default async function WinningPage() {
                   <span key={i} className="chip bg-trust-direct/12 text-trust-direct">{d.item} <span className="ml-1 font-semibold">${d.yourPrice.toFixed(0)}</span></span>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* deals rivals are posting on social (grocery sales, restaurant specials, spa promos) */}
+          {deals.deals.length > 0 && (
+            <section className="card">
+              <h2 className="mb-1 flex items-center gap-2 font-semibold">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🛒</span>
+                Deals rivals are posting
+              </h2>
+              <p className="mb-3 text-xs text-ink-faint">Sales, specials and promos your rivals are broadcasting on social — match or counter them.</p>
+              {deals.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{deals.summary}</p>}
+              <ul className="space-y-1.5">
+                {deals.deals.map((d, i) => (
+                  <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl bg-white/55 p-3 text-sm">
+                    <span className="chip shrink-0 bg-coral/15 text-coral-dark">🏷️ deal</span>
+                    <span className="min-w-0 flex-1 text-ink"><span className="font-medium">{d.rival}</span> — {d.deal}{d.when ? <span className="text-ink-faint"> · {d.when}</span> : null}</span>
+                    {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-medium text-brand hover:underline">post ↗</a>}
+                  </li>
+                ))}
+              </ul>
+              {deals.moves.length > 0 && (
+                <div className="mt-3 rounded-2xl bg-brand-soft/50 p-3">
+                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-deep">Your moves</p>
+                  <ul className="space-y-1 text-sm text-brand-deep">{deals.moves.map((m, i) => <li key={i}>✦ {m}</li>)}</ul>
+                </div>
+              )}
             </section>
           )}
 
