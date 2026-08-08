@@ -105,6 +105,49 @@ export async function spendForCost(orgId: string, costUsd: number, ref: Record<s
   } catch { /* record-only; never fail collection on credits */ }
 }
 
+// ── Deep read (pay-per-scan) — the middle tier between free Explore and Monitor.
+// Value-based FLAT pricing (real COGS is ~$0.10 single / ~$0.90 area ⇒ ~90% $-margin;
+// the credit price is positioned to protect the Monitor subscription, not cost-plus).
+export const DEEP_READ_SINGLE_CREDITS = 20;          // one business, full profile
+export const DEEP_READ_AREA_BASE_CREDITS = 20;       // your business
+export const DEEP_READ_PER_COMPETITOR_CREDITS = 12;  // each local rival scanned
+export const DEEP_READ_COMPETITOR_CAP = 10;          // quote cap so it can't run away
+
+/** Credits a deep read costs. Single = flat; area = base + per-competitor (capped). */
+export function quoteDeepRead(scope: "single" | "area", competitorCount = 0): number {
+  if (scope === "single") return DEEP_READ_SINGLE_CREDITS;
+  return DEEP_READ_AREA_BASE_CREDITS + DEEP_READ_PER_COMPETITOR_CREDITS * Math.min(competitorCount, DEEP_READ_COMPETITOR_CAP);
+}
+
+/** Charge an explicit credit amount for a discrete action (deep read). Debits plan
+ *  first then top-up. Returns false without charging if the balance is short. */
+export async function spendCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<boolean> {
+  if (!(credits > 0)) return true;
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  if (balanceOf(billing) < credits) return false;
+  let remaining = credits;
+  const fromPlan = Math.min(billing.planCredits, remaining);
+  billing.planCredits -= fromPlan;
+  remaining -= fromPlan;
+  billing.topupCredits -= remaining;
+  billing.totalSpent += credits;
+  billing.ledger.push({ ts: new Date().toISOString(), delta: -credits, bucket: fromPlan >= credits ? "plan" : "topup", reason, ref });
+  await writeBilling(svc, orgId, settings, billing);
+  return true;
+}
+
+/** Credit back a prior charge (deep-read → Monitor promotion within the window). */
+export async function refundCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<void> {
+  if (!(credits > 0)) return;
+  const svc = createServiceClient();
+  const { settings, billing } = await readBilling(svc, orgId);
+  billing.topupCredits += credits;                    // refunds land in the persistent bucket
+  billing.totalSpent = Math.max(0, billing.totalSpent - credits);
+  billing.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason, ref });
+  await writeBilling(svc, orgId, settings, billing);
+}
+
 export interface CreditsSummary {
   balance: number; plan: string; status: string; planCredits: number; topupCredits: number;
   totalSpent: number; totalCostUsd: number; trialGranted: boolean;

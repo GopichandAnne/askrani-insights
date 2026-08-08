@@ -19,12 +19,24 @@ export interface SchedulerResult {
   due: number;
   enqueued: number;
   pausedNoCredits: number;
+  ephemeralCleaned: number;
 }
 
 export async function runScheduler(): Promise<SchedulerResult> {
   const svc = createServiceClient();
   const { data: wss } = await svc.from("workspace").select("id, organization_id, goals, target_business_id");
   const workspaces = wss ?? [];
+
+  // Deep-read (ephemeral) workspaces are one-shot snapshots — never recur, and are
+  // cleaned up once past their retention window (30 days). Promotion clears the flag.
+  const nowMs = Date.now();
+  let ephemeralCleaned = 0;
+  for (const w of workspaces as any[]) {
+    const exp = w.goals?.ephemeralExpiresAt ? Date.parse(w.goals.ephemeralExpiresAt) : 0;
+    if (w.goals?.ephemeral && exp && nowMs > exp) {
+      await svc.from("workspace").delete().eq("id", w.id).then(() => { ephemeralCleaned++; }, () => {});
+    }
+  }
 
   const orgIds = [...new Set(workspaces.map((w: any) => w.organization_id).filter(Boolean))] as string[];
   const { data: orgs } = await svc.from("organization").select("id, settings").in("id", orgIds.length ? orgIds : ["00000000-0000-0000-0000-000000000000"]);
@@ -36,6 +48,7 @@ export async function runScheduler(): Promise<SchedulerResult> {
 
   for (const w of workspaces as any[]) {
     if (!w.target_business_id) continue; // nothing set up to collect
+    if (w.goals?.ephemeral) continue;    // deep reads never recur (one-shot snapshot)
     const cadence = PLANS[String(planOf.get(w.organization_id) ?? "")]?.cadence ?? "weekly";
     const intervalMs = (cadence === "daily" ? 1 : 7) * DAY;
     const last = w.goals?.lastScheduledRefresh ? Date.parse(w.goals.lastScheduledRefresh) : 0;
@@ -55,5 +68,5 @@ export async function runScheduler(): Promise<SchedulerResult> {
   }
 
   if (enqueued > 0) await nudgeWorker();
-  return { checked: workspaces.length, due, enqueued, pausedNoCredits };
+  return { checked: workspaces.length, due, enqueued, pausedNoCredits, ephemeralCleaned };
 }

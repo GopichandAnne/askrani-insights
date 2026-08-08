@@ -11,7 +11,10 @@ export type AnalyticsEvent =
   | "explore_search"
   | "signup"
   | "workspace_created"
-  | "collect_started";
+  | "collect_started"
+  | "deep_read_quote"
+  | "deep_read_run"
+  | "workspace_promoted";
 
 export async function logEvent(
   event: AnalyticsEvent,

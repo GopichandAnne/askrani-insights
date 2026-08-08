@@ -6,6 +6,7 @@ import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 import { CreditBanner } from "@/components/CreditBanner";
+import { EphemeralBanner } from "@/components/EphemeralBanner";
 import { Analytics } from "@/components/Analytics";
 import { ConsentBanner } from "@/components/ConsentBanner";
 import { creditsSummary } from "@/lib/credits";
@@ -74,6 +75,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             />
             <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
               <CreditBanner />
+              <EphemeralBanner />
               {children}
             </main>
           </div>
