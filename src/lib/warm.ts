@@ -10,6 +10,7 @@ import { generateWinning, winningIsGood } from "@/lib/winning";
 import { generateDemand, demandIsGood } from "@/lib/demand";
 import { buildMenuLens } from "@/lib/menu";
 import { generateDeals, dealsIsGood } from "@/lib/deals";
+import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -50,6 +51,9 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     { key: "demand", run: () => generateDemand(row, db), good: (v) => demandIsGood(v) && !v?.failed },
     { key: "menu", run: () => buildMenuLens(row, db), good: (v) => !!v && !v?.failed }, // retry when the intelligent match errored
     { key: "deals", run: () => generateDeals(row, db), good: (v) => dealsIsGood(v) && !v?.failed },
+    // Pulse LAST — it reads goals.you (velocity) + writes goals.themeHistory, so it
+    // must run after You is cached; this builds the week-over-week theme diff.
+    { key: "pulse", run: () => generateReviewPulse(row, db), good: (v) => pulseIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;

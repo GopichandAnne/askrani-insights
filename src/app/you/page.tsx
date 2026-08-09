@@ -1,6 +1,8 @@
 import { activeWorkspace } from "@/lib/workspace";
+import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { getOrMakeYou, platformLabel, type YouReport } from "@/lib/you";
+import type { ReviewPulse } from "@/lib/pulse";
 import { ActOnIt } from "@/components/ActOnIt";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +89,21 @@ function Reputation({ r }: { r: YouReport["reputation"] }) {
   );
 }
 
+function PulseCol({ title, tone, items, empty }: { title: string; tone: string; items: string[]; empty: string }) {
+  return (
+    <div className="rounded-2xl bg-white/55 p-3">
+      <div className={`text-[11px] font-semibold uppercase tracking-wide ${tone}`}>{title}</div>
+      {items.length ? (
+        <ul className="mt-1 space-y-0.5">
+          {items.slice(0, 4).map((t, i) => <li key={i} className="text-sm text-ink">{t}</li>)}
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-ink-faint">{empty}</p>
+      )}
+    </div>
+  );
+}
+
 export default async function YouPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You" />;
@@ -94,6 +111,12 @@ export default async function YouPage() {
   const you = await getOrMakeYou(state.workspace);
   const h = HEALTH[you.synthesis.health] ?? HEALTH.watch;
   const price = you.price;
+
+  // review pulse — read the CACHED value only (built by the warm step) so the page
+  // stays fast; shows what's CHANGING in reviews week-over-week.
+  const supabase = await createClient();
+  const { data: pRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
+  const pulse = (pRow?.goals as any)?.pulse as ReviewPulse | undefined;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -116,6 +139,28 @@ export default async function YouPage() {
       </section>
 
       <Reputation r={you.reputation} />
+
+      {pulse && !pulse.failed && (pulse.emerging.length > 0 || pulse.rising.length > 0 || pulse.fading.length > 0 || pulse.summary) && (
+        <section className="card">
+          <h2 className="mb-1 flex items-center gap-2 font-semibold">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">📈</span>
+            What&apos;s changing in your reviews
+          </h2>
+          {(pulse.newReviews != null || pulse.ratingDelta != null) && (
+            <p className="text-xs text-ink-faint">
+              {pulse.newReviews != null ? `${pulse.newReviews} new review${pulse.newReviews === 1 ? "" : "s"}` : ""}
+              {pulse.ratingDelta != null ? `${pulse.newReviews != null ? " · " : ""}rating ${pulse.ratingDelta >= 0 ? "+" : ""}${pulse.ratingDelta}★` : ""}
+              {pulse.windowDays ? ` over ~${pulse.windowDays} days` : ""}
+            </p>
+          )}
+          {pulse.summary && <p className="mt-2 text-sm text-ink-soft">{pulse.summary}</p>}
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <PulseCol title="⚠ Emerging" tone="text-coral-dark" items={pulse.emerging.map((e) => e.theme)} empty="Nothing new to worry about" />
+            <PulseCol title="↑ Rising praise" tone="text-trust-high" items={pulse.rising} empty="—" />
+            <PulseCol title="↓ Fading" tone="text-ink-faint" items={pulse.fading} empty="—" />
+          </div>
+        </section>
+      )}
 
       {/* loves + gripes */}
       {(you.synthesis.loves.length > 0 || you.synthesis.gripes.length > 0) && (

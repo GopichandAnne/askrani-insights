@@ -104,6 +104,34 @@ export function buildDigest(
     });
   }
 
+  // ── Review pulse — what's CHANGING in reviews, not just the current state ──
+  const pulse = goals.pulse as any | undefined;
+  if (pulse && !pulse.failed) {
+    for (const e of ((pulse.emerging ?? []) as any[]).slice(0, 2)) {
+      const theme = clean(e.theme);
+      if (!theme) continue;
+      push({
+        id: `pulse:emerging:${theme.slice(0, 30).toLowerCase()}`,
+        severity: "alert", pillar: "Reputation", icon: "📈",
+        title: `Emerging complaint: ${theme}`,
+        detail: clean(pulse.summary) || "Showing up more in recent reviews — get ahead of it before it spreads.",
+        act: { kind: "content", move: `Get ahead of the growing concern about "${theme}" — an operational fix + a reassuring post`, context: clean(pulse.summary) },
+        href: "/you",
+      });
+    }
+    const rise = clean(((pulse.rising ?? []) as string[])[0]);
+    if (rise) {
+      push({
+        id: `pulse:rising:${rise.slice(0, 30).toLowerCase()}`,
+        severity: "opportunity", pillar: "Reputation", icon: "💚",
+        title: `Customers increasingly love: ${rise}`,
+        detail: "Rising in your recent reviews — make it the star of your next post.",
+        act: { kind: "content", move: `Celebrate what customers increasingly love: ${rise}`, context: clean(pulse.summary) },
+        href: "/you",
+      });
+    }
+  }
+
   // ── Competitor deals (goals.deals + goals.flyerDeals), grouped by rival ────
   const captionDeals = ((goals.deals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: clean(d.deal) }));
   const flyerDeals = ((goals.flyerDeals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: `${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}` }));
