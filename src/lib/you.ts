@@ -55,6 +55,9 @@ export interface YouSynthesis {
   gripes: { theme: string; fix: string }[];
   reviewsToAnswer: ReviewToAnswer[];
   summary: string;
+  /** true when the AI synthesis errored (e.g. API down / out of credits) — as
+   *  opposed to genuinely having no reviews. Never cache-accepted, so it retries. */
+  failed?: boolean;
 }
 export interface YouReport {
   name: string;
@@ -123,8 +126,8 @@ const SCHEMA = {
 const SYSTEM =
   "You are Ask Rani, telling a busy, non-technical local-business owner how their reputation looks. Work ONLY from the reviews and numbers given — never invent praise or complaints. Be honest but constructive; the owner is \"you\". Plain language, no jargon.";
 
-const emptySynthesis = (msg: string): YouSynthesis => ({
-  headline: "Your reputation at a glance", health: "watch", loves: [], gripes: [], reviewsToAnswer: [], summary: msg,
+const emptySynthesis = (msg: string, failed = false): YouSynthesis => ({
+  headline: "Your reputation at a glance", health: "watch", loves: [], gripes: [], reviewsToAnswer: [], summary: msg, failed,
 });
 
 export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<YouReport> {
@@ -238,7 +241,7 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
   } else {
     const numbered = reviews.map((r, i) => `[${i}] ${r.text.slice(0, 300)}`).join("\n");
     try {
-      const { data } = await getLlm().callStructured<{
+      const call = () => getLlm().callStructured<{
         headline: string;
         health: YouSynthesis["health"];
         loves: string[];
@@ -252,6 +255,8 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
         tier: "extract",
         maxTokens: 1300,
       });
+      // one retry on transient failure before we give up
+      const { data } = await call().catch(() => call());
       synthesis = {
         headline: strip(data.headline) || "Your reputation at a glance",
         health: data.health ?? "watch",
@@ -272,7 +277,16 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
         synthesis.summary = `You're at ${reputation.rating}★ from ${reputation.reviewCount ?? "many"} reviews${vs}.${fix ? ` The clearest thing to work on: ${fix.toLowerCase()}.` : ""}`;
       }
     } catch {
-      synthesis = emptySynthesis("We're still gathering enough reviews to summarize — check back after the next scan.");
+      // The AI read FAILED (API error / out of credits) — we DO have reviews.
+      // Don't pretend there are none, and mark it failed so it's never cached as
+      // final (getOrMakeYou/youIsGood retry it next time instead of sticking).
+      const vs = reputation.delta == null ? "" : reputation.delta >= 0 ? ` — above the local ${reputation.marketAvg}★ average` : ` — below the local ${reputation.marketAvg}★ average`;
+      synthesis = emptySynthesis(
+        reputation.rating != null
+          ? `You're at ${reputation.rating}★ from ${reputation.reviewCount ?? "many"} reviews${vs}. We couldn't read your ${reviews.length} recent reviews just now — we'll pull out the highlights on the next refresh.`
+          : "We couldn't read your reviews just now — we'll try again on the next refresh.",
+        true,
+      );
     }
   }
 
@@ -284,8 +298,10 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
   };
 }
 
-/** Non-empty when the synthesis actually said something (warm-retry predicate). */
+/** Non-empty when the synthesis actually said something (warm-retry predicate).
+ *  A failed AI read is never "good" — so warm/getOrMakeYou retry it. */
 export function youIsGood(y: YouReport): boolean {
+  if (y.synthesis.failed) return false;
   return !!(y.synthesis.summary && (y.synthesis.loves.length || y.synthesis.gripes.length || y.reviewsAnalyzed === 0));
 }
 
@@ -294,7 +310,9 @@ export async function getOrMakeYou(ws: WorkspaceRow, maxAgeHours = 12): Promise<
   const supabase = await createClient();
   const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const cached = (data?.goals as any)?.you as YouReport | undefined;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.synthesis) return cached;
+  // Serve cache only if it's fresh AND the AI read didn't fail — a failed read is
+  // regenerated on the next view so it self-heals once the API is back / funded.
+  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.synthesis && !cached.synthesis.failed) return cached;
 
   const fresh = await generateYou(ws);
   const svc = createServiceClient();
