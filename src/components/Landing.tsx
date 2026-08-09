@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { RaniMark } from "@/components/RaniSpinner";
 import { ExploreClient } from "@/components/ExploreClient";
+import { LiveRadarHero } from "@/components/LiveRadarHero";
 
 /**
  * Public front door (signed-out visitors at insights.askrani.ai). Futuristic
@@ -9,74 +10,8 @@ import { ExploreClient } from "@/components/ExploreClient";
 export function Landing() {
   return (
     <div className="animate-fade-in">
-      {/* ── Hero ─────────────────────────────────────────────────────── */}
-      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-14 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
-        <div>
-          <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-brand-deep">
-            <span className="rani-dots scale-75" aria-hidden><span /><span /><span /></span>
-            Your always-on local market analyst
-          </span>
-          <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
-            Know your local market.{" "}
-            <span className="text-gradient">Beat your competition.</span>
-          </h1>
-          <p className="mt-6 max-w-xl text-lg text-ink-soft">
-            You&apos;re busy running the place — not watching the shop next door. Ask Rani watches your
-            competitors for you — their prices, offers, reviews and social — and each week tells you
-            exactly what to do about it. Plain English, no spreadsheets. Start free with one search.
-          </p>
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Built for owners of</span>
-            {["Med spas & aesthetics", "Salons & barbers", "Restaurants", "Grocers"].map((t) => (
-              <span key={t} className="chip bg-white/70 text-ink-soft">{t}</span>
-            ))}
-          </div>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <a href="#explore" className="btn btn-primary px-7 py-3.5 text-base">
-              Try it free — no signup <RaniMark size={18} />
-            </a>
-            <Link href="/login" className="btn btn-secondary px-7 py-3.5 text-base">
-              Sign in
-            </Link>
-          </div>
-          <p className="mt-4 text-sm text-ink-faint">Explore any area free · no credit card · monitoring runs on credits</p>
-        </div>
-
-        {/* floating product-preview card */}
-        <div className="relative lg:pl-6">
-          <div className="animate-float glass rounded-3xl p-5 shadow-glass">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <RaniMark size={30} />
-                <span className="font-display text-lg font-bold italic text-brand-deep">Today</span>
-              </div>
-              <span className="chip bg-brand-soft text-brand-deep">live</span>
-            </div>
-
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              {[["Watched", "7"], ["Events", "12"], ["Actions", "3"]].map(([l, v]) => (
-                <div key={l} className="rounded-2xl bg-white/70 p-3 text-center">
-                  <div className="text-2xl font-extrabold text-brand-deep">{v}</div>
-                  <div className="text-[11px] text-ink-faint">{l}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 space-y-2">
-              <div className="flex items-start gap-2 rounded-2xl bg-white/70 p-3 text-sm">
-                <span className="chip shrink-0 bg-surface-sunken text-ink-soft">new offer</span>
-                <span className="text-ink-soft"><b className="text-ink">Radiance Med Spa</b> launched $10/unit Botox for new clients</span>
-              </div>
-              <div className="flex items-start gap-2 rounded-2xl bg-white/70 p-3 text-sm">
-                <span className="chip shrink-0 bg-brand-soft text-brand">action</span>
-                <span className="text-ink-soft">Post two before/after results this week — your top rival gets 3× the engagement</span>
-              </div>
-            </div>
-          </div>
-          <div className="pointer-events-none absolute -right-4 -top-6 h-24 w-24 rounded-full bg-coral/20 blur-2xl" aria-hidden />
-          <div className="pointer-events-none absolute -bottom-8 left-2 h-28 w-28 rounded-full bg-brand/20 blur-2xl" aria-hidden />
-        </div>
-      </section>
+      {/* ── Hero: live market-radar (the product doing its job on load) ── */}
+      <LiveRadarHero />
 
       {/* ── Try it now: live Explore (no signup) ─────────────────────── */}
       <section id="explore" className="mx-auto max-w-5xl px-6 py-14">
