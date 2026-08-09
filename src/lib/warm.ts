@@ -12,6 +12,7 @@ import { buildMenuLens } from "@/lib/menu";
 import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
+import { snapshotMarket } from "@/lib/panel";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -73,5 +74,13 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
       .update({ goals: { ...((cur?.goals as object) ?? {}), [key]: value } })
       .eq("id", workspaceId);
     await sleep(2000); // small gap between surfaces to avoid a rate-limit burst
+  }
+
+  // Bank today's append-only market-panel snapshot now that every pillar is
+  // fresh. Best-effort: the panel is a data asset, never blocks warm.
+  try {
+    await snapshotMarket(row, db);
+  } catch {
+    /* non-fatal — next cycle captures it */
   }
 }
