@@ -54,9 +54,15 @@ function SetUpCta() {
           Search your business — we detect its type, find your local competitors, and gather everything about
           your market. Takes about two minutes.
         </p>
-        <Link href="/onboarding" className="btn btn-primary mt-1 px-7 py-3.5 text-base">
-          Get started <RaniMark size={18} />
-        </Link>
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-3">
+          <Link href="/onboarding" className="btn btn-primary px-7 py-3.5 text-base">
+            Get started <RaniMark size={18} />
+          </Link>
+          <Link href="/explore" className="btn btn-secondary px-6 py-3.5 text-base">
+            📍 Monitor an area instead
+          </Link>
+        </div>
+        <p className="text-xs text-ink-faint">No business of your own? Watch a whole zip or city — no business required.</p>
       </div>
     </section>
   );
