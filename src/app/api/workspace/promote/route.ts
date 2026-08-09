@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api";
+import { activeWorkspace } from "@/lib/workspace";
 import { createServiceClient } from "@/lib/supabase/server";
 import { refundCredits } from "@/lib/credits";
 import { logEvent } from "@/lib/analytics";
@@ -16,8 +17,15 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const auth = await requireOrg();
   if (!auth) return unauthorized();
-  const { workspaceId } = await req.json().catch(() => ({}));
-  if (!workspaceId) return badRequest("workspaceId required");
+  // The promote button lives on the ephemeral workspace's own pages, so default
+  // to the active workspace; still accept an explicit id in the body.
+  const body = await req.json().catch(() => ({}));
+  let workspaceId: string | undefined = typeof body?.workspaceId === "string" ? body.workspaceId : undefined;
+  if (!workspaceId) {
+    const state = await activeWorkspace();
+    if (state.status === "ok") workspaceId = state.workspace.id;
+  }
+  if (!workspaceId) return badRequest("No active workspace to promote.");
   if (!(await workspaceInOrg(workspaceId, auth.orgId))) return unauthorized();
 
   const svc = createServiceClient();
