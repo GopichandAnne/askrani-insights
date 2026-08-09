@@ -187,8 +187,8 @@ export function LiveRadarHero() {
         </div>
         <p className="mt-4 text-sm text-ink-faint">Explore free · no card · monitoring runs on credits</p>
         <div className="mt-6 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Built for</span>
-          {["Med spas", "Salons & barbers", "Restaurants", "Grocers"].map((t) => (
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Built for any local small business</span>
+          {["Restaurants", "Salons", "Med spas", "Grocers", "& more"].map((t) => (
             <span key={t} className="chip bg-white/70 text-ink-soft">{t}</span>
           ))}
         </div>
