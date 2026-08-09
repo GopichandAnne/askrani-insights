@@ -40,6 +40,48 @@ function cityFromAddress(addr?: string): string | null {
   return parts.length >= 2 ? parts[parts.length - 2] : null;
 }
 
+export interface TrendPoint {
+  date: string;
+  youRating: number | null; mktRating: number | null;
+  youPrice: number | null; mktPrice: number | null;
+  rank: number | null; marketSize: number | null;
+  deals: number | null; ads: number | null;
+}
+export interface MarketTrends { points: TrendPoint[]; latest: TrendPoint | null; days: number }
+
+/** Read the workspace's market panel as a you-vs-market time series (Phase 2). */
+export async function getMarketTrends(ws: WorkspaceRow): Promise<MarketTrends> {
+  const svc = createServiceClient();
+  const { data } = await svc
+    .from("market_snapshot")
+    .select("captured_on, is_target, rating, avg_price, rating_rank, market_size, deals_active, ads_active")
+    .eq("workspace_id", ws.id)
+    .order("captured_on", { ascending: true });
+  const rows = (data ?? []) as any[];
+
+  const byDate = new Map<string, any[]>();
+  for (const r of rows) { const k = r.captured_on as string; (byDate.get(k) ?? byDate.set(k, []).get(k)!).push(r); }
+
+  const avg = (xs: number[]) => (xs.length ? Number((xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2)) : null);
+  const points: TrendPoint[] = [...byDate.entries()].map(([date, rs]) => {
+    const you = rs.find((r) => r.is_target);
+    const rivals = rs.filter((r) => !r.is_target);
+    return {
+      date,
+      youRating: you?.rating ?? null,
+      mktRating: avg(rivals.map((r) => r.rating).filter((v): v is number => typeof v === "number")),
+      youPrice: you?.avg_price ?? null,
+      mktPrice: avg(rivals.map((r) => r.avg_price).filter((v): v is number => typeof v === "number")),
+      rank: you?.rating_rank ?? null,
+      marketSize: you?.market_size ?? null,
+      deals: you?.deals_active ?? null,
+      ads: you?.ads_active ?? null,
+    };
+  });
+
+  return { points, latest: points[points.length - 1] ?? null, days: points.length };
+}
+
 /** Write today's snapshot row for every business in the workspace. Idempotent. */
 export async function snapshotMarket(ws: WorkspaceRow, db?: RlsClient): Promise<number> {
   const svc = createServiceClient();
