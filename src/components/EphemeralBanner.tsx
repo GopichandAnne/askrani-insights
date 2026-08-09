@@ -16,7 +16,8 @@ export async function EphemeralBanner() {
   const goals = (data?.goals as Record<string, any> | null) ?? {};
   if (!goals.ephemeral) return null;
 
-  const scope = goals.deepReadScope === "area" ? "market" : "business";
+  const isArea = goals.deepReadScope === "area";
+  const scope = isArea ? "market" : "business";
   const expires = goals.ephemeralExpiresAt ? new Date(goals.ephemeralExpiresAt) : null;
   const expiresLabel = expires ? expires.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
   const creditBack = Number(goals.deepReadCharged ?? 0);
@@ -32,8 +33,15 @@ export async function EphemeralBanner() {
           {expiresLabel ? ` Available until ${expiresLabel}.` : ""} Promote it to keep it live and watched.
         </p>
       </div>
-      <div className="mt-3 sm:mt-0">
-        <PromoteButton creditBack={creditBack} />
+      <div className="mt-3 flex flex-wrap gap-2 sm:mt-0">
+        {isArea ? (
+          <>
+            <PromoteButton creditBack={creditBack} as="area" label="Monitor this whole area →" />
+            <PromoteButton creditBack={0} as="business" variant="secondary" label="Just this business →" />
+          </>
+        ) : (
+          <PromoteButton creditBack={creditBack} />
+        )}
       </div>
     </div>
   );
