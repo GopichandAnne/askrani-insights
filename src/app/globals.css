@@ -179,8 +179,15 @@ h2,
 /* Slow conic sweep behind the "What we monitor" console (MonitorPanel). */
 @keyframes radar-spin { to { transform: rotate(360deg); } }
 .radar-spin { animation: radar-spin 9s linear infinite; will-change: transform; }
+/* Target-lock rings behind the recommended plan (PricingPanel) — a slow breathe. */
+@keyframes radar-lock {
+  0%, 100% { opacity: .35; transform: scale(0.98); }
+  50%      { opacity: .7;  transform: scale(1.02); }
+}
+.radar-lock { animation: radar-lock 3.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .radar-spin { animation: none; }
+  .radar-lock { animation: none; opacity: .5; }
 }
 /* Rani gliding along the collection track (position handled inline; this is the
  * gentle bob + a subtle lean). */
