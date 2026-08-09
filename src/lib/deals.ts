@@ -115,6 +115,7 @@ export async function generateDeals(ws: WorkspaceRow, db?: RlsClient): Promise<D
 }
 
 export function dealsIsGood(d: DealsReport): boolean {
+  if (d.failed) return false; // a failed AI read is never "good" — retry it
   return !!(d.deals.length || d.empty);
 }
 

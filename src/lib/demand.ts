@@ -159,6 +159,7 @@ export async function generateDemand(ws: WorkspaceRow, db?: RlsClient): Promise<
 }
 
 export function demandIsGood(d: DemandReport): boolean {
+  if (d.failed) return false; // a failed AI read is never "good" — retry it
   return !!(d.demands.length || d.empty);
 }
 

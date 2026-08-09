@@ -213,6 +213,7 @@ export async function generateWinning(ws: WorkspaceRow, db?: RlsClient): Promise
 
 /** Non-empty when we produced winning offerings (warm-retry predicate). */
 export function winningIsGood(w: WinningReport): boolean {
+  if (w.failed) return false; // a failed AI read is never "good" — retry it
   return !!(w.winning.length || w.empty);
 }
 
