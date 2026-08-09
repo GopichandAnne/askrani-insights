@@ -134,7 +134,7 @@ export default async function WinningPage() {
       ) : (
         <>
           {w.summary && (
-            <section className="card bg-brand-hero text-white">
+            <section className="card-hero">
               <h2 className="flex items-center gap-2 font-display text-lg font-extrabold"><span aria-hidden>🏆</span> The read</h2>
               <p className="mt-1.5 max-w-3xl text-sm text-white/90">{w.summary}</p>
             </section>

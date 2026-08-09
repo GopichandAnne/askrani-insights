@@ -1,7 +1,7 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
-import { getOrMakeYou, platformLabel, type YouReport } from "@/lib/you";
+import { getOrMakeYou, platformLabel, type YouReport, type ReviewToAnswer } from "@/lib/you";
 import type { ReviewPulse } from "@/lib/pulse";
 import { ActOnIt } from "@/components/ActOnIt";
 import { PulseColumns } from "@/components/PulseColumns";
@@ -90,6 +90,28 @@ function Reputation({ r }: { r: YouReport["reputation"] }) {
   );
 }
 
+function AnswerCard({ r, businessName }: { r: ReviewToAnswer; businessName: string }) {
+  return (
+    <div className="rounded-2xl bg-white/55 p-3.5">
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 border-l-2 border-line pl-2.5 text-sm italic text-ink-soft">“{r.quote}”</p>
+        <span className="chip shrink-0 bg-surface-sunken text-ink-faint">{r.why}</span>
+      </div>
+      <div className="mt-2 rounded-xl bg-brand-soft/60 p-2.5 text-sm text-brand-deep">
+        <span className="font-semibold">Suggested reply:</span> {r.reply}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <ActOnIt kind="reply" move={`Reply to this ${businessName} review: "${r.quote}"`} context={r.why} reviewName={r.reviewName} small />
+        {r.url && (
+          <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex text-xs font-medium text-brand hover:underline">
+            Open the review to respond ↗
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default async function YouPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You" />;
@@ -116,7 +138,7 @@ export default async function YouPage() {
       </div>
 
       {/* health headline */}
-      <section className="card bg-brand-hero text-white">
+      <section className="card-hero">
         <div className="flex flex-wrap items-center gap-3">
           <span className={`chip ${h.chip}`}>{h.label}</span>
           <h2 className="font-display text-xl font-extrabold">{you.synthesis.headline}</h2>
@@ -194,26 +216,18 @@ export default async function YouPage() {
             Reviews worth answering
           </h2>
           <div className="space-y-3">
-            {you.synthesis.reviewsToAnswer.map((r, i) => (
-              <div key={i} className="rounded-2xl bg-white/55 p-3.5">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 flex-1 border-l-2 border-line pl-2.5 text-sm italic text-ink-soft">“{r.quote}”</p>
-                  <span className="chip shrink-0 bg-surface-sunken text-ink-faint">{r.why}</span>
-                </div>
-                <div className="mt-2 rounded-xl bg-brand-soft/60 p-2.5 text-sm text-brand-deep">
-                  <span className="font-semibold">Suggested reply:</span> {r.reply}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <ActOnIt kind="reply" move={`Reply to this ${you.name} review: "${r.quote}"`} context={r.why} reviewName={r.reviewName} small />
-                  {r.url && (
-                    <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex text-xs font-medium text-brand hover:underline">
-                      Open the review to respond ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            ))}
+            {you.synthesis.reviewsToAnswer.slice(0, 2).map((r, i) => <AnswerCard key={i} r={r} businessName={you.name} />)}
           </div>
+          {you.synthesis.reviewsToAnswer.length > 2 && (
+            <details className="mt-3">
+              <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-brand-deep hover:bg-brand-soft/60">
+                Show {you.synthesis.reviewsToAnswer.length - 2} more <span aria-hidden>›</span>
+              </summary>
+              <div className="mt-2 space-y-3">
+                {you.synthesis.reviewsToAnswer.slice(2).map((r, i) => <AnswerCard key={i + 2} r={r} businessName={you.name} />)}
+              </div>
+            </details>
+          )}
         </section>
       )}
 

@@ -157,7 +157,7 @@ export default async function ContentPage() {
       ) : (
         <>
           {c.summary && (
-            <section className="card bg-brand-hero text-white">
+            <section className="card-hero">
               <h2 className="flex items-center gap-2 font-display text-lg font-extrabold">
                 <span aria-hidden>🎬</span> The content play
               </h2>
@@ -174,8 +174,18 @@ export default async function ContentPage() {
                 Swipe file — steal these formats
               </h2>
               <div className="grid items-start gap-4 md:grid-cols-2">
-                {c.swipe.map((p, i) => <Swipe key={i} p={p} />)}
+                {c.swipe.slice(0, 4).map((p, i) => <Swipe key={i} p={p} />)}
               </div>
+              {c.swipe.length > 4 && (
+                <details className="mt-4">
+                  <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold text-brand-deep hover:bg-brand-soft/60">
+                    Show {c.swipe.length - 4} more post{c.swipe.length - 4 === 1 ? "" : "s"} <span aria-hidden>›</span>
+                  </summary>
+                  <div className="mt-3 grid items-start gap-4 md:grid-cols-2">
+                    {c.swipe.slice(4).map((p, i) => <Swipe key={i + 4} p={p} />)}
+                  </div>
+                </details>
+              )}
             </section>
           )}
 
