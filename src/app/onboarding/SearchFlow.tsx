@@ -477,7 +477,7 @@ function WorkspacePhase({
             <div>
               <div className="font-semibold">Ready when you are</div>
               <p className="text-sm text-ink-faint">
-                We&apos;ll gather websites, menus, offers, reviews and social for you and the {competitors.length} competitor{competitors.length === 1 ? "" : "s"} above.
+                We&apos;ll gather websites, listings, offers, reviews and social for you and the {competitors.length} competitor{competitors.length === 1 ? "" : "s"} above.
               </p>
             </div>
             <button onClick={startCollection} disabled={starting} className="btn btn-primary px-7 py-3 text-base disabled:opacity-60">
@@ -504,7 +504,7 @@ function WorkspacePhase({
           />
           {!allDone ? (
             <p className="mt-3 text-xs text-ink-faint">
-              We&apos;re gathering everything about your market in the background — menus, prices, offers and
+              We&apos;re gathering everything about your market in the background — listings, prices, offers and
               reviews. This can take a few minutes. Feel free to leave this page; we&apos;ll keep working.
             </p>
           ) : (

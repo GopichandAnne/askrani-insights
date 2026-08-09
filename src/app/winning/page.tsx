@@ -78,8 +78,8 @@ function Row({ w }: { w: WinningEntity }) {
         <span className={`chip ${m.chip}`}>{m.label}</span>
         <span className="font-semibold">{w.name}</span>
         {w.onYourMenu
-          ? <span className="chip bg-trust-direct/12 text-trust-direct">✓ on your menu</span>
-          : <span className="chip bg-coral/10 text-coral-dark">not on your menu</span>}
+          ? <span className="chip bg-trust-direct/12 text-trust-direct">✓ in your lineup</span>
+          : <span className="chip bg-coral/10 text-coral-dark">not in your lineup</span>}
         <span className="ml-auto text-xs text-ink-faint">
           {w.offeredBy > 0 && <>at {w.offeredBy} nearby</>}{w.priceRange ? ` · ${w.priceRange}` : ""}
         </span>
@@ -119,15 +119,15 @@ export default async function WinningPage() {
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">What&apos;s winning</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-          The specific dishes and offerings winning in your market right now — fused from who offers them, what
-          reviews say, and what&apos;s getting social traction — and whether they&apos;re on your menu.
+          The specific products and offerings winning in your market right now — fused from who offers them, what
+          reviews say, and what&apos;s getting social traction — and whether they&apos;re in your lineup.
         </p>
       </div>
 
       {nothing ? (
         <div className="card border-dashed">
           <p className="text-sm text-ink-soft">
-            <span className="font-semibold text-ink">Nothing yet.</span> Once we&apos;ve collected menus, reviews and
+            <span className="font-semibold text-ink">Nothing yet.</span> Once we&apos;ve collected listings, reviews and
             posts across your market, we&apos;ll pull out the specific offerings that are winning — and which ones you&apos;re missing.
           </p>
         </div>
@@ -145,7 +145,7 @@ export default async function WinningPage() {
             <section className="card">
               <h2 className="mb-1 flex items-center gap-2 font-semibold">
                 <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">🎯</span>
-                Gaps to grab — winning, but not on your menu
+                Gaps to grab — winning, but not in your lineup
               </h2>
               <p className="mb-3 text-xs text-ink-faint">Offerings pulling customers to your rivals that you don&apos;t have yet.</p>
               <div className="space-y-2.5">{gaps.map((x, i) => <Row key={i} w={x} />)}</div>
@@ -171,7 +171,7 @@ export default async function WinningPage() {
                 <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🏷️</span>
                 Your prices vs the market — item by item
               </h2>
-              <p className="mb-3 text-xs text-ink-faint">Same dish, your price vs what nearby rivals charge. Biggest gaps first.</p>
+              <p className="mb-3 text-xs text-ink-faint">Same item, your price vs what nearby rivals charge. Biggest gaps first.</p>
               <ul className="space-y-1.5">{menu.pricePositions.map((p, i) => <PricePosRow key={i} p={p} />)}</ul>
             </section>
           )}
@@ -182,7 +182,7 @@ export default async function WinningPage() {
                 <span className="grid h-7 w-7 place-items-center rounded-lg bg-trust-direct/15 text-trust-direct">✦</span>
                 Only you offer this — your differentiators
               </h2>
-              <p className="mb-3 text-xs text-ink-faint">Items on your menu that no nearby rival has — lean on these to stand out.</p>
+              <p className="mb-3 text-xs text-ink-faint">Items in your lineup that no nearby rival has — lean on these to stand out.</p>
               <div className="flex flex-wrap gap-2">
                 {menu.differentiators.map((d, i) => (
                   <span key={i} className="chip bg-trust-direct/12 text-trust-direct">{d.item} <span className="ml-1 font-semibold">${d.yourPrice.toFixed(0)}</span></span>

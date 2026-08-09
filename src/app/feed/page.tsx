@@ -70,7 +70,7 @@ export default async function FeedPage() {
         {!events?.length ? (
           <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-faint">
             No changes yet. These appear after a business is re-collected and something moved
-            (price, new dish, a promotion starting). Re-run collection to build history.
+            (price, new item, a promotion starting). Re-run collection to build history.
           </p>
         ) : (
           <ul className="stagger space-y-1.5">

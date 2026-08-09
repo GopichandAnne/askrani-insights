@@ -10,7 +10,7 @@ import { RaniMark } from "@/components/RaniSpinner";
  */
 
 const FREE = ["Explore any zip or city", "Real ratings & review counts", "Ranked list + map", "A quick market overview"];
-const PAID = ["Track a business — or a whole area, no business needed", "Prices, social, delivery menus & reviews", "Change alerts + weekly AI briefing", "Your Edge / the opening + post drafts"];
+const PAID = ["Track a business — or a whole area, no business needed", "Prices, social, delivery listings & reviews", "Change alerts + weekly AI briefing", "Your Edge / the opening + post drafts"];
 
 export function PricingPanel() {
   return (

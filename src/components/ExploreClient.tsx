@@ -184,7 +184,7 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
           )}
 
           <p className="px-1 text-[11px] text-ink-faint">
-            Ratings from Google. Want ongoing tracking — prices, social, delivery menus &amp; alerts — for one of these?{" "}
+            Ratings from Google. Want ongoing tracking — prices, social, delivery listings &amp; alerts — for one of these?{" "}
             {signedOut
               ? <a href="/login" className="font-medium text-brand hover:underline">Sign up to monitor a business →</a>
               : <a href="/onboarding" className="font-medium text-brand hover:underline">Set it up as your business →</a>}

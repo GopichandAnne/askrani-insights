@@ -23,7 +23,7 @@ export interface Command {
 const COMMANDS: Command[] = [
   { label: "Today", href: "/", icon: "🏠", hint: "What changed + what to do", keywords: ["overview", "home", "dashboard", "summary", "start"] },
   { label: "Market feed", href: "/feed", icon: "📡", hint: "Every change, newest first", keywords: ["changes", "events", "activity", "timeline", "price drop", "new dish", "moved", "happened", "week"] },
-  { label: "Offers & pricing", href: "/offers", icon: "💸", hint: "Menus & prices, you vs rivals", keywords: ["price", "prices", "pricing", "menu", "dishes", "products", "cost of items", "compare", "cheap", "expensive"] },
+  { label: "Offers & pricing", href: "/offers", icon: "💸", hint: "Prices & listings, you vs rivals", keywords: ["price", "prices", "pricing", "menu", "dishes", "products", "cost of items", "compare", "cheap", "expensive"] },
   { label: "Competitors", href: "/competitors", icon: "🧭", hint: "Your local rivals", keywords: ["rivals", "competition", "nearby", "businesses", "who", "compete"] },
   { label: "Recommendations", href: "/recommendations", icon: "🎯", hint: "What to do next", keywords: ["actions", "advice", "suggestions", "next moves", "todo", "ideas", "grow"] },
   { label: "Market report", href: "/reports", icon: "📊", hint: "Full report · export · cost", keywords: ["report", "export", "pdf", "csv", "download", "summary", "monitoring cost", "spend", "budget"] },
