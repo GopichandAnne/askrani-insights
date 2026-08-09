@@ -143,6 +143,42 @@ export async function getMarketTrends(ws: WorkspaceRow): Promise<MarketTrends> {
   return { points, latest: points[points.length - 1] ?? null, days: points.length };
 }
 
+export interface MarketEventRow { kind: string; rival: string | null; title: string; detail: string | null; firstSeen: string; lastSeen: string; url: string | null; metric: number | null }
+export interface MarketMemory {
+  total: number;
+  byKind: Record<string, number>;
+  sinceDate: string | null;
+  recent: MarketEventRow[];         // deals + ad-moves + breakouts, newest first
+  dealsByMonth: { month: string; count: number }[];
+}
+
+/** Read the workspace's preserved market artifacts (the seasonal memory). */
+export async function getMarketEvents(ws: WorkspaceRow, recentLimit = 8): Promise<MarketMemory> {
+  const svc = createServiceClient();
+  const { data } = await svc
+    .from("market_event")
+    .select("kind, rival, title, detail, first_seen_on, last_seen_on, url, metric")
+    .eq("workspace_id", ws.id)
+    .order("first_seen_on", { ascending: false })
+    .limit(500);
+  const rows = (data ?? []) as any[];
+
+  const byKind: Record<string, number> = {};
+  for (const r of rows) byKind[r.kind] = (byKind[r.kind] ?? 0) + 1;
+
+  const monthAcc = new Map<string, number>();
+  for (const r of rows) if (r.kind === "deal") { const m = String(r.first_seen_on).slice(0, 7); monthAcc.set(m, (monthAcc.get(m) ?? 0) + 1); }
+  const dealsByMonth = [...monthAcc.entries()].map(([month, count]) => ({ month, count })).sort((a, b) => a.month.localeCompare(b.month));
+
+  const recent = rows
+    .filter((r) => r.kind === "deal" || r.kind === "ad_move" || r.kind === "breakout")
+    .slice(0, recentLimit)
+    .map((r) => ({ kind: r.kind, rival: r.rival ?? null, title: r.title, detail: r.detail ?? null, firstSeen: r.first_seen_on, lastSeen: r.last_seen_on, url: r.url ?? null, metric: r.metric ?? null }));
+
+  const sinceDate = rows.length ? String(rows[rows.length - 1].first_seen_on) : null;
+  return { total: rows.length, byKind, sinceDate, recent, dealsByMonth };
+}
+
 /** Write today's snapshot row for every business in the workspace. Idempotent. */
 export async function snapshotMarket(ws: WorkspaceRow, db?: RlsClient): Promise<number> {
   const svc = createServiceClient();

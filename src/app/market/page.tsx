@@ -3,7 +3,8 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { MarketTabs } from "@/components/MarketTabs";
 import { MarketTrends } from "@/components/MarketTrends";
-import { getMarketTrends } from "@/lib/panel";
+import { MarketMemory } from "@/components/MarketMemory";
+import { getMarketTrends, getMarketEvents } from "@/lib/panel";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,10 @@ export default async function MarketPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Market" />;
 
-  const trends = await getMarketTrends(state.workspace);
+  const [trends, memory] = await Promise.all([
+    getMarketTrends(state.workspace),
+    getMarketEvents(state.workspace),
+  ]);
 
   const cards = [
     { href: "/feed", icon: "🛰️", title: "Market feed", desc: "Everything that changed — competitor price moves, new items, promos — plus a summarized local-news digest." },
@@ -31,6 +35,8 @@ export default async function MarketPage() {
       <MarketTabs />
 
       <MarketTrends trends={trends} />
+
+      <MarketMemory memory={memory} />
 
       <div className="stagger grid gap-4 sm:grid-cols-3">
         {cards.map((c) => (
