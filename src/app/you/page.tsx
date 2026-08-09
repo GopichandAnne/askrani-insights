@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { activeWorkspace } from "@/lib/workspace";
+import { isAreaMode } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { getOrMakeYou, platformLabel, type YouReport, type ReviewToAnswer } from "@/lib/you";
@@ -115,6 +117,7 @@ function AnswerCard({ r, businessName }: { r: ReviewToAnswer; businessName: stri
 export default async function YouPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You" />;
+  if (isAreaMode(state.workspace)) redirect("/market"); // area workspaces have no "you"
 
   const you = await getOrMakeYou(state.workspace);
   const h = HEALTH[you.synthesis.health] ?? HEALTH.watch;

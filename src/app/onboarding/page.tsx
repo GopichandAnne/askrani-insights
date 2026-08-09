@@ -38,7 +38,21 @@ export default async function OnboardingPage() {
           <Link href="/login" className="btn btn-primary mt-3 px-5 py-2.5">Sign in</Link>
         </div>
       ) : (
-        <SearchFlow />
+        <>
+          {/* Two ways in: nominate your own business (below), or monitor a whole
+              area with no business of your own (the Explore → "Monitor this area" path). */}
+          <div className="card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-lg" aria-hidden>📍</span>
+              <div>
+                <p className="text-sm font-semibold">Don&apos;t want to add your own business?</p>
+                <p className="text-sm text-ink-faint">Monitor a whole area instead — a zip or city + what you&apos;re watching. No business required.</p>
+              </div>
+            </div>
+            <Link href="/explore" className="btn btn-secondary shrink-0 px-4 py-2.5 text-sm">Monitor an area →</Link>
+          </div>
+          <SearchFlow />
+        </>
       )}
     </div>
   );

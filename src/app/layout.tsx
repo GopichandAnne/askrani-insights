@@ -5,6 +5,7 @@ import { getUser, isSuperAdmin, ensureOrgForUser } from "@/lib/auth";
 import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
+import { isAreaMode } from "@/lib/subject";
 import { CreditBanner } from "@/components/CreditBanner";
 import { EphemeralBanner } from "@/components/EphemeralBanner";
 import { CollectionBanner } from "@/components/CollectionBanner";
@@ -34,15 +35,33 @@ const NAV: NavItem[] = [
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
+// Area workspaces have no "you" — market surfaces only, and Your Edge reframes to
+// "the opening here". Market is home; the you-relative tabs (This Week, You) drop.
+const AREA_NAV: NavItem[] = [
+  { href: "/market", label: "Market", icon: "market", match: ["/", "/feed", "/offers", "/competitors"] },
+  { href: "/edge", label: "The opening", icon: "today" },
+  { href: "/winning", label: "What's winning", icon: "winning" },
+  { href: "/around", label: "Around", icon: "around" },
+  { href: "/content", label: "Content", icon: "content" },
+  { href: "/explore", label: "Explore", icon: "explore" },
+  { href: "/reports", label: "Report", icon: "report" },
+  { href: "/billing", label: "Billing", icon: "billing" },
+  { href: "/onboarding", label: "New workspace", icon: "add" },
+];
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser();
   const admin = isSuperAdmin(user);
-  const nav = admin ? [...NAV, { href: "/admin", label: "Admin", icon: "admin" as const }] : NAV;
 
   // businesses this login can switch between (only meaningful when signed in)
   const workspaces = user ? await listWorkspaces() : [];
   const active = user ? await activeWorkspace() : null;
   const activeId = active?.status === "ok" ? active.workspace.id : "";
+
+  // Area workspaces get a market-only nav (no "you" surfaces).
+  const areaMode = active?.status === "ok" && isAreaMode(active.workspace);
+  const baseNav = areaMode ? AREA_NAV : NAV;
+  const nav = admin ? [...baseNav, { href: "/admin", label: "Admin", icon: "admin" as const }] : baseNav;
 
   // remaining monitoring credits (shown in the nav)
   let credits: number | null = null;

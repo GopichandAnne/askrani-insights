@@ -16,6 +16,7 @@ export interface WorkspaceRow {
   name: string;
   vertical: string;
   target_business_id: string | null;
+  goals?: Record<string, unknown> | null;
 }
 
 export type ScreenState =
@@ -41,7 +42,7 @@ export async function activeWorkspace(): Promise<ScreenState> {
   if (pinned) {
     const { data } = await supabase
       .from("workspace")
-      .select("id,name,vertical,target_business_id")
+      .select("id,name,vertical,target_business_id,goals")
       .eq("id", pinned)
       .maybeSingle();
     if (data) return { status: "ok", workspace: data as WorkspaceRow };
@@ -49,7 +50,7 @@ export async function activeWorkspace(): Promise<ScreenState> {
 
   const { data } = await supabase
     .from("workspace")
-    .select("id,name,vertical,target_business_id")
+    .select("id,name,vertical,target_business_id,goals")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -66,7 +67,7 @@ export async function listWorkspaces(): Promise<WorkspaceRow[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("workspace")
-    .select("id,name,vertical,target_business_id")
+    .select("id,name,vertical,target_business_id,goals")
     .order("created_at", { ascending: false });
   return (data ?? []) as WorkspaceRow[];
 }

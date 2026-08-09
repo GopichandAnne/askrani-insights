@@ -419,6 +419,69 @@ export async function createWorkspaceFromCandidate(
   return { workspaceId, businessId, geo: cand.geo, vertical, subtype };
 }
 
+/**
+ * Create an AREA workspace — a monitored zip/location with NO target business.
+ * The watched set is the businesses Explore already found there; each is stored
+ * as a peer competitor_edge (none is "you"). Subject metadata lives in
+ * goals.subjectType/subject (see lib/subject.ts). Idempotent-ish: callers make a
+ * fresh area workspace per monitor action; de-duping is left to the caller.
+ */
+export async function createAreaWorkspace(
+  orgId: string,
+  input: {
+    area: string;
+    keyword?: string | null;
+    vertical?: string;
+    center?: { lat: number; lng: number } | null;
+    businesses: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; vertical?: string }[];
+  },
+): Promise<{ workspaceId: string; count: number }> {
+  const svc = createServiceClient();
+  const vertical = input.vertical || "restaurant";
+  const what = input.keyword ? input.keyword.replace(/\b\w/g, (c) => c.toUpperCase()) : "Businesses";
+  const name = `${what} · ${input.area}`;
+
+  const { data, error } = await svc
+    .from("workspace")
+    .insert({
+      organization_id: orgId,
+      name,
+      vertical,
+      target_business_id: null,
+      goals: {
+        subjectType: "area",
+        subject: { area: input.area, keyword: input.keyword ?? null, center: input.center ?? null },
+      },
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(`area workspace insert: ${error.message}`);
+  const workspaceId = data.id as string;
+
+  // Persist each found business + attach it to the workspace as a peer edge.
+  let count = 0;
+  for (const b of input.businesses.slice(0, 15)) {
+    if (!b.name) continue;
+    const compId = await upsertBusiness(svc, b, b.vertical || vertical);
+    const { error: edgeErr } = await svc
+      .from("competitor_edge")
+      .upsert(
+        {
+          workspace_id: workspaceId,
+          competitor_id: compId,
+          relation: "primary",
+          tier: "standard",
+          score: 0.5,
+          score_components: { area: true },
+          rationale: "In the monitored area",
+        },
+        { onConflict: "workspace_id,competitor_id" },
+      );
+    if (!edgeErr) count++;
+  }
+  return { workspaceId, count };
+}
+
 /** Auto-discover, rank and persist competitors near the target business. */
 export async function autoDiscoverCompetitors(
   workspaceId: string,

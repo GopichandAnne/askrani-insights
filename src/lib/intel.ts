@@ -1,5 +1,6 @@
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { isAreaMode, areaSubject, areaLabel } from "@/lib/subject";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
@@ -91,13 +92,27 @@ const SYSTEM = [
   "Be concise — each field is a short phrase or one sentence, never a paragraph. Hard caps: at most 4 competitorMoves, 3 trends, 3 winningOfferings, 3 events, 4 loves and 4 gripes. Prioritize ruthlessly; quality over quantity.",
 ].join(" ");
 
+// Area mode: no "you". The reader is scouting/entering the area, so reframe the
+// SAME schema into "the opening here" — a market-entry brief. theEdge = the single
+// clearest opening; sentiment.marketSummary carries the read (leave aboutYou "").
+const AREA_SYSTEM = [
+  "You are Ask Rani, a sharp local-market strategist briefing someone sizing up an AREA to enter or compete in — there is NO 'your business' here, only the market.",
+  "Write ONLY from the DATA provided. Be concrete: use real business names, product names, and numbers. Never invent figures, reviews, events, or trends.",
+  "theEdge = THE OPENING: the single clearest gap or under-served angle for someone entering this area (an unmet need, a quality/price/reviews bar rivals aren't clearing, a missing subtype). Make it specific and doable.",
+  "competitorMoves = notable moves by the businesses already here. winningOfferings = what's demonstrably WORKING in this market (use topPerformingPosts as proof). trends = what's rising locally. sentiment.loves/gripes = what customers across the area praise/complain about; put the overall market read in sentiment.marketSummary and leave sentiment.aboutYou empty.",
+  "Every 'leverage' action is framed for a NEW entrant/competitor ('do X to win here'), never 'you already do'.",
+  "If a section has little support, return fewer (or zero) items and set dataThin=true. Plain English, no jargon.",
+  "Be concise — each field is a short phrase or one sentence. Hard caps: at most 4 competitorMoves, 3 trends, 3 winningOfferings, 3 events, 4 loves and 4 gripes.",
+].join(" ");
+
 /** Assemble the grounded signal context the strategist reasons over. */
 async function buildEdgeContext(ws: WorkspaceRow, db?: RlsClient) {
   const report = await buildWorkspaceReport(ws, 30, db);
   const supabase = db ?? (await createClient());
   const ids = await workspaceBusinessIds(ws, supabase);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
-  const youName = report.pricing.find((p) => p.isTarget)?.name ?? ws.name;
+  const area = areaSubject(ws);
+  const youName = area ? areaLabel(area) : (report.pricing.find((p) => p.isTarget)?.name ?? ws.name);
 
   const { data: content } = await supabase
     .from("content_item")
@@ -172,6 +187,8 @@ async function buildEdgeContext(ws: WorkspaceRow, db?: RlsClient) {
 
   return {
     you: youName,
+    mode: area ? "area" : "business",
+    area: area ? areaLabel(area) : undefined,
     vertical: ws.vertical,
     positioning: {
       pricing: report.pricing.map((p) => ({ name: p.name, you: p.isTarget, avgPrice: p.avgPrice, pricedItems: p.offers })),
@@ -208,7 +225,12 @@ function deepStrip<T>(v: T): T {
 
 export async function generateEdge(ws: WorkspaceRow, db?: RlsClient): Promise<Edge> {
   const at = new Date().toISOString();
-  const empty: Edge = {
+  const area = isAreaMode(ws);
+  const empty: Edge = area ? {
+    headline: "Scan this area to find the opening",
+    theEdge: "Once we've gathered the area's offers, reviews, and social, this becomes a live read of where the gap is and how a new entrant wins here.",
+    competitorMoves: [], sentiment: { loves: [], gripes: [], aboutYou: "", marketSummary: "" }, trends: [], winningOfferings: [], events: [], dataThin: true, at,
+  } : {
     headline: "Collect your market to unlock your edge",
     theEdge: "Once we've gathered your competitors' offers, reviews, and social, this becomes a live playbook of what they're doing differently and how to win.",
     competitorMoves: [], sentiment: { loves: [], gripes: [], aboutYou: "", marketSummary: "" }, trends: [], winningOfferings: [], events: [], dataThin: true, at,
@@ -218,7 +240,7 @@ export async function generateEdge(ws: WorkspaceRow, db?: RlsClient): Promise<Ed
   const context = await buildEdgeContext(ws, db);
   try {
     const { data } = await getLlm().callStructured<Omit<Edge, "at">>({
-      system: SYSTEM,
+      system: area ? AREA_SYSTEM : SYSTEM,
       text: `Analyze this local business and its market, then produce the edge brief.\n\nDATA (JSON):\n${JSON.stringify(context)}`,
       schema: SCHEMA,
       tier: "extract",

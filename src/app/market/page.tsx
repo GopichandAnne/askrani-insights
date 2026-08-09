@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { activeWorkspace } from "@/lib/workspace";
+import { isAreaMode } from "@/lib/subject";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { MarketTabs } from "@/components/MarketTabs";
 import { MarketTrends } from "@/components/MarketTrends";
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function MarketPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Market" />;
+  const area = isAreaMode(state.workspace);
 
   const [trends, memory] = await Promise.all([
     getMarketTrends(state.workspace),
@@ -29,7 +31,11 @@ export default async function MarketPage() {
       <header>
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
         <h1 className="mt-0.5 font-display text-3xl font-extrabold tracking-tight sm:text-4xl">Market</h1>
-        <p className="mt-1 max-w-2xl text-ink-soft">Everything happening across {state.workspace.name} and its competitors, in one place.</p>
+        <p className="mt-1 max-w-2xl text-ink-soft">
+          {area
+            ? <>Everything happening across the businesses in {state.workspace.name}, in one place.</>
+            : <>Everything happening across {state.workspace.name} and its competitors, in one place.</>}
+        </p>
       </header>
 
       <MarketTabs />

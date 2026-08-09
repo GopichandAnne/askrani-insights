@@ -47,7 +47,9 @@ export async function runScheduler(): Promise<SchedulerResult> {
   const creditCache = new Map<string, boolean>();
 
   for (const w of workspaces as any[]) {
-    if (!w.target_business_id) continue; // nothing set up to collect
+    // Area workspaces (goals.subjectType==='area') have no target but still watch
+    // a set of businesses — schedule them too. Only skip if nothing is set up.
+    if (!w.target_business_id && w.goals?.subjectType !== "area") continue;
     if (w.goals?.ephemeral) continue;    // deep reads never recur (one-shot snapshot)
     const cadence = PLANS[String(planOf.get(w.organization_id) ?? "")]?.cadence ?? "weekly";
     const intervalMs = (cadence === "daily" ? 1 : 7) * DAY;

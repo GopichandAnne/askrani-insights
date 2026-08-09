@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { activeWorkspace, workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { isAreaMode } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
@@ -21,6 +23,8 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const state = await activeWorkspace();
   if (state.status === "signedout" || state.status === "unconfigured") return <Landing />;
+  // Area workspaces have no "you" — the market hub is their home.
+  if (state.status === "ok" && isAreaMode(state.workspace)) redirect("/market");
 
   return (
     <div className="animate-fade-in space-y-6">

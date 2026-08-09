@@ -37,7 +37,7 @@ export async function GET(req: Request) {
   if (onlyWs) q = q.eq("id", onlyWs);
   const { data: wss } = await q;
   // Skip ephemeral deep-read workspaces — they're one-shot snapshots, not monitored.
-  const workspaces = (wss ?? []).filter((w: any) => w.target_business_id && !w.goals?.ephemeral);
+  const workspaces = (wss ?? []).filter((w: any) => (w.target_business_id || w.goals?.subjectType === "area") && !w.goals?.ephemeral);
 
   const now = Date.now();
   let due = 0, built = 0, emailed = 0, empty = 0;

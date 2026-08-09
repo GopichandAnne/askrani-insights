@@ -52,9 +52,22 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
     } catch { /* the list still stands on its own */ } finally { setReadLoading(false); }
   }
 
-  function monitorArea() {
+  const [monitoring, setMonitoring] = useState(false);
+  const [monitorErr, setMonitorErr] = useState<string | null>(null);
+
+  // Monitor the AREA itself (no business of your own). Signed-out visitors sign in
+  // first; signed-in ones get an area workspace created + activated server-side.
+  async function monitorArea() {
     track("monitor_intent", { source: "market_read", area, keyword, signed_out: signedOut });
-    window.location.href = signedOut ? "/login?next=/onboarding" : "/onboarding";
+    if (signedOut) { window.location.href = "/login?next=/explore"; return; }
+    setMonitoring(true); setMonitorErr(null);
+    try {
+      const r = await fetch("/api/explore/monitor-area", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ area, keyword }) });
+      const d = await r.json();
+      if (!r.ok || !d.workspaceId) { setMonitorErr(d.error ?? "Couldn't set up monitoring"); setMonitoring(false); return; }
+      await fetch("/api/workspace/active", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: d.workspaceId }) });
+      window.location.href = "/market";
+    } catch (e) { setMonitorErr((e as Error).message); setMonitoring(false); }
   }
 
   const [deepFor, setDeepFor] = useState<{ r: ExploreResult; scope: "single" | "area" } | null>(null);
@@ -138,6 +151,8 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
               keyword={keyword.trim()}
               signedOut={signedOut}
               onMonitor={monitorArea}
+              monitoring={monitoring}
+              monitorErr={monitorErr}
               onDeep={() => results[0] && openDeep(results[0], "area")}
             />
           )}
@@ -193,8 +208,8 @@ function toCandidate(r: ExploreResult) {
  *  area-level conversion CTA. This is the hook that turns a free scan into a
  *  monitored business. */
 function MarketReadPanel({
-  read, loading, areaLabel, keyword, signedOut, onMonitor, onDeep,
-}: { read: MarketRead | null; loading: boolean; areaLabel: string; keyword: string; signedOut: boolean; onMonitor: () => void; onDeep: () => void }) {
+  read, loading, areaLabel, keyword, signedOut, onMonitor, monitoring, monitorErr, onDeep,
+}: { read: MarketRead | null; loading: boolean; areaLabel: string; keyword: string; signedOut: boolean; onMonitor: () => void; monitoring?: boolean; monitorErr?: string | null; onDeep: () => void }) {
   const s = read?.stats;
   return (
     <section className="glass-strong relative overflow-hidden rounded-3xl p-5 sm:p-6">
@@ -246,11 +261,12 @@ function MarketReadPanel({
           <p className="text-sm text-ink-soft">Go deeper — pull the full picture (social, deals, prices, reviews, competitor ads &amp; sale flyers) for this market now, or watch it ongoing.</p>
           <div className="flex shrink-0 flex-wrap gap-2">
             <button onClick={onDeep} className="btn btn-primary px-4 py-2.5 text-sm">🔬 Deep read this market</button>
-            <button onClick={onMonitor} className="btn btn-secondary px-4 py-2.5 text-sm">
-              {signedOut ? "Monitor a business →" : "Monitor my business →"}
+            <button onClick={onMonitor} disabled={monitoring} className="btn btn-secondary px-4 py-2.5 text-sm disabled:opacity-60">
+              {monitoring ? "Setting up…" : "Monitor this area →"}
             </button>
           </div>
         </div>
+        {monitorErr && <p className="mt-2 text-right text-xs text-trust-low">{monitorErr}</p>}
       </div>
     </section>
   );
