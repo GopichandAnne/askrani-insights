@@ -163,6 +163,20 @@ h2,
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow);
 }
+
+/* Rani "bob" — matches app.askrani.ai's brand loader (translateY -4px, 1.3s). */
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.animate-bob { animation: bob 1.3s ease-in-out infinite; }
+/* Rani gliding along the collection track (position handled inline; this is the
+ * gentle bob + a subtle lean). */
+.rani-run { transition: left 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .animate-bob { animation: none; }
+  .rani-run { transition: none; }
+}
 .card-hover:hover {
   transform: translateY(-4px);
   box-shadow: 0 18px 40px -16px rgba(15, 118, 110, 0.3);

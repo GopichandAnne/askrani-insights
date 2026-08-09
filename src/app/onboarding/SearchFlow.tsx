@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { RaniSpinner, RaniMark } from "@/components/RaniSpinner";
+import { RaniCollecting } from "@/components/RaniCollecting";
 import { subtypeLabel } from "@/lib/classify";
 import type { MapPoint } from "@/components/MapPicker";
 
@@ -495,9 +496,12 @@ function WorkspacePhase({
             <div className="font-semibold">Collection {allDone ? "complete" : "running in the background"}</div>
             <div className="text-sm text-ink-faint">{done}/{businesses.length} done</div>
           </div>
-          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-surface-sunken">
-            <div className="h-full rounded-full bg-brand-gradient transition-all" style={{ width: `${businesses.length ? (done / businesses.length) * 100 : 0}%` }} />
-          </div>
+          <RaniCollecting
+            businesses={businesses.map((b: any) => ({ name: b.name, status: (jobs[b.id]?.status ?? "pending") as "pending" | "running" | "done" | "error" }))}
+            done={done}
+            total={businesses.length}
+            allDone={allDone}
+          />
           {!allDone ? (
             <p className="mt-3 text-xs text-ink-faint">
               We&apos;re gathering everything about your market in the background — menus, prices, offers and
