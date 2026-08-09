@@ -85,7 +85,7 @@ export function ActOnIt({ kind, move, context, label, small, reviewName }: { kin
                     <Field label={`Your reply${art.tone ? ` · ${art.tone}` : ""}`} value={art.reply} multiline />
                     {reviewName && (
                       posted ? (
-                        <p className="rounded-2xl bg-trust-high/10 px-3 py-2 text-sm font-medium text-trust-high">✓ Posted to Google — it'll appear on your listing shortly.</p>
+                        <p className="rounded-2xl bg-brand-soft px-3 py-2 text-sm font-medium text-brand-deep">✓ Posted to Google — it&apos;ll appear on your listing shortly.</p>
                       ) : (
                         <>
                           <button onClick={postToGoogle} disabled={posting} className="btn btn-primary w-full justify-center py-2.5 text-sm disabled:opacity-60">

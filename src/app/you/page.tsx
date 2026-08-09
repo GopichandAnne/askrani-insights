@@ -4,6 +4,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { getOrMakeYou, platformLabel, type YouReport } from "@/lib/you";
 import type { ReviewPulse } from "@/lib/pulse";
 import { ActOnIt } from "@/components/ActOnIt";
+import { PulseColumns } from "@/components/PulseColumns";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the reviews LLM read on a cold cache
@@ -89,21 +90,6 @@ function Reputation({ r }: { r: YouReport["reputation"] }) {
   );
 }
 
-function PulseCol({ title, tone, items, empty }: { title: string; tone: string; items: string[]; empty: string }) {
-  return (
-    <div className="rounded-2xl bg-white/55 p-3">
-      <div className={`text-[11px] font-semibold uppercase tracking-wide ${tone}`}>{title}</div>
-      {items.length ? (
-        <ul className="mt-1 space-y-0.5">
-          {items.slice(0, 4).map((t, i) => <li key={i} className="text-sm text-ink">{t}</li>)}
-        </ul>
-      ) : (
-        <p className="mt-1 text-xs text-ink-faint">{empty}</p>
-      )}
-    </div>
-  );
-}
-
 export default async function YouPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You" />;
@@ -154,11 +140,11 @@ export default async function YouPage() {
             </p>
           )}
           {pulse.summary && <p className="mt-2 text-sm text-ink-soft">{pulse.summary}</p>}
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <PulseCol title="⚠ Emerging" tone="text-coral-dark" items={pulse.emerging.map((e) => e.theme)} empty="Nothing new to worry about" />
-            <PulseCol title="↑ Rising praise" tone="text-trust-high" items={pulse.rising} empty="—" />
-            <PulseCol title="↓ Fading" tone="text-ink-faint" items={pulse.fading} empty="—" />
-          </div>
+          <PulseColumns columns={[
+            { title: "⚠ Emerging", tone: "text-coral-dark", items: pulse.emerging.map((e) => e.theme), empty: "Nothing new to worry about" },
+            { title: "↑ Rising praise", tone: "text-brand-deep", items: pulse.rising, empty: "—" },
+            { title: "↓ Fading", tone: "text-ink-faint", items: pulse.fading, empty: "—" },
+          ]} />
         </section>
       )}
 

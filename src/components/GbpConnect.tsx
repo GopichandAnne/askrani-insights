@@ -41,7 +41,7 @@ export function GbpConnect() {
           </p>
         </div>
         {s.connected ? (
-          <span className="chip bg-trust-high/15 text-trust-high">Connected{s.title ? ` · ${s.title}` : ""}</span>
+          <span className="chip bg-brand-soft text-brand-deep">● Connected{s.title ? ` · ${s.title}` : ""}</span>
         ) : (
           <span className="chip bg-surface-sunken text-ink-faint">Not connected</span>
         )}

@@ -6,6 +6,7 @@ import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
 import { getAdsReport } from "@/lib/ads";
 import type { SocialPulse } from "@/lib/socialpulse";
+import { PulseColumns } from "@/components/PulseColumns";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the content LLM read on a cold cache
@@ -108,26 +109,13 @@ function SocialPulseSection({ p }: { p: SocialPulse }) {
       )}
 
       {(p.risingFormats.length > 0 || p.fadingFormats.length > 0 || p.newCollabs.length > 0) && (
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <PulseCol title="↑ Rising formats" tone="text-trust-high" items={p.risingFormats} empty="—" />
-          <PulseCol title="↓ Fading formats" tone="text-ink-faint" items={p.fadingFormats} empty="—" />
-          <PulseCol title="🤝 New collabs" tone="text-brand-deep" items={p.newCollabs.map((h) => `@${h}`)} empty="None new" />
-        </div>
+        <PulseColumns columns={[
+          { title: "↑ Rising formats", tone: "text-brand-deep", items: p.risingFormats, empty: "—" },
+          { title: "↓ Fading formats", tone: "text-ink-faint", items: p.fadingFormats, empty: "—" },
+          { title: "🤝 New collabs", tone: "text-brand-deep", items: p.newCollabs.map((h) => `@${h}`), empty: "None new" },
+        ]} />
       )}
     </section>
-  );
-}
-
-function PulseCol({ title, tone, items, empty }: { title: string; tone: string; items: string[]; empty: string }) {
-  return (
-    <div className="rounded-2xl bg-white/55 p-3">
-      <div className={`text-[11px] font-semibold uppercase tracking-wide ${tone}`}>{title}</div>
-      {items.length ? (
-        <ul className="mt-1 space-y-0.5">{items.slice(0, 4).map((t, i) => <li key={i} className="text-sm text-ink">{t}</li>)}</ul>
-      ) : (
-        <p className="mt-1 text-xs text-ink-faint">{empty}</p>
-      )}
-    </div>
   );
 }
 
