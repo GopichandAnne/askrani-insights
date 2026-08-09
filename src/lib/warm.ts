@@ -48,7 +48,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     { key: "content", run: () => generateContent(row, 90, db), good: (v) => contentIsGood(v) && !v?.failed },
     { key: "winning", run: () => generateWinning(row, db), good: (v) => winningIsGood(v) && !v?.failed },
     { key: "demand", run: () => generateDemand(row, db), good: (v) => demandIsGood(v) && !v?.failed },
-    { key: "menu", run: () => buildMenuLens(row, db), good: (v) => !!v }, // deterministic — no retry needed
+    { key: "menu", run: () => buildMenuLens(row, db), good: (v) => !!v && !v?.failed }, // retry when the intelligent match errored
     { key: "deals", run: () => generateDeals(row, db), good: (v) => dealsIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {

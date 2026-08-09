@@ -52,6 +52,11 @@ export interface MenuLens {
   itemsCompared: number;
   at: string;
   empty?: boolean;
+  /** true when the intelligent LLM match was expected but errored (API down / out
+   *  of credits) and we degraded to the deterministic lens — never cache-accepted,
+   *  so it retries the intelligent path once the API is back. NOT set when the LLM
+   *  is simply unconfigured (that's the intended deterministic mode). */
+  failed?: boolean;
 }
 
 const empty = (at: string): MenuLens => ({ pricePositions: [], differentiators: [], itemsCompared: 0, at, empty: true });
@@ -155,6 +160,7 @@ export async function buildMenuLens(ws: WorkspaceRow, db?: RlsClient): Promise<M
   const trulyUnique = (item: string) => { const t = distinctive(item); return t.length > 0 && !t.some((x) => rivalTokenSet.has(x)); };
 
   // Intelligent path: LLM matches dishes semantically; we do the arithmetic.
+  let llmErrored = false; // the LLM was expected but threw (vs. ran-but-found-nothing)
   if (isLlmConfigured() && yours.length && rivals.length) {
     // dedup rival lines by name+price, cap for the prompt
     const seen = new Set<string>();
@@ -187,16 +193,18 @@ export async function buildMenuLens(ws: WorkspaceRow, db?: RlsClient): Promise<M
           .sort((a, b) => b.yourPrice - a.yourPrice)
           .slice(0, 10);
         if (pp.length || diffs.length) return { pricePositions: pp, differentiators: diffs, itemsCompared, at };
-      } catch { /* retry */ }
+        break; // LLM ran fine but found nothing comparable — deterministic, not a failure
+      } catch { llmErrored = true; /* API error — retry */ }
       if (attempt < 2) await new Promise((r) => setTimeout(r, 4000));
     }
   }
 
-  // Fallback: conservative exact-normalized-name match (no LLM).
-  return deterministicMenuLens(ws, supabase, at);
+  // Fallback: conservative exact-normalized-name match (no LLM). Flagged failed
+  // only when the intelligent path was expected but errored, so it retries later.
+  return deterministicMenuLens(ws, supabase, at, llmErrored);
 }
 
-async function deterministicMenuLens(ws: WorkspaceRow, db: RlsClient, at: string): Promise<MenuLens> {
+async function deterministicMenuLens(ws: WorkspaceRow, db: RlsClient, at: string, failed = false): Promise<MenuLens> {
   const menus = await gatherMenus(ws, db);
   if (!menus) return empty(at);
   const rivalByItem = new Map<string, number[]>();
@@ -212,7 +220,7 @@ async function deterministicMenuLens(ws: WorkspaceRow, db: RlsClient, at: string
   }
   pricePositions.sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct));
   differentiators.sort((a, b) => b.yourPrice - a.yourPrice);
-  return { pricePositions: pricePositions.slice(0, 10), differentiators: differentiators.slice(0, 10), itemsCompared: menus.itemsCompared, at };
+  return { pricePositions: pricePositions.slice(0, 10), differentiators: differentiators.slice(0, 10), itemsCompared: menus.itemsCompared, at, ...(failed ? { failed: true } : {}) };
 }
 
 /** Cached menu lens (regenerated when older than maxAgeHours). */
@@ -220,7 +228,9 @@ export async function getOrMakeMenuLens(ws: WorkspaceRow, maxAgeHours = 12): Pro
   const supabase = await createClient();
   const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const cached = (data?.goals as { menu?: MenuLens } | null)?.menu;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return cached;
+  // Serve cache only if fresh AND not a degraded (LLM-errored) lens — a degraded
+  // one is regenerated so it upgrades back to the intelligent match once the API's up.
+  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
 
   const fresh = await buildMenuLens(ws);
   const svc = createServiceClient();
