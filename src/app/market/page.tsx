@@ -22,8 +22,12 @@ export default async function MarketPage() {
 
   const cards = [
     { href: "/feed", icon: "🛰️", title: "Market feed", desc: "Everything that changed — competitor price moves, new items, promos — plus a summarized local-news digest." },
-    { href: "/offers", icon: "💸", title: "Offers & prices", desc: "Menu/item prices side by side: your price positioning vs rivals, and who's cheapest item-by-item." },
-    { href: "/competitors", icon: "🧭", title: "Competitors", desc: "Your rivals on a map and ranked by match — add, remove, and see how close a competitor each one is." },
+    { href: "/offers", icon: "💸", title: "Offers & prices", desc: area
+      ? "Menu/item prices side by side across the area — who's cheapest item-by-item and where the price bands sit."
+      : "Menu/item prices side by side: your price positioning vs rivals, and who's cheapest item-by-item." },
+    { href: "/competitors", icon: "🧭", title: area ? "The businesses here" : "Competitors", desc: area
+      ? "Every business in the area on a map and ranked — add or remove any to fine-tune what you watch."
+      : "Your rivals on a map and ranked by match — add, remove, and see how close a competitor each one is." },
   ];
 
   return (

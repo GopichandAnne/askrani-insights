@@ -1,4 +1,5 @@
 import { activeWorkspace } from "@/lib/workspace";
+import { isAreaMode, areaSubject } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
@@ -76,7 +77,10 @@ export default async function AroundPage() {
       : Promise.resolve({ data: null }),
   ]);
 
-  const area = (target as { attributes?: { address?: string } } | null)?.attributes?.address;
+  // Area workspaces have no target business — use the monitored area itself as the label.
+  const area = isAreaMode(state.workspace)
+    ? areaSubject(state.workspace)?.area
+    : (target as { attributes?: { address?: string } } | null)?.attributes?.address;
   const local = digest.items.filter((i) => i.kind === "local" || i.kind === "opening");
   const national = digest.items.filter((i) => i.kind === "trend");
   const nothing = !digest.summary && digest.items.length === 0 && trends.trends.length === 0;

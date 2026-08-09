@@ -1,4 +1,5 @@
 import { activeWorkspace } from "@/lib/workspace";
+import { isAreaMode } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CompetitorsMap } from "@/components/CompetitorsMap";
@@ -19,6 +20,7 @@ const geoOf = (attrs: unknown): Geo | null => {
 export default async function CompetitorsPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Competitors" />;
+  const area = isAreaMode(state.workspace);
 
   const supabase = await createClient();
   const [{ data: edges }, { data: target }, cardData] = await Promise.all([
@@ -47,10 +49,11 @@ export default async function CompetitorsPage() {
     <div className="animate-fade-in space-y-6">
       <div>
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
-        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Competitors</h1>
+        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">{area ? "The businesses here" : "Competitors"}</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-          Everything each rival is doing for {state.workspace.name} — their rating, prices, latest move
-          and best post — in one card each. No hopping between screens.
+          {area
+            ? <>Every business across {state.workspace.name} — rating, prices, latest move and best post — in one card each.</>
+            : <>Everything each rival is doing for {state.workspace.name} — their rating, prices, latest move and best post — in one card each. No hopping between screens.</>}
         </p>
       </div>
 
