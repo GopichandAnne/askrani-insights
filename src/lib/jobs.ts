@@ -285,7 +285,16 @@ export async function getWorkspaceJobs(workspaceId: string) {
   const { data } = await svc
     .from("collection_job")
     .select("business_id,status,result,error,updated_at, business:business_id(canonical_name)")
-    .eq("workspace_id", workspaceId);
-  // flatten the joined name so the client gets {business_id,status,name,...}
-  return (data ?? []).map((j: any) => ({ ...j, name: j.business?.canonical_name ?? "A business" }));
+    .eq("workspace_id", workspaceId)
+    .order("updated_at", { ascending: false });
+  // Job rows accumulate per collection; keep only the LATEST job per business so
+  // callers see one node per business (the current scan), not all-time history.
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const j of (data ?? []) as any[]) {
+    if (seen.has(j.business_id)) continue;
+    seen.add(j.business_id);
+    out.push({ ...j, name: j.business?.canonical_name ?? "A business" });
+  }
+  return out;
 }
