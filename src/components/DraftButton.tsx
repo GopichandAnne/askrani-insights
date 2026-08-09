@@ -24,7 +24,7 @@ export function DraftButton({ move, context }: { move: string; context?: string 
 
   return (
     <>
-      <button onClick={run} className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-brand-deep transition-colors hover:bg-brand-soft">
+      <button onClick={run} className="mt-1.5 inline-flex min-h-[38px] items-center gap-1 rounded-full bg-white/70 px-3 py-2 text-xs font-semibold text-brand-deep transition-colors hover:bg-brand-soft">
         ✍️ Draft a post
       </button>
       {open && (

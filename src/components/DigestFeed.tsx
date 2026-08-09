@@ -35,7 +35,7 @@ function FullItem({ it }: { it: DigestItem }) {
       <p className="mt-0.5 text-sm text-ink-soft">{it.detail}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {it.act && <ActOnIt kind={it.act.kind} move={it.act.move} context={it.act.context} small />}
-        {it.href && <Link href={it.href} className="text-[11px] font-medium text-brand hover:underline">See details →</Link>}
+        {it.href && <Link href={it.href} className="inline-flex min-h-[38px] items-center px-1 text-xs font-medium text-brand hover:underline">See details →</Link>}
       </div>
     </li>
   );
@@ -49,7 +49,7 @@ function CompactItem({ it }: { it: DigestItem }) {
       {it.act ? (
         <ActOnIt kind={it.act.kind} move={it.act.move} context={it.act.context} small />
       ) : it.href ? (
-        <Link href={it.href} className="shrink-0 text-[11px] font-medium text-brand hover:underline">Details →</Link>
+        <Link href={it.href} className="inline-flex min-h-[38px] shrink-0 items-center px-1 text-xs font-medium text-brand hover:underline">Details →</Link>
       ) : null}
     </li>
   );

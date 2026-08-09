@@ -18,14 +18,16 @@ export const metadata: Metadata = {
     "Understand what local businesses are doing, why it matters, and what to do next. By Ask Rani.",
 };
 
+// Order matters: the first five are the mobile bottom-tab primaries (the daily
+// owner surfaces); the rest live under "More" on mobile / lower on the desktop rail.
 const NAV: NavItem[] = [
   { href: "/", label: "This Week", icon: "today", match: ["/edge"] },
   { href: "/you", label: "You", icon: "you" },
-  { href: "/explore", label: "Explore", icon: "explore" },
-  { href: "/around", label: "Around me", icon: "around" },
   { href: "/content", label: "Content", icon: "content" },
   { href: "/winning", label: "What's winning", icon: "winning" },
   { href: "/market", label: "Market", icon: "market", match: ["/feed", "/offers", "/competitors"] },
+  { href: "/explore", label: "Explore", icon: "explore" },
+  { href: "/around", label: "Around me", icon: "around" },
   { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
