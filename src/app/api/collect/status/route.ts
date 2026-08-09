@@ -15,7 +15,9 @@ export async function GET(req: Request) {
   if (!(await workspaceInOrg(workspaceId, auth.orgId))) return unauthorized();
 
   const jobs = await getWorkspaceJobs(workspaceId);
-  const { data } = await createServiceClient().from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
+  const { data } = await createServiceClient().from("workspace").select("goals, target_business_id").eq("id", workspaceId).maybeSingle();
   const ephemeral = !!(data?.goals as any)?.ephemeral;
-  return NextResponse.json({ jobs, ephemeral });
+  const targetId = data?.target_business_id ?? null;
+  const withTarget = jobs.map((j: any) => ({ ...j, isTarget: j.business_id === targetId }));
+  return NextResponse.json({ jobs: withTarget, ephemeral });
 }

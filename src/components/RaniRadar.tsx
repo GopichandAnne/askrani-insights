@@ -31,13 +31,30 @@ export function RaniRadar({ businesses, done, total, allDone }: { businesses: Co
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const n = businesses.length;
-  // even radial distribution (from top, clockwise) with a little ring variety
+  // You are at the center (Rani); competitors are the blips placed at their REAL
+  // bearing + distance from you when geo is available, else evenly distributed.
+  const target = businesses.find((b) => b.isTarget);
+  const center = target && target.lat != null && target.lng != null ? { lat: target.lat, lng: target.lng } : null;
+  const blips = businesses.some((b) => b.isTarget) ? businesses.filter((b) => !b.isTarget) : businesses;
+
+  // equirectangular offset (deg) — fine for a local market; only ratios matter
+  const off = (b: CollectNode) => center && b.lat != null && b.lng != null
+    ? { north: b.lat - center.lat, east: (b.lng - center.lng) * Math.cos((center.lat * Math.PI) / 180) }
+    : null;
+  const geoBlips = blips.map(off).filter((o): o is { north: number; east: number } => !!o);
+  const maxD = Math.max(1e-9, ...geoBlips.map((o) => Math.hypot(o.north, o.east)));
   const rings = [0.56, 0.82, 0.68];
-  const place = (i: number) => {
-    const ang = (i * (360 / Math.max(1, n)) - 90) * (Math.PI / 180);
-    const d = rings[i % rings.length] * 44; // %
-    return { left: 50 + d * Math.cos(ang), top: 50 + d * Math.sin(ang) };
+  const place = (b: CollectNode, i: number) => {
+    const o = off(b);
+    if (o && (o.north !== 0 || o.east !== 0)) {
+      const bearing = Math.atan2(o.east, o.north); // 0 = due north
+      const screen = bearing - Math.PI / 2;        // rotate so north = top
+      const r = (0.34 + 0.58 * (Math.hypot(o.north, o.east) / maxD)) * 44; // nearest→center, farthest→edge
+      return { left: 50 + r * Math.cos(screen), top: 50 + r * Math.sin(screen) };
+    }
+    // no geo → even fallback slot
+    const ang = (i * (360 / Math.max(1, blips.length)) - 90) * (Math.PI / 180);
+    return { left: 50 + rings[i % rings.length] * 44 * Math.cos(ang), top: 50 + rings[i % rings.length] * 44 * Math.sin(ang) };
   };
   const activeName = businesses.find((b) => b.status === "running")?.name;
   const recent = businesses.filter((b) => b.status === "done" || b.status === "error").slice(-2).reverse();
@@ -65,10 +82,10 @@ export function RaniRadar({ businesses, done, total, allDone }: { businesses: Co
             aria-hidden
           />
           {/* competitor blips */}
-          {businesses.map((b, i) => {
+          {blips.map((b, i) => {
             const doneish = b.status === "done" || b.status === "error";
             const running = b.status === "running";
-            const { left, top } = place(i);
+            const { left, top } = place(b, i);
             return (
               <span
                 key={i}

@@ -9,7 +9,7 @@ import { RaniMark } from "@/components/RaniSpinner";
  * she "gathers intel." Driven by the real per-business job status, so it mirrors
  * exactly what's happening. Respects prefers-reduced-motion.
  */
-export interface CollectNode { name: string; status: "pending" | "running" | "done" | "error" }
+export interface CollectNode { name: string; status: "pending" | "running" | "done" | "error"; lat?: number | null; lng?: number | null; isTarget?: boolean }
 
 export function RaniCollecting({ businesses, done, total, allDone }: { businesses: CollectNode[]; done: number; total: number; allDone: boolean }) {
   const n = businesses.length;

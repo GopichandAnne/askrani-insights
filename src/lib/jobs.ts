@@ -284,17 +284,19 @@ export async function getWorkspaceJobs(workspaceId: string) {
   const svc = createServiceClient();
   const { data } = await svc
     .from("collection_job")
-    .select("business_id,status,result,error,updated_at, business:business_id(canonical_name)")
+    .select("business_id,status,result,error,updated_at, business:business_id(canonical_name, attributes)")
     .eq("workspace_id", workspaceId)
     .order("updated_at", { ascending: false });
   // Job rows accumulate per collection; keep only the LATEST job per business so
   // callers see one node per business (the current scan), not all-time history.
+  // Include geo (attributes.geo) so the radar can place blips at true bearing.
   const seen = new Set<string>();
   const out: any[] = [];
   for (const j of (data ?? []) as any[]) {
     if (seen.has(j.business_id)) continue;
     seen.add(j.business_id);
-    out.push({ ...j, name: j.business?.canonical_name ?? "A business" });
+    const geo = j.business?.attributes?.geo;
+    out.push({ business_id: j.business_id, status: j.status, result: j.result, error: j.error, updated_at: j.updated_at, name: j.business?.canonical_name ?? "A business", lat: geo?.lat ?? null, lng: geo?.lng ?? null });
   }
   return out;
 }

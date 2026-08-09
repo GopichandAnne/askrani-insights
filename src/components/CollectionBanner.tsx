@@ -11,7 +11,7 @@ import { RaniRadar } from "@/components/RaniRadar";
  * (a deep read, a monitored refresh, or a re-collect) — on Home or any page —
  * then auto-hides. Onboarding has its own inline version, so we skip it there.
  */
-type Job = { name?: string; status: string };
+type Job = { name?: string; status: string; lat?: number | null; lng?: number | null; isTarget?: boolean };
 
 export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const pathname = usePathname();
@@ -54,6 +54,7 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const businesses: CollectNode[] = jobs.map((j) => ({
     name: j.name ?? "A business",
     status: (["pending", "running", "done", "error"].includes(j.status) ? j.status : "pending") as CollectNode["status"],
+    lat: j.lat ?? null, lng: j.lng ?? null, isTarget: j.isTarget,
   }));
   const done = businesses.filter((b) => b.status === "done" || b.status === "error").length;
   const total = businesses.length;

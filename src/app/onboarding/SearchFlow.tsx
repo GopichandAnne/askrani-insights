@@ -322,8 +322,8 @@ function WorkspacePhase({
   competitors, workspaceId, runSearch, setCompetitors, jobs, starting, startCollection, removeCompetitor, needsCredits,
 }: any) {
   const businesses = [
-    ...(target ? [{ id: target.businessId, name: target.name, isTarget: true }] : []),
-    ...competitors.map((c: Competitor) => ({ id: c.businessId, name: c.name, isTarget: false })),
+    ...(target ? [{ id: target.businessId, name: target.name, isTarget: true, lat: target.geo?.lat, lng: target.geo?.lng }] : []),
+    ...competitors.map((c: Competitor) => ({ id: c.businessId, name: c.name, isTarget: false, lat: c.geo?.lat, lng: c.geo?.lng })),
   ];
   const done = businesses.filter((b: any) => jobs[b.id]?.status === "done" || jobs[b.id]?.status === "error").length;
   const anyActive = businesses.some((b: any) => ["pending", "running"].includes(jobs[b.id]?.status));
@@ -497,7 +497,7 @@ function WorkspacePhase({
             <div className="text-sm text-ink-faint">{done}/{businesses.length} done</div>
           </div>
           <RaniRadar
-            businesses={businesses.map((b: any) => ({ name: b.name, status: (jobs[b.id]?.status ?? "pending") as "pending" | "running" | "done" | "error" }))}
+            businesses={businesses.map((b: any) => ({ name: b.name, status: (jobs[b.id]?.status ?? "pending") as "pending" | "running" | "done" | "error", lat: b.lat, lng: b.lng, isTarget: b.isTarget }))}
             done={done}
             total={businesses.length}
             allDone={allDone}
