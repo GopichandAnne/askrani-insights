@@ -10,7 +10,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
  */
 
 export interface DigestItem { point: string; source: string; url?: string; kind?: string; }
-export interface NewsDigest { summary: string; items: DigestItem[]; at: string; empty?: boolean }
+export interface NewsDigest { summary: string; items: DigestItem[]; at: string; empty?: boolean; failed?: boolean }
 
 const SCHEMA = {
   type: "object",
@@ -64,18 +64,22 @@ export async function generateNewsDigest(ws: WorkspaceRow, db?: RlsClient): Prom
   }
 
   try {
-    const { data } = await getLlm().callStructured<{ summary: string; items: DigestItem[] }>({
+    const call = () => getLlm().callStructured<{ summary: string; items: DigestItem[] }>({
       system: SYSTEM,
       text: `Summarize what's happening around "${ws.name}" for the owner.\n\nARTICLES (JSON):\n${JSON.stringify(articles)}`,
       schema: SCHEMA,
       tier: "extract",
       maxTokens: 900,
     });
+    // one retry on transient failure before we degrade
+    const { data } = await call().catch(() => call());
     const strip = (s?: string) => { const v = String(s ?? ""); const j = v.search(/<\/|<(parameter|function|antml|invoke|summary|point)\b/i); return (j >= 0 ? v.slice(0, j) : v).replace(/\s+/g, " ").trim(); };
     const items = (data.items ?? []).map((i) => ({ point: strip(i.point), source: strip(i.source), url: i.url || undefined, kind: i.kind }));
     return { summary: strip(data.summary), items, at };
   } catch {
-    return { summary: "", items: articles.slice(0, 6).map((a) => ({ point: a.headline, source: a.source, url: a.url, kind: a.kind })), at };
+    // AI read failed — still show the raw headlines, but mark it failed so it's
+    // never cached as final (getOrMake/warm regenerate the summary next time).
+    return { summary: "", items: articles.slice(0, 6).map((a) => ({ point: a.headline, source: a.source, url: a.url, kind: a.kind })), at, failed: true };
   }
 }
 
@@ -84,7 +88,7 @@ export async function getOrMakeNewsDigest(ws: WorkspaceRow, maxAgeHours = 12): P
   const supabase = await createClient();
   const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const cached = (data?.goals as any)?.newsDigest as NewsDigest | undefined;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return cached;
+  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
 
   const fresh = await generateNewsDigest(ws);
   const svc = createServiceClient();

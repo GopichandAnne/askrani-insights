@@ -153,6 +153,43 @@ export function buildDigest(
     });
   }
 
+  // ── Social pulse — what's breaking out / rising in rivals' content ─────────
+  const sp = goals.socialPulse as any | undefined;
+  if (sp && !sp.failed) {
+    const b0 = (sp.breakouts ?? [])[0];
+    if (b0?.rival) {
+      push({
+        id: `social:breakout:${clean(b0.rival).toLowerCase()}:${clean(b0.caption).slice(0, 20).toLowerCase()}`,
+        severity: "opportunity", pillar: "Social", icon: "🚀",
+        title: `${clean(b0.rival)}'s post is breaking out`,
+        detail: `${b0.multiple}× their usual engagement — “${clean(b0.caption).slice(0, 90)}”. Make your version.`,
+        act: { kind: "content", move: `Make our own version of the post that's working for ${clean(b0.rival)}: "${clean(b0.caption)}"`, context: clean(sp.summary) },
+        href: "/content",
+      });
+    }
+    const rf = clean(((sp.risingFormats ?? []) as string[])[0]);
+    if (rf) {
+      push({
+        id: `social:rising:${rf.slice(0, 30).toLowerCase()}`,
+        severity: "opportunity", pillar: "Social", icon: "📱",
+        title: `Rising format locally: ${rf}`,
+        detail: clean(sp.summary) || "Gaining traction in your market's content — worth trying.",
+        act: { kind: "content", move: `Create a "${rf}" style post for us`, context: clean(sp.summary) },
+        href: "/content",
+      });
+    }
+    const nc = ((sp.newCollabs ?? []) as string[])[0];
+    if (nc) {
+      push({
+        id: `social:collab:${String(nc).toLowerCase()}`,
+        severity: "fyi", pillar: "Social", icon: "🤝",
+        title: `New collab in your market: @${nc}`,
+        detail: `A rival just started working with @${nc} — a creator you could partner with too.`,
+        href: "/content",
+      });
+    }
+  }
+
   // ── Competitor ads (goals.ads) ────────────────────────────────────────────
   const ads = goals.ads as any | undefined;
   if (ads && !ads.empty && (ads.advertisers?.length || ads.moves?.length)) {

@@ -11,6 +11,7 @@ import { generateDemand, demandIsGood } from "@/lib/demand";
 import { buildMenuLens } from "@/lib/menu";
 import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
+import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -44,7 +45,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     { key: "edge", run: () => generateEdge(row, db), good: (v) => !!v?.headline && !/Collect your market|Connect an AI key/.test(v.headline) },
     { key: "you", run: () => generateYou(row, db), good: (v) => youIsGood(v) },
     { key: "briefing", run: () => generateBriefing(row, db), good: (v) => !!v?.summary },
-    { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) },
+    { key: "newsDigest", run: () => generateNewsDigest(row, db), good: (v) => !!(v?.items?.length || v?.empty) && !v?.failed },
     { key: "localTrends", run: () => generateLocalTrends(row, 60, db), good: (v) => !!(v?.trends?.length || (v?.empty && !v?.failed)) },
     { key: "content", run: () => generateContent(row, 90, db), good: (v) => contentIsGood(v) && !v?.failed },
     { key: "winning", run: () => generateWinning(row, db), good: (v) => winningIsGood(v) && !v?.failed },
@@ -54,6 +55,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // Pulse LAST — it reads goals.you (velocity) + writes goals.themeHistory, so it
     // must run after You is cached; this builds the week-over-week theme diff.
     { key: "pulse", run: () => generateReviewPulse(row, db), good: (v) => pulseIsGood(v) && !v?.failed },
+    { key: "socialPulse", run: () => generateSocialPulse(row, db), good: (v) => socialPulseIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;

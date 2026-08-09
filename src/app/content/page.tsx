@@ -1,9 +1,11 @@
 import { activeWorkspace } from "@/lib/workspace";
+import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { DraftButton } from "@/components/DraftButton";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
 import { getAdsReport } from "@/lib/ads";
+import type { SocialPulse } from "@/lib/socialpulse";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the content LLM read on a cold cache
@@ -78,6 +80,57 @@ function IndustrySwipe({ p }: { p: IndustryBestPost }) {
   );
 }
 
+function SocialPulseSection({ p }: { p: SocialPulse }) {
+  return (
+    <section className="card">
+      <h2 className="mb-1 flex items-center gap-2 font-semibold">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🚀</span>
+        What&apos;s moving in social this week
+      </h2>
+      {p.summary && <p className="text-sm text-ink-soft">{p.summary}</p>}
+
+      {p.breakouts.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {p.breakouts.map((b, i) => (
+            <div key={i} className="rounded-2xl bg-white/55 p-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="chip bg-coral/15 text-coral-dark">🚀 {b.multiple}× usual</span>
+                <span className="font-semibold text-ink">{b.rival}</span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-sm text-ink-soft">{b.caption}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <DraftButton move={`Make our version of this post that's working for ${b.rival}: ${b.caption}`} context="Rival breakout post" />
+                {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">See the original ↗</a>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(p.risingFormats.length > 0 || p.fadingFormats.length > 0 || p.newCollabs.length > 0) && (
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <PulseCol title="↑ Rising formats" tone="text-trust-high" items={p.risingFormats} empty="—" />
+          <PulseCol title="↓ Fading formats" tone="text-ink-faint" items={p.fadingFormats} empty="—" />
+          <PulseCol title="🤝 New collabs" tone="text-brand-deep" items={p.newCollabs.map((h) => `@${h}`)} empty="None new" />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PulseCol({ title, tone, items, empty }: { title: string; tone: string; items: string[]; empty: string }) {
+  return (
+    <div className="rounded-2xl bg-white/55 p-3">
+      <div className={`text-[11px] font-semibold uppercase tracking-wide ${tone}`}>{title}</div>
+      {items.length ? (
+        <ul className="mt-1 space-y-0.5">{items.slice(0, 4).map((t, i) => <li key={i} className="text-sm text-ink">{t}</li>)}</ul>
+      ) : (
+        <p className="mt-1 text-xs text-ink-faint">{empty}</p>
+      )}
+    </div>
+  );
+}
+
 export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
@@ -87,7 +140,13 @@ export default async function ContentPage() {
     getOrMakeIndustryBest(state.workspace),
     getAdsReport(state.workspace),
   ]);
-  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0;
+  // social pulse — cached read only (warmed on collection), so the page stays fast
+  const supabase = await createClient();
+  const { data: spRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
+  const pulse = (spRow?.goals as any)?.socialPulse as SocialPulse | undefined;
+  const hasPulse = !!pulse && !pulse.failed && (pulse.breakouts.length > 0 || pulse.risingFormats.length > 0 || pulse.newCollabs.length > 0 || !!pulse.summary);
+
+  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0 && !hasPulse;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -117,6 +176,8 @@ export default async function ContentPage() {
               <p className="mt-1.5 max-w-3xl text-sm text-white/90">{c.summary}</p>
             </section>
           )}
+
+          {hasPulse && pulse && <SocialPulseSection p={pulse} />}
 
           {c.swipe.length > 0 && (
             <section>
