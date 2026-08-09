@@ -33,6 +33,7 @@ const ICONS = {
   report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
   add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
+  more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
 };
 const SHORT: Record<string, string> = {
   "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
@@ -71,7 +72,10 @@ function CreditsPill({ credits }: { credits: number | null }) {
 export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId = "", credits = null }: { items: NavItem[]; email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string; credits?: number | null }) {
   const pathname = usePathname() || "/";
   const [open, setOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
   useCommandKey(setOpen);
+  // close the mobile "More" sheet on navigation
+  useEffect(() => { setMenu(false); }, [pathname]);
   const isActive = (n: NavItem) => {
     const hrefs = [n.href, ...(n.match ?? [])];
     return hrefs.some((h) => (h === "/" ? pathname === "/" : pathname === h || pathname.startsWith(h + "/")));
@@ -143,23 +147,67 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
         </div>
       </header>
 
-      {/* ── Mobile bottom tab bar ───────────────────────────────────── */}
+      {/* ── Mobile bottom tab bar (5 primary + More) ────────────────── */}
       <nav className="no-print fixed inset-x-0 bottom-0 z-40 lg:hidden">
-        <div className="glass-strong mx-auto flex max-w-xl items-center justify-around gap-1 px-2 py-1.5">
+        <div className="glass-strong mx-auto flex max-w-xl items-center justify-around gap-0.5 px-1.5 py-1.5">
           {items.slice(0, 5).map((n) => (
             <Link
               key={n.href}
               href={n.href}
               aria-label={n.label}
               data-active={isActive(n)}
-              className="flex flex-col items-center gap-0.5 rounded-xl px-3 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
+              className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
             >
               <span className={isActive(n) ? "text-brand" : ""}>{ICONS[n.icon]}</span>
               <span>{SHORT[n.href] ?? n.label.split(" ")[0]}</span>
             </Link>
           ))}
+          {items.length > 5 && (
+            <button
+              onClick={() => setMenu(true)}
+              aria-label="More"
+              aria-expanded={menu}
+              data-active={items.slice(5).some(isActive)}
+              className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
+            >
+              <span className={items.slice(5).some(isActive) ? "text-brand" : ""}>{ICONS.more}</span>
+              <span>More</span>
+            </button>
+          )}
         </div>
       </nav>
+
+      {/* ── Mobile "More" sheet — everything not in the bottom 5 ─────── */}
+      {menu && (
+        <div className="no-print fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="More menu">
+          <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setMenu(false)} />
+          <div className="absolute inset-x-0 bottom-0 animate-fade-in rounded-t-3xl glass-strong p-4 pb-6">
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line" aria-hidden />
+            <div className="grid grid-cols-3 gap-2">
+              {items.slice(5).map((n) => (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  onClick={() => setMenu(false)}
+                  data-active={isActive(n)}
+                  className="flex flex-col items-center gap-1.5 rounded-2xl bg-white/50 p-3 text-[11px] font-medium text-ink-soft transition-colors hover:bg-brand-soft data-[active=true]:bg-brand-gradient data-[active=true]:text-white"
+                >
+                  {ICONS[n.icon]}
+                  <span className="text-center leading-tight">{n.label}</span>
+                </Link>
+              ))}
+            </div>
+            {email && (
+              <form action="/auth/signout" method="post" className="mt-3">
+                <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white/50 py-3 text-sm font-medium text-trust-low">
+                  <svg {...I}><path d="M15 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3" /><path d="M10 17l-5-5 5-5" /><path d="M5 12h11" /></svg>
+                  Sign out
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       <CommandPalette open={open} onClose={() => setOpen(false)} admin={admin} />
     </>
