@@ -160,7 +160,7 @@ export async function generateContent(ws: WorkspaceRow, days = 90, db?: RlsClien
   const mentionList = mentions.map((m) => `@${m.handle} (tagged ${m.count}× by ${m.byRivals.join(", ")})`).join("\n") || "(none found)";
 
   try {
-    const { data } = await getLlm().callStructured<{
+    const call = () => getLlm().callStructured<{
       summary: string;
       swipe: { index: number; format: string; whyItWorks: string; yourVersion: string }[];
       collabs: { handle: string; whoTheyAre: string; why: string }[];
@@ -171,6 +171,8 @@ export async function generateContent(ws: WorkspaceRow, days = 90, db?: RlsClien
       tier: "extract",
       maxTokens: 1800,
     });
+    // one retry on transient failure before we give up
+    const { data } = await call().catch(() => call());
 
     const swipe: SwipePost[] = (data.swipe ?? [])
       .map((s) => {
@@ -205,6 +207,7 @@ export async function generateContent(ws: WorkspaceRow, days = 90, db?: RlsClien
 
 /** Non-empty when we produced a swipe file or collab radar (warm-retry predicate). */
 export function contentIsGood(c: ContentReport): boolean {
+  if (c.failed) return false; // a failed AI read is never "good" — retry it
   return !!(c.swipe.length || c.collabs.length || c.empty);
 }
 
