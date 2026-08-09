@@ -23,8 +23,8 @@ export default async function OnboardingPage() {
           </div>
         </div>
         <p className="relative mt-3 max-w-2xl text-sm text-ink-soft">
-          We detect your business type and cuisine, rank your closest like-for-like rivals, then gather
-          everything available — websites, menus, offers, reviews. Every fact keeps its source and confidence.
+          We detect your business type and specialty, rank your closest like-for-like rivals, then gather
+          everything available — websites, prices, offers, social &amp; reviews. Every fact keeps its source and confidence.
         </p>
       </section>
 
