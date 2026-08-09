@@ -40,6 +40,67 @@ function cityFromAddress(addr?: string): string | null {
   return parts.length >= 2 ? parts[parts.length - 2] : null;
 }
 
+const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Append-only MARKET EVENT log — preserves the ARTIFACTS a market produces over
+ * time (deals, ad moves, breakout posts, rising formats, unmet demand) with the
+ * date first seen, so seasonality becomes queryable ("what did local groceries
+ * run last Diwali?"). Companion to snapshotMarket (metrics). Derived text/labels
+ * only — never raw third-party media. A row is created once (first_seen_on
+ * immutable); re-seeing it extends last_seen_on. Called from the warm hook.
+ */
+export async function recordMarketEvents(ws: WorkspaceRow, _db?: RlsClient): Promise<number> {
+  const svc = createServiceClient();
+  const { data: wsRow } = await svc.from("workspace").select("organization_id, goals").eq("id", ws.id).maybeSingle();
+  const orgId = (wsRow?.organization_id as string | undefined) ?? null;
+  const goals = (wsRow?.goals as Record<string, any>) ?? {};
+
+  // market location (from the target business) for geo/seasonal bucketing
+  let geohashV: string | null = null, cityV: string | null = null;
+  if (ws.target_business_id) {
+    const { data: tb } = await svc.from("business").select("attributes").eq("id", ws.target_business_id).maybeSingle();
+    const a = (tb?.attributes as any) ?? {};
+    if (a.geo?.lat != null && a.geo?.lng != null) geohashV = geohash(a.geo.lat, a.geo.lng);
+    cityV = cityFromAddress(a.address);
+  }
+
+  type Ev = { kind: string; rival: string | null; title: string; detail: string | null; metric: number | null; url: string | null };
+  const byFp = new Map<string, Ev>();
+  const add = (kind: string, e: Partial<Ev> & { title?: string }) => {
+    const title = clean(e.title); if (!title) return;
+    const rival = e.rival ? clean(e.rival) : null;
+    const fp = `${kind}:${norm(rival ?? "")}:${norm(title).slice(0, 60)}`;
+    if (byFp.has(fp)) return;
+    byFp.set(fp, { kind, rival, title: title.slice(0, 200), detail: e.detail ? clean(e.detail).slice(0, 300) : null, metric: e.metric ?? null, url: e.url ?? null });
+  };
+
+  for (const d of (goals.deals?.deals ?? []) as any[]) add("deal", { rival: d.rival, title: d.deal, detail: d.item });
+  for (const d of (goals.flyerDeals?.deals ?? []) as any[]) add("deal", { rival: d.rival, title: d.item, detail: [d.price, d.terms].filter(Boolean).join(" · "), url: d.postUrl });
+  const topAdvertiser = (goals.ads?.advertisers ?? [])[0];
+  for (const p of (goals.ads?.patterns ?? []) as any[]) add("ad_move", { rival: topAdvertiser, title: p.pattern, detail: p.example });
+  for (const b of (goals.socialPulse?.breakouts ?? []) as any[]) add("breakout", { rival: b.rival, title: b.caption, metric: b.multiple, detail: `${b.eng} engagement` });
+  for (const f of (goals.socialPulse?.risingFormats ?? []) as string[]) add("winning_format", { title: f });
+  for (const dm of (goals.demand?.demands ?? []) as any[]) add("demand", { title: dm.need, detail: dm.signal });
+
+  const events = [...byFp.entries()];
+  if (!events.length) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = events.map(([fp, e]) => ({
+    first_seen_on: today, last_seen_on: today,
+    workspace_id: ws.id, organization_id: orgId, business_id: null,
+    vertical: ws.vertical, subtype: null, city: cityV, geohash: geohashV,
+    kind: e.kind, rival: e.rival, title: e.title, detail: e.detail, metric: e.metric, url: e.url, fingerprint: fp,
+  }));
+
+  // create new ones (first_seen preserved); then extend last_seen for re-seen ones
+  const ins = await svc.from("market_event").upsert(rows, { onConflict: "workspace_id,fingerprint", ignoreDuplicates: true }).select("id");
+  if (ins.error) throw new Error(`market_event: ${ins.error.message}`);
+  await svc.from("market_event").update({ last_seen_on: today }).eq("workspace_id", ws.id).in("fingerprint", events.map(([fp]) => fp)).lt("last_seen_on", today);
+  return rows.length;
+}
+
 export interface TrendPoint {
   date: string;
   youRating: number | null; mktRating: number | null;

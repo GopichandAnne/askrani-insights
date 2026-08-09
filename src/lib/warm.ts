@@ -12,7 +12,7 @@ import { buildMenuLens } from "@/lib/menu";
 import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
-import { snapshotMarket } from "@/lib/panel";
+import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -80,6 +80,13 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
   // fresh. Best-effort: the panel is a data asset, never blocks warm.
   try {
     await snapshotMarket(row, db);
+  } catch {
+    /* non-fatal — next cycle captures it */
+  }
+  // Preserve this cycle's artifacts (deals/ad-moves/breakouts/formats/demand) in
+  // the append-only event log, so seasonality is queryable over time.
+  try {
+    await recordMarketEvents(row, db);
   } catch {
     /* non-fatal — next cycle captures it */
   }
