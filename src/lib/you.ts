@@ -47,7 +47,7 @@ export interface YouDiscoverability {
   missing: string[];
   scorePct: number;
 }
-export interface ReviewToAnswer { quote: string; why: string; reply: string; url?: string }
+export interface ReviewToAnswer { quote: string; why: string; reply: string; url?: string; reviewName?: string }
 export interface YouSynthesis {
   headline: string;
   health: "strong" | "watch" | "at_risk";
@@ -221,17 +221,19 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
   const discoverability: YouDiscoverability = { present, missing, scorePct };
 
   // ── own reviews → love/gripe/answer synthesis ──
-  let reviews: { text: string; url?: string; at?: string }[] = [];
+  let reviews: { text: string; url?: string; at?: string; name?: string }[] = [];
   if (ids.targetId) {
     const { data: rows } = await supabase
       .from("content_item")
-      .select("text, url, published_at, observed_at")
+      .select("text, url, published_at, observed_at, external_ref")
       .eq("business_id", ids.targetId)
       .in("platform", ["google", "yelp"])
       .order("published_at", { ascending: false, nullsFirst: false })
       .limit(80);
     reviews = (rows ?? [])
-      .map((r) => ({ text: String((r as any).text ?? "").replace(/\s+/g, " ").trim(), url: (r as any).url ?? undefined, at: (r as any).published_at ?? undefined }))
+      // external_ref is the GBP review name (accounts/…/reviews/…) when synced via
+      // the owner connection — carry it so a reply can be posted straight to Google.
+      .map((r) => ({ text: String((r as any).text ?? "").replace(/\s+/g, " ").trim(), url: (r as any).url ?? undefined, at: (r as any).published_at ?? undefined, name: /\/reviews\//.test(String((r as any).external_ref ?? "")) ? String((r as any).external_ref) : undefined }))
       .filter((r) => r.text.length > 15 && !RATING_RE.test(r.text)) // drop the aggregate "Rated X★…" summaries
       .slice(0, 40);
   }
@@ -276,7 +278,7 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
         loves: (data.loves ?? []).map(strip).filter(Boolean).slice(0, 5),
         gripes: (data.gripes ?? []).map((g) => ({ theme: strip(g.theme), fix: strip(g.fix) })).filter((g) => g.theme).slice(0, 4),
         reviewsToAnswer: (data.reviewsToAnswer ?? [])
-          .map((r) => ({ quote: strip(r.quote), why: strip(r.why), reply: strip(r.reply), url: reviews[r.sourceIndex]?.url }))
+          .map((r) => ({ quote: strip(r.quote), why: strip(r.why), reply: strip(r.reply), url: reviews[r.sourceIndex]?.url, reviewName: reviews[r.sourceIndex]?.name }))
           .filter((r) => r.quote && r.reply)
           .slice(0, 3),
         summary: strip(data.summary),

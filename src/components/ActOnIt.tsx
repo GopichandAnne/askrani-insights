@@ -17,11 +17,24 @@ const RANI = (process.env.NEXT_PUBLIC_RANI_URL || "").replace(/\/$/, "");
  * tap generates the copy (reply / promo / post); the owner copies it or sends it
  * straight to Rani. This is what makes the intelligence worth paying for.
  */
-export function ActOnIt({ kind, move, context, label, small }: { kind: Kind; move: string; context?: string; label?: string; small?: boolean }) {
+export function ActOnIt({ kind, move, context, label, small, reviewName }: { kind: Kind; move: string; context?: string; label?: string; small?: boolean; reviewName?: string }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [art, setArt] = useState<Artifact | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const [posted, setPosted] = useState(false);
+  const [postErr, setPostErr] = useState<string | null>(null);
+
+  async function postToGoogle() {
+    if (!reviewName || !art || art.kind !== "reply") return;
+    setPosting(true); setPostErr(null);
+    try {
+      const r = await fetch("/api/gbp/reply", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reviewName, comment: art.reply }) });
+      const d = await r.json();
+      if (!r.ok) setPostErr(d.error ?? "Couldn't post"); else setPosted(true);
+    } catch (e) { setPostErr((e as Error).message); } finally { setPosting(false); }
+  }
 
   async function run() {
     setOpen(true);
@@ -68,7 +81,21 @@ export function ActOnIt({ kind, move, context, label, small }: { kind: Kind; mov
             {art && (
               <div className="mt-4 space-y-3">
                 {art.kind === "reply" ? (
-                  <Field label={`Your reply${art.tone ? ` · ${art.tone}` : ""}`} value={art.reply} multiline />
+                  <>
+                    <Field label={`Your reply${art.tone ? ` · ${art.tone}` : ""}`} value={art.reply} multiline />
+                    {reviewName && (
+                      posted ? (
+                        <p className="rounded-2xl bg-trust-high/10 px-3 py-2 text-sm font-medium text-trust-high">✓ Posted to Google — it'll appear on your listing shortly.</p>
+                      ) : (
+                        <>
+                          <button onClick={postToGoogle} disabled={posting} className="btn btn-primary w-full justify-center py-2.5 text-sm disabled:opacity-60">
+                            {posting ? "Posting…" : "Post this reply to Google →"}
+                          </button>
+                          {postErr && <p className="text-xs text-trust-low">{postErr}</p>}
+                        </>
+                      )
+                    )}
+                  </>
                 ) : (
                   <>
                     <Field label="Social caption" value={art.caption} multiline />

@@ -2,6 +2,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { workspaceChannels } from "@/lib/channels";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ChannelManager } from "@/components/ChannelManager";
+import { GbpConnect } from "@/components/GbpConnect";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export default async function ChannelsPage() {
         Watching <span className="font-semibold text-brand-deep">{watched}</span> social channel{watched === 1 ? "" : "s"} across{" "}
         <span className="font-semibold text-brand-deep">{businesses.length}</span> business{businesses.length === 1 ? "" : "es"}.
       </div>
+
+      <GbpConnect />
 
       {businesses.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-6 text-sm text-ink-faint">

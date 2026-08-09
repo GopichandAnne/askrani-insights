@@ -173,7 +173,7 @@ export default async function YouPage() {
                   <span className="font-semibold">Suggested reply:</span> {r.reply}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-3">
-                  <ActOnIt kind="reply" move={`Reply to this ${you.name} review: "${r.quote}"`} context={r.why} small />
+                  <ActOnIt kind="reply" move={`Reply to this ${you.name} review: "${r.quote}"`} context={r.why} reviewName={r.reviewName} small />
                   {r.url && (
                     <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex text-xs font-medium text-brand hover:underline">
                       Open the review to respond ↗
