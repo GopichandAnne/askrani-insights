@@ -284,7 +284,8 @@ export async function getWorkspaceJobs(workspaceId: string) {
   const svc = createServiceClient();
   const { data } = await svc
     .from("collection_job")
-    .select("business_id,status,result,error,updated_at")
+    .select("business_id,status,result,error,updated_at, business:business_id(canonical_name)")
     .eq("workspace_id", workspaceId);
-  return data ?? [];
+  // flatten the joined name so the client gets {business_id,status,name,...}
+  return (data ?? []).map((j: any) => ({ ...j, name: j.business?.canonical_name ?? "A business" }));
 }
