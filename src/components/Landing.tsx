@@ -2,6 +2,7 @@ import Link from "next/link";
 import { RaniMark } from "@/components/RaniSpinner";
 import { ExploreClient } from "@/components/ExploreClient";
 import { LiveRadarHero } from "@/components/LiveRadarHero";
+import { MonitorPanel } from "@/components/MonitorPanel";
 
 /**
  * Public front door (signed-out visitors at insights.askrani.ai). Futuristic
@@ -70,35 +71,8 @@ export function Landing() {
         </div>
       </section>
 
-      {/* ── What we monitor ──────────────────────────────────────────── */}
-      <section className="mx-auto max-w-6xl px-6 py-14">
-        <h2 className="text-center font-display text-3xl font-extrabold sm:text-4xl">What we keep an eye on for you</h2>
-        <p className="mx-auto mt-3 max-w-xl text-center text-ink-faint">
-          Once you pick a business to monitor, we watch every public signal about it and its rivals — and turn it into moves.
-        </p>
-        <div className="stagger mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            ["⭐", "Ratings & reviews", "Google, Yelp and more — scores and review volume, side by side, per source."],
-            ["💬", "What people really think", "Themes mined from review & social text — praise and complaints, not just stars."],
-            ["📸", "Social & what's working", "Instagram, Facebook & TikTok posts — and which ones actually got engagement."],
-            ["💸", "Prices, packages & offers", "Treatments, services, menu items and packages — priced item-by-item across rivals."],
-            ["🎁", "Promotions & specials", "Intro offers, memberships, financing and seasonal deals the moment rivals launch them."],
-            ["📈", "Trends, news & openings", "Industry trends, local news and new competitors opening nearby."],
-          ].map(([icon, t, d]) => (
-            <div key={t} className="card card-hover flex gap-4">
-              <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-soft text-2xl">{icon}</div>
-              <div>
-                <h3 className="font-bold">{t}</h3>
-                <p className="mt-1 text-sm text-ink-faint">{d}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <p className="mt-8 text-center text-sm text-ink-faint">
-          It&apos;s all synthesized into a plain-English <span className="font-medium text-brand-deep">weekly briefing</span>, a{" "}
-          <span className="font-medium text-brand-deep">Your Edge</span> action plan, and ready-to-post drafts — every insight shows its source.
-        </p>
-      </section>
+      {/* ── What we monitor: dark radar-console (carries the hero aesthetic) ── */}
+      <MonitorPanel />
 
       {/* ── Pricing / credits ────────────────────────────────────────── */}
       <section id="pricing" className="mx-auto max-w-5xl px-6 py-14">

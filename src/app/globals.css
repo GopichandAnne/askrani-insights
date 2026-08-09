@@ -176,6 +176,12 @@ h2,
   0%   { opacity: .85; transform: scale(0.6); }
   100% { opacity: 0;   transform: scale(2.4); }
 }
+/* Slow conic sweep behind the "What we monitor" console (MonitorPanel). */
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+.radar-spin { animation: radar-spin 9s linear infinite; will-change: transform; }
+@media (prefers-reduced-motion: reduce) {
+  .radar-spin { animation: none; }
+}
 /* Rani gliding along the collection track (position handled inline; this is the
  * gentle bob + a subtle lean). */
 .rani-run { transition: left 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
