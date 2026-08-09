@@ -77,7 +77,7 @@ function Row({ e }: { e: MarketEventRow }) {
         {e.rival && <span className="font-semibold">{e.rival}: </span>}{e.title}
       </span>
       {e.url ? (
-        <a href={e.url} target="_blank" rel="noreferrer" className="shrink-0 text-[11px] font-medium text-brand hover:underline" style={{ fontVariantNumeric: "tabular-nums" }}>{ran} ↗</a>
+        <a href={e.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] shrink-0 items-center text-[11px] font-medium text-brand hover:underline" style={{ fontVariantNumeric: "tabular-nums" }}>{ran} ↗</a>
       ) : (
         <span className="shrink-0 text-[11px] text-ink-faint" style={{ fontVariantNumeric: "tabular-nums" }}>{ran}</span>
       )}

@@ -107,7 +107,7 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-ink-faint">Try:</span>
             {EXAMPLES.map((ex, i) => (
-              <button key={i} onClick={() => { setKeyword(ex.keyword); setArea(ex.area); run(ex.keyword, ex.area); }} className="chip bg-surface-sunken text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand-deep">
+              <button key={i} onClick={() => { setKeyword(ex.keyword); setArea(ex.area); run(ex.keyword, ex.area); }} className="chip min-h-[36px] bg-surface-sunken text-ink-soft transition-colors hover:bg-brand-soft hover:text-brand-deep">
                 {ex.keyword} · {ex.area}
               </button>
             ))}
@@ -379,9 +379,9 @@ function ResultRow({ r, rank, onMonitor, onDeep }: { r: ExploreResult; rank: num
         <div className="font-semibold text-brand-deep">{r.rating != null ? `${r.rating}★` : "—"}</div>
         <div className="text-[11px] text-ink-faint">{r.reviews != null ? `${r.reviews.toLocaleString()} reviews` : "no reviews"}</div>
       </div>
-      <div className="flex shrink-0 flex-col gap-1">
-        <button onClick={onDeep} className="btn btn-primary px-3 py-1.5 text-xs" title="Pay to pull this business's full profile — reviews, social, deals, ads, flyers & pricing">🔬 Deep read</button>
-        <button onClick={onMonitor} className="btn btn-secondary px-3 py-1.5 text-xs" title="Track this business + its competitors, ongoing">Monitor →</button>
+      <div className="flex shrink-0 flex-col gap-1.5">
+        <button onClick={onDeep} className="btn btn-primary min-h-[38px] px-3 py-2 text-xs" title="Pay to pull this business's full profile — reviews, social, deals, ads, flyers & pricing">🔬 Deep read</button>
+        <button onClick={onMonitor} className="btn btn-secondary min-h-[38px] px-3 py-2 text-xs" title="Track this business + its competitors, ongoing">Monitor →</button>
       </div>
     </li>
   );

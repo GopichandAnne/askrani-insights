@@ -103,7 +103,7 @@ function AnswerCard({ r, businessName }: { r: ReviewToAnswer; businessName: stri
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <ActOnIt kind="reply" move={`Reply to this ${businessName} review: "${r.quote}"`} context={r.why} reviewName={r.reviewName} small />
         {r.url && (
-          <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex text-xs font-medium text-brand hover:underline">
+          <a href={r.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-xs font-medium text-brand hover:underline">
             Open the review to respond ↗
           </a>
         )}

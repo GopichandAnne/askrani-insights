@@ -32,7 +32,7 @@ function Swipe({ p }: { p: SwipePost }) {
         <p className="text-sm text-brand-deep"><span className="font-semibold">Your version:</span> {p.yourVersion}</p>
         <div className="mt-2 flex items-center gap-2">
           <DraftButton move={p.yourVersion} context={`Swipe from ${p.business}: ${p.format}`} />
-          {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">See the original ↗</a>}
+          {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-xs font-medium text-brand hover:underline">See the original ↗</a>}
         </div>
       </div>
     </div>
@@ -48,9 +48,9 @@ function Collab({ c }: { c: CollabItem }) {
         {c.mentions > 0 && <span className="text-xs text-ink-faint">tagged {c.mentions}× by {c.byRivals.slice(0, 2).join(", ")}{c.byRivals.length > 2 ? "…" : ""}</span>}
       </div>
       <p className="text-sm text-ink-soft">{c.why}</p>
-      <div className="flex gap-3 text-xs">
-        <a href={`https://instagram.com/${c.handle}`} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">View profile ↗</a>
-        {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="text-ink-faint hover:underline">The post that tagged them ↗</a>}
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <a href={`https://instagram.com/${c.handle}`} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center font-medium text-brand hover:underline">View profile ↗</a>
+        {c.url && <a href={c.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-ink-faint hover:underline">The post that tagged them ↗</a>}
       </div>
     </li>
   );
@@ -74,7 +74,7 @@ function IndustrySwipe({ p }: { p: IndustryBestPost }) {
         <p className="text-sm text-brand-deep"><span className="font-semibold">Your version:</span> {p.yourVersion}</p>
         <div className="mt-2 flex items-center gap-2">
           <DraftButton move={p.yourVersion} context={`National industry format: ${p.format}`} />
-          {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">See the original ↗</a>}
+          {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-xs font-medium text-brand hover:underline">See the original ↗</a>}
         </div>
       </div>
     </div>
@@ -101,7 +101,7 @@ function SocialPulseSection({ p }: { p: SocialPulse }) {
               <p className="mt-1 line-clamp-2 text-sm text-ink-soft">{b.caption}</p>
               <div className="mt-2 flex items-center gap-2">
                 <DraftButton move={`Make our version of this post that's working for ${b.rival}: ${b.caption}`} context="Rival breakout post" />
-                {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand hover:underline">See the original ↗</a>}
+                {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex min-h-[36px] items-center text-xs font-medium text-brand hover:underline">See the original ↗</a>}
               </div>
             </div>
           ))}
@@ -228,7 +228,7 @@ export default async function ContentPage() {
                       {a.cta && <span className="chip bg-surface-sunken text-ink-faint">{a.cta}</span>}
                     </div>
                     <p className="line-clamp-3 text-ink-soft">{a.text || "(image ad)"}</p>
-                    {a.snapshotUrl && <a href={a.snapshotUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex text-xs font-medium text-brand hover:underline">See the ad ↗</a>}
+                    {a.snapshotUrl && <a href={a.snapshotUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex min-h-[36px] items-center text-xs font-medium text-brand hover:underline">See the ad ↗</a>}
                   </div>
                 ))}
               </div>

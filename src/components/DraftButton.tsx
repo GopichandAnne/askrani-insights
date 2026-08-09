@@ -67,7 +67,7 @@ function Field({ label, value, multiline }: { label: string; value: string; mult
     <div className="rounded-2xl bg-white/60 p-3">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{label}</span>
-        <button onClick={copy} className="text-[11px] font-medium text-brand hover:underline">{copied ? "Copied ✓" : "Copy"}</button>
+        <button onClick={copy} className="inline-flex min-h-[36px] items-center px-2 text-xs font-medium text-brand hover:underline">{copied ? "Copied ✓" : "Copy"}</button>
       </div>
       <p className={`text-sm text-ink ${multiline ? "whitespace-pre-wrap" : ""}`}>{value}</p>
     </div>
