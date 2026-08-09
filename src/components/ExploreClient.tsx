@@ -54,20 +54,33 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
 
   const [monitoring, setMonitoring] = useState(false);
   const [monitorErr, setMonitorErr] = useState<string | null>(null);
+  const [areaQuote, setAreaQuote] = useState<{ quote: number; businessCount: number; balance: number } | null>(null);
 
   // Monitor the AREA itself (no business of your own). Signed-out visitors sign in
-  // first; signed-in ones get an area workspace created + activated server-side.
+  // first. Signed-in: step 1 fetches the up-front price (cheap, no scan) and shows
+  // a confirm strip; step 2 charges + creates + activates the area workspace.
   async function monitorArea() {
     track("monitor_intent", { source: "market_read", area, keyword, signed_out: signedOut });
     if (signedOut) { window.location.href = "/login?next=/explore"; return; }
+    setMonitorErr(null);
+    try {
+      const r = await fetch("/api/explore/monitor-area/quote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ businessCount: (data?.results ?? []).length }) });
+      const d = await r.json();
+      if (!r.ok) { setMonitorErr(d.error ?? "Couldn't price that"); return; }
+      setAreaQuote({ quote: d.quote, businessCount: d.businessCount, balance: d.balance });
+    } catch (e) { setMonitorErr((e as Error).message); }
+  }
+
+  async function confirmMonitor() {
     setMonitoring(true); setMonitorErr(null);
     try {
       const r = await fetch("/api/explore/monitor-area", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ area, keyword }) });
       const d = await r.json();
-      if (!r.ok || !d.workspaceId) { setMonitorErr(d.error ?? "Couldn't set up monitoring"); setMonitoring(false); return; }
+      if (r.status === 402 || d.needsCredits) { setMonitoring(false); setMonitorErr(`Not enough credits — starting this needs ${d.quote}. Top up in Billing.`); return; }
+      if (!r.ok || !d.workspaceId) { setMonitoring(false); setMonitorErr(d.error ?? "Couldn't set up monitoring"); return; }
       await fetch("/api/workspace/active", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: d.workspaceId }) });
       window.location.href = "/market";
-    } catch (e) { setMonitorErr((e as Error).message); setMonitoring(false); }
+    } catch (e) { setMonitoring(false); setMonitorErr((e as Error).message); }
   }
 
   const [deepFor, setDeepFor] = useState<{ r: ExploreResult; scope: "single" | "area" } | null>(null);
@@ -153,6 +166,9 @@ export function ExploreClient({ signedOut = false }: { signedOut?: boolean }) {
               onMonitor={monitorArea}
               monitoring={monitoring}
               monitorErr={monitorErr}
+              areaQuote={areaQuote}
+              onConfirmMonitor={confirmMonitor}
+              onCancelMonitor={() => { setAreaQuote(null); setMonitorErr(null); }}
               onDeep={() => results[0] && openDeep(results[0], "area")}
             />
           )}
@@ -208,8 +224,8 @@ function toCandidate(r: ExploreResult) {
  *  area-level conversion CTA. This is the hook that turns a free scan into a
  *  monitored business. */
 function MarketReadPanel({
-  read, loading, areaLabel, keyword, signedOut, onMonitor, monitoring, monitorErr, onDeep,
-}: { read: MarketRead | null; loading: boolean; areaLabel: string; keyword: string; signedOut: boolean; onMonitor: () => void; monitoring?: boolean; monitorErr?: string | null; onDeep: () => void }) {
+  read, loading, areaLabel, keyword, signedOut, onMonitor, monitoring, monitorErr, areaQuote, onConfirmMonitor, onCancelMonitor, onDeep,
+}: { read: MarketRead | null; loading: boolean; areaLabel: string; keyword: string; signedOut: boolean; onMonitor: () => void; monitoring?: boolean; monitorErr?: string | null; areaQuote?: { quote: number; businessCount: number; balance: number } | null; onConfirmMonitor?: () => void; onCancelMonitor?: () => void; onDeep: () => void }) {
   const s = read?.stats;
   return (
     <section className="glass-strong relative overflow-hidden rounded-3xl p-5 sm:p-6">
@@ -257,16 +273,40 @@ function MarketReadPanel({
         ) : null}
 
         {/* conversion CTAs — deep read (pay-per-scan) + monitor (ongoing) */}
-        <div className="mt-4 flex flex-col gap-2 border-t border-line/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-ink-soft">Go deeper — pull the full picture (social, deals, prices, reviews, competitor ads &amp; sale flyers) for this market now, or watch it ongoing.</p>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <button onClick={onDeep} className="btn btn-primary px-4 py-2.5 text-sm">🔬 Deep read this market</button>
-            <button onClick={onMonitor} disabled={monitoring} className="btn btn-secondary px-4 py-2.5 text-sm disabled:opacity-60">
-              {monitoring ? "Setting up…" : "Monitor this area →"}
-            </button>
+        {areaQuote ? (
+          // confirm strip — the up-front area-monitoring price, before we charge
+          <div className="mt-4 rounded-2xl border border-brand/30 bg-brand-soft/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-ink">Start monitoring {areaLabel || "this area"}</p>
+                <p className="mt-0.5 text-sm text-ink-soft">
+                  <span className="font-semibold text-brand-deep">{areaQuote.quote} credits</span> to start · {areaQuote.businessCount} businesses watched · then a small weekly refresh.
+                </p>
+                <p className="mt-0.5 text-xs text-ink-faint">Your balance: {areaQuote.balance} credits</p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button onClick={onCancelMonitor} disabled={monitoring} className="btn btn-ghost px-4 py-2.5 text-sm">Cancel</button>
+                <button onClick={onConfirmMonitor} disabled={monitoring} className="btn btn-primary px-4 py-2.5 text-sm disabled:opacity-60">
+                  {monitoring ? "Setting up…" : `Confirm — ${areaQuote.quote} credits`}
+                </button>
+              </div>
+            </div>
+            {monitorErr && (
+              <p className="mt-2 text-xs text-trust-low">
+                {monitorErr} {monitorErr.includes("Billing") && <a href="/billing" className="font-medium underline">Open Billing →</a>}
+              </p>
+            )}
           </div>
-        </div>
-        {monitorErr && <p className="mt-2 text-right text-xs text-trust-low">{monitorErr}</p>}
+        ) : (
+          <div className="mt-4 flex flex-col gap-2 border-t border-line/50 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-ink-soft">Go deeper — pull the full picture (social, deals, prices, reviews, competitor ads &amp; sale flyers) for this market now, or watch it ongoing.</p>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button onClick={onDeep} className="btn btn-primary px-4 py-2.5 text-sm">🔬 Deep read this market</button>
+              <button onClick={onMonitor} className="btn btn-secondary px-4 py-2.5 text-sm">Monitor this area →</button>
+            </div>
+          </div>
+        )}
+        {!areaQuote && monitorErr && <p className="mt-2 text-right text-xs text-trust-low">{monitorErr}</p>}
       </div>
     </section>
   );

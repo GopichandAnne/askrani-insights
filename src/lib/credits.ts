@@ -119,6 +119,20 @@ export function quoteDeepRead(scope: "single" | "area", competitorCount = 0): nu
   return DEEP_READ_AREA_BASE_CREDITS + DEEP_READ_PER_COMPETITOR_CREDITS * Math.min(competitorCount, DEEP_READ_COMPETITOR_CAP);
 }
 
+// ── Area monitoring — the up-front price to START watching a whole area (no
+// business of your own). Scales with how many businesses we watch there (the
+// "credits scale with how much we collect" model). Priced a touch under a repeat
+// area deep read so ongoing monitoring is the better deal; each weekly refresh
+// then debits real COGS via spendForCost, like any monitored workspace.
+export const AREA_MONITOR_BASE_CREDITS = 20;         // the area scan itself
+export const AREA_MONITOR_PER_BUSINESS_CREDITS = 10; // each business watched
+export const AREA_MONITOR_BUSINESS_CAP = 12;         // quote cap (we watch ≤15)
+
+/** Credits to start monitoring an area = base + per-business (capped). */
+export function quoteAreaMonitor(businessCount = 0): number {
+  return AREA_MONITOR_BASE_CREDITS + AREA_MONITOR_PER_BUSINESS_CREDITS * Math.min(Math.max(0, businessCount), AREA_MONITOR_BUSINESS_CAP);
+}
+
 /** Charge an explicit credit amount for a discrete action (deep read). Debits plan
  *  first then top-up. Returns false without charging if the balance is short. */
 export async function spendCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<boolean> {

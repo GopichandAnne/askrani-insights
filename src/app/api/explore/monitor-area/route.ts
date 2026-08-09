@@ -3,6 +3,8 @@ import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { exploreArea } from "@/lib/explore";
 import { createAreaWorkspace } from "@/lib/discovery";
 import { enqueueWorkspaceCollection, nudgeWorker } from "@/lib/jobs";
+import { quoteAreaMonitor, spendCredits, refundCredits, getBalance } from "@/lib/credits";
+import { createServiceClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
@@ -39,13 +41,25 @@ export async function POST(req: Request) {
     vertical: r.vertical,
   }));
 
+  // Authoritative up-front charge, priced on the real business count we'll watch.
+  // Gated: if the balance is short, don't create anything — tell the client to top up.
+  const quote = quoteAreaMonitor(businesses.length);
+  const charged = await spendCredits(auth.orgId, quote, "area_monitor_start", { area, keyword, businessCount: businesses.length });
+  if (!charged) return NextResponse.json({ needsCredits: true, quote, balance: await getBalance(auth.orgId) }, { status: 402 });
+
   try {
     const { workspaceId, count } = await createAreaWorkspace(auth.orgId, { area, keyword: keyword || null, vertical, center: center ?? null, businesses });
+    // Record the start charge on the workspace for reference (mirrors deep-read).
+    const svc = createServiceClient();
+    const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
+    await svc.from("workspace").update({ goals: { ...((cur?.goals as Record<string, unknown>) ?? {}), areaMonitorCharged: quote, areaMonitorStartedAt: new Date().toISOString() } }).eq("id", workspaceId);
     const enqueued = await enqueueWorkspaceCollection(workspaceId);
-    void logEvent("monitor_area", { area, keyword, count, enqueued }, { orgId: auth.orgId, path: "/explore" });
+    void logEvent("monitor_area", { area, keyword, count, enqueued, quote }, { orgId: auth.orgId, path: "/explore" });
     after(() => nudgeWorker());
-    return NextResponse.json({ workspaceId, count });
+    return NextResponse.json({ workspaceId, count, quote, balance: await getBalance(auth.orgId) });
   } catch (e) {
+    // Creation failed after charging — refund so we never take credits for nothing.
+    await refundCredits(auth.orgId, quote, "area_monitor_refund", { area, keyword, error: (e as Error).message });
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }
