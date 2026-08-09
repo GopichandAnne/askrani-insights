@@ -14,26 +14,57 @@ import { RaniMark } from "@/components/RaniSpinner";
  */
 
 type Blip = { name: string; left: number; top: number; angle: number; hot?: boolean };
+type Story = { tag: string; who: string; sig: string; act: string };
 
-// Seeded demo market (a med-spa cluster) — real-feeling angles/distances.
-const DEMO: Blip[] = [
-  { name: "Radiance", angle: 32, left: 0, top: 0, hot: true },
-  { name: "Glow", angle: 112, left: 0, top: 0 },
-  { name: "Lush Skin", angle: 210, left: 0, top: 0 },
-  { name: "Bela", angle: 168, left: 0, top: 0 },
-  { name: "Rejuve", angle: 300, left: 0, top: 0 },
-  { name: "NovaDerm", angle: 342, left: 0, top: 0 },
-  { name: "Serene", angle: 78, left: 0, top: 0 },
-].map((b, i) => {
-  const r = [0.42, 0.63, 0.55, 0.78, 0.7, 0.9, 0.85][i];
-  const a = (b.angle - 90) * (Math.PI / 180);
-  return { ...b, left: 50 + r * 44 * Math.cos(a), top: 50 + r * 44 * Math.sin(a) };
-});
+// Shared radar layout (7 slots) — every demo market reuses it, so only the names
+// and stories change as we rotate through verticals.
+const LAYOUT: { angle: number; r: number }[] = [
+  { angle: 32, r: 0.42 }, { angle: 112, r: 0.63 }, { angle: 210, r: 0.55 }, { angle: 168, r: 0.78 },
+  { angle: 300, r: 0.7 }, { angle: 342, r: 0.9 }, { angle: 78, r: 0.85 },
+];
+function buildBlips(names: { name: string; hot?: boolean }[]): Blip[] {
+  return names.map((b, i) => {
+    const { angle, r } = LAYOUT[i % LAYOUT.length];
+    const a = (angle - 90) * (Math.PI / 180);
+    return { name: b.name, hot: b.hot, angle, left: 50 + r * 44 * Math.cos(a), top: 50 + r * 44 * Math.sin(a) };
+  });
+}
 
-const STORIES = [
-  { tag: "price drop", who: "Radiance Med Spa", sig: "launched $10/unit Botox for new clients", act: "Match it with a first-visit offer — post before the weekend" },
-  { tag: "review spike", who: "Glow Aesthetics", sig: "pulled 18 five-star reviews in two weeks", act: "Ask your last 10 happy clients for a review today" },
-  { tag: "hit post", who: "Lush Skin Bar", sig: "a before/after reel got 3× their usual reach", act: "Post two before/after results this week" },
+// Demo markets — rotate through verticals so no single one (e.g. med spas) makes
+// other owners feel the product isn't for them. Each carries its own blips + stories.
+const MARKETS: { label: string; keyword: string; blips: Blip[]; stories: Story[] }[] = [
+  {
+    label: "med spas", keyword: "med spa",
+    blips: buildBlips([{ name: "Radiance", hot: true }, { name: "Glow" }, { name: "Lush Skin" }, { name: "Bela" }, { name: "Rejuve" }, { name: "NovaDerm" }, { name: "Serene" }]),
+    stories: [
+      { tag: "price drop", who: "Radiance Med Spa", sig: "launched $10/unit Botox for new clients", act: "Match it with a first-visit offer — post before the weekend" },
+      { tag: "review spike", who: "Glow Aesthetics", sig: "pulled 18 five-star reviews in two weeks", act: "Ask your last 10 happy clients for a review today" },
+    ],
+  },
+  {
+    label: "restaurants", keyword: "restaurant",
+    blips: buildBlips([{ name: "Saffron", hot: true }, { name: "Nonna's" }, { name: "El Farol" }, { name: "Blue Oak" }, { name: "Pho 88" }, { name: "Tandoor" }, { name: "Verde" }]),
+    stories: [
+      { tag: "new deal", who: "Saffron Kitchen", sig: "added a $9 weekday lunch combo", act: "Run a lunch special of your own this week" },
+      { tag: "hit post", who: "Blue Oak BBQ", sig: "a brisket reel got 5× their usual reach", act: "Post a short cook video of your best dish" },
+    ],
+  },
+  {
+    label: "barbers", keyword: "barber",
+    blips: buildBlips([{ name: "Fade Co", hot: true }, { name: "The Chair" }, { name: "Gloss" }, { name: "Sharp" }, { name: "Mane" }, { name: "Blowout" }, { name: "Lux" }]),
+    stories: [
+      { tag: "promo", who: "Fade Co", sig: "dropped $20 weekend fades for new clients", act: "Offer a first-visit discount and post it Friday" },
+      { tag: "hit post", who: "Gloss Bar", sig: "a color transformation reel blew up", act: "Post a before/after of your best cut this week" },
+    ],
+  },
+  {
+    label: "grocers", keyword: "grocery",
+    blips: buildBlips([{ name: "Patel Bros", hot: true }, { name: "Fresh Mart" }, { name: "Namaste" }, { name: "Sabzi" }, { name: "Green Cart" }, { name: "H-Town" }, { name: "Daily" }]),
+    stories: [
+      { tag: "sale", who: "Patel Brothers", sig: "ran a mango case sale this weekend", act: "Feature a seasonal produce deal up front" },
+      { tag: "flyer", who: "Fresh Mart", sig: "their weekly flyer post hit 4× reach", act: "Post your weekly specials as a simple flyer" },
+    ],
+  },
 ];
 
 interface LiveResult { name: string; rating: number | null; reviews: number | null; geo?: { lat: number; lng: number }; distanceKm?: number }
@@ -43,7 +74,8 @@ export function LiveRadarHero() {
   const [keyword, setKeyword] = useState("");
   const [mode, setMode] = useState<"demo" | "live">("demo");
   const [loading, setLoading] = useState(false);
-  const [blips, setBlips] = useState<Blip[]>(DEMO);
+  const [marketIdx, setMarketIdx] = useState(0);
+  const [blips, setBlips] = useState<Blip[]>(MARKETS[0].blips);
   const [summary, setSummary] = useState<{ n: number; avg: number | null; leader: string | null; leaderRating: number | null; label: string } | null>(null);
   const [storyIdx, setStoryIdx] = useState(0);
   const [reduced, setReduced] = useState(false);
@@ -89,12 +121,25 @@ export function LiveRadarHero() {
     if (lbl) lbl.style.opacity = "0.95";
   }
 
-  // demo story cycling
+  // in demo mode, re-seed the radar to the current vertical's businesses
+  useEffect(() => {
+    if (mode === "demo") setBlips(MARKETS[marketIdx].blips);
+  }, [mode, marketIdx]);
+
+  // demo cycling — advance stories, then roll to the next vertical when a market's
+  // stories are spent, so the hero shows med spas → restaurants → barbers → grocers.
   useEffect(() => {
     if (mode !== "demo" || reduced) return;
-    const t = setInterval(() => setStoryIdx((i) => (i + 1) % STORIES.length), 3200);
+    const stories = MARKETS[marketIdx].stories;
+    const t = setInterval(() => {
+      setStoryIdx((i) => {
+        if (i + 1 < stories.length) return i + 1;
+        setMarketIdx((m) => (m + 1) % MARKETS.length);
+        return 0;
+      });
+    }, 3200);
     return () => clearInterval(t);
-  }, [mode, reduced]);
+  }, [mode, reduced, marketIdx]);
 
   async function scan(e: React.FormEvent) {
     e.preventDefault();
@@ -116,7 +161,8 @@ export function LiveRadarHero() {
     } catch { /* keep demo on failure */ } finally { setLoading(false); }
   }
 
-  const story = STORIES[storyIdx];
+  const market = MARKETS[marketIdx];
+  const story = market.stories[storyIdx] ?? market.stories[0];
 
   return (
     <section className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-20">
@@ -156,14 +202,14 @@ export function LiveRadarHero() {
             <span>◎ Rani scanning nearby</span>
             <span className="inline-flex items-center gap-1.5" style={{ color: "#5eead4" }}>
               <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "#5eead4", boxShadow: "0 0 8px #5eead4" }} />
-              {mode === "live" ? "your market" : "live demo"}
+              {mode === "live" ? "your market" : `live demo · ${market.label}`}
             </span>
           </div>
           <form onSubmit={scan} className="mt-2.5 flex gap-1.5">
             <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Your zip or city" aria-label="Your zip or city"
               className="min-w-0 flex-1 rounded-full px-3.5 py-2 text-sm text-white placeholder:text-teal-200/50 focus:outline-none focus:ring-2 focus:ring-teal-300/40"
               style={{ background: "rgba(6,19,28,.6)", border: "1px solid rgba(94,234,212,.28)" }} />
-            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="med spa" aria-label="What you do"
+            <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={mode === "demo" ? market.keyword : "med spa"} aria-label="What you do"
               className="hidden w-28 rounded-full px-3.5 py-2 text-sm text-white placeholder:text-teal-200/50 focus:outline-none focus:ring-2 focus:ring-teal-300/40 sm:block"
               style={{ background: "rgba(6,19,28,.6)", border: "1px solid rgba(94,234,212,.28)" }} />
             <button type="submit" disabled={loading} className="shrink-0 rounded-full px-4 py-2 text-sm font-bold text-teal-950 disabled:opacity-60" style={{ background: "linear-gradient(140deg,#5eead4,#14b8a6)" }}>
@@ -180,7 +226,7 @@ export function LiveRadarHero() {
               <div ref={sweepRef} className="absolute inset-0 rounded-full" aria-hidden style={{ background: "conic-gradient(from 0deg at 50% 50%, rgba(20,184,166,.38) 0deg, rgba(20,184,166,.1) 26deg, transparent 60deg, transparent 360deg)", willChange: "transform" }} />
 
               {blips.map((b, i) => (
-                <span key={`${mode}-${i}`} ref={(el) => { blipRefs.current[i] = el; }} className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                <span key={mode === "demo" ? `demo-${marketIdx}-${i}` : `live-${i}`} ref={(el) => { blipRefs.current[i] = el; }} className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full"
                   style={{ left: `${b.left}%`, top: `${b.top}%`, background: "rgba(94,234,212,.28)", transition: "background .3s, box-shadow .3s" }} title={b.name}>
                   {!reduced && <span data-ping className="absolute inset-[-4px] rounded-full" style={{ border: "2px solid #5eead4", opacity: 0 }} aria-hidden />}
                   <span data-lbl className="absolute left-1/2 top-[13px] -translate-x-1/2 whitespace-nowrap rounded-md px-1.5 py-px text-[9px] font-bold opacity-0 transition-opacity" style={{ color: "#eafffb", background: "rgba(6,19,28,.75)", border: "1px solid rgba(94,234,212,.3)" }}>{b.name}</span>
@@ -200,7 +246,7 @@ export function LiveRadarHero() {
           {/* payoff card: demo story → or real market read */}
           <div className="mt-3 rounded-2xl p-3.5" style={{ background: "rgba(255,255,255,.72)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,.6)" }}>
             {mode === "demo" ? (
-              <div className="animate-fade-in" key={storyIdx}>
+              <div className="animate-fade-in" key={`${marketIdx}-${storyIdx}`}>
                 <div className="flex items-start gap-2">
                   <span className="shrink-0 rounded-full bg-coral/15 px-2 py-1 text-[10.5px] font-extrabold uppercase tracking-wide text-coral-dark">{story.tag}</span>
                   <span className="text-[13.5px] leading-snug text-ink"><b>{story.who}</b> {story.sig}</span>
