@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { RaniSpinner, RaniMark } from "@/components/RaniSpinner";
-import { RaniCollecting } from "@/components/RaniCollecting";
+import { RaniRadar } from "@/components/RaniRadar";
 import { subtypeLabel } from "@/lib/classify";
 import type { MapPoint } from "@/components/MapPicker";
 
@@ -496,7 +496,7 @@ function WorkspacePhase({
             <div className="font-semibold">Collection {allDone ? "complete" : "running in the background"}</div>
             <div className="text-sm text-ink-faint">{done}/{businesses.length} done</div>
           </div>
-          <RaniCollecting
+          <RaniRadar
             businesses={businesses.map((b: any) => ({ name: b.name, status: (jobs[b.id]?.status ?? "pending") as "pending" | "running" | "done" | "error" }))}
             done={done}
             total={businesses.length}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { RaniCollecting, type CollectNode } from "@/components/RaniCollecting";
+import { RaniRadar } from "@/components/RaniRadar";
 
 /**
  * App-wide "collection in progress" surface. Polls the active workspace's scan
@@ -15,6 +16,7 @@ type Job = { name?: string; status: string };
 export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const pathname = usePathname();
   const [jobs, setJobs] = useState<Job[] | null>(null);
+  const [ephemeral, setEphemeral] = useState(false);
   const [visible, setVisible] = useState(false);
   const wasActive = useRef(false);
 
@@ -31,6 +33,7 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
         if (!r.ok) return;
         const d = await r.json();
         const js = (d.jobs ?? []) as Job[];
+        setEphemeral(!!d.ephemeral);
         const active = js.some((j) => j.status === "pending" || j.status === "running");
         if (active) { wasActive.current = true; setJobs(js); setVisible(true); }
         else if (wasActive.current) {
@@ -58,9 +61,13 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   return (
     <section className="glass-strong mb-4 rounded-3xl p-4 sm:p-5">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-brand-deep">
-        <span aria-hidden>🛰️</span> Gathering your market intel
+        <span aria-hidden>🛰️</span> {ephemeral ? "Deep read · scanning your market" : "Gathering your market intel"}
       </div>
-      <RaniCollecting businesses={businesses} done={done} total={total} allDone={done >= total} />
+      {ephemeral ? (
+        <RaniRadar businesses={businesses} done={done} total={total} allDone={done >= total} />
+      ) : (
+        <RaniCollecting businesses={businesses} done={done} total={total} allDone={done >= total} />
+      )}
     </section>
   );
 }
