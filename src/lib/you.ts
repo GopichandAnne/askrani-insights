@@ -66,6 +66,9 @@ export interface YouReport {
   discoverability: YouDiscoverability;
   synthesis: YouSynthesis;
   reviewsAnalyzed: number;
+  /** true when Google's Gemini full-corpus review summary fed the synthesis —
+   *  drives the required "Summarized with Gemini" attribution in the UI. */
+  usedGoogleSummary?: boolean;
   at: string;
 }
 
@@ -233,13 +236,23 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
       .slice(0, 40);
   }
 
+  // Google's Gemini full-corpus review summary (Places API reviewSummary) — breadth
+  // the ≈5 raw reviews can't give. We fuse it in so synthesis reflects ALL reviews.
+  let googleSummary = "";
+  if (ids.targetId) {
+    const { data: bizRow } = await supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle();
+    googleSummary = String((bizRow?.attributes as any)?.googleReviewSummary?.text ?? "").replace(/\s+/g, " ").trim();
+  }
+  const usedGoogleSummary = !!googleSummary;
+
   let synthesis: YouSynthesis;
   if (!isLlmConfigured()) {
     synthesis = emptySynthesis("Connect an AI key to read what your customers are saying.");
-  } else if (!reviews.length) {
+  } else if (!reviews.length && !googleSummary) {
     synthesis = emptySynthesis("No review text captured yet — after the next scan we'll read what customers are saying and pull out what they love and what to fix.");
   } else {
     const numbered = reviews.map((r, i) => `[${i}] ${r.text.slice(0, 300)}`).join("\n");
+    const corpus = googleSummary ? `AI summary of ALL your reviews (Google/Gemini, full corpus):\n${googleSummary}\n\n` : "";
     try {
       const call = () => getLlm().callStructured<{
         headline: string;
@@ -250,7 +263,7 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
         summary: string;
       }>({
         system: SYSTEM,
-        text: `Your rating: ${reputation.rating ?? "?"}★ from ${reputation.reviewCount ?? "?"} reviews (market avg ${reputation.marketAvg ?? "?"}★).\n\nYour recent reviews:\n${numbered}\n\nWrite the reputation read.`,
+        text: `Your rating: ${reputation.rating ?? "?"}★ from ${reputation.reviewCount ?? "?"} reviews (market avg ${reputation.marketAvg ?? "?"}★).\n\n${corpus}${numbered ? `Recent individual reviews:\n${numbered}\n\n` : ""}Write the reputation read${googleSummary ? ", weighting the full-corpus summary for breadth and the individual reviews for specific quotes to answer" : ""}.`,
         schema: SCHEMA,
         tier: "extract",
         maxTokens: 1300,
@@ -294,6 +307,7 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
     name: youRep?.name ?? ws.name,
     reputation, price, discoverability, synthesis,
     reviewsAnalyzed: reviews.length,
+    usedGoogleSummary,
     at,
   };
 }

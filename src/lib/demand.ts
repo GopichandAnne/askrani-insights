@@ -92,9 +92,10 @@ export async function generateDemand(ws: WorkspaceRow, db?: RlsClient): Promise<
   const scope = ids.all;
   if (!scope.length) return empty(at);
 
-  const [{ data: reviews }, { data: offers }] = await Promise.all([
+  const [{ data: reviews }, { data: offers }, { data: bizRows }] = await Promise.all([
     supabase.from("content_item").select("text").in("business_id", scope).in("platform", ["google", "yelp"]).order("observed_at", { ascending: false }).limit(700),
     supabase.from("offer").select("entity_text").in("business_id", scope).limit(6000),
+    supabase.from("business").select("canonical_name, attributes").in("id", scope),
   ]);
 
   const reviewSnips = (reviews ?? [])
@@ -102,7 +103,13 @@ export async function generateDemand(ws: WorkspaceRow, db?: RlsClient): Promise<
     .filter((t) => t.length > 25 && !RATING_RE.test(t))
     .slice(0, 45)
     .map((t) => t.slice(0, 240));
-  if (reviewSnips.length < 4) return empty(at);
+  // Google's Gemini full-corpus review summaries across the market — breadth the
+  // raw snippets can't give (esp. for competitors we only get ≈5 reviews from).
+  const summaries = (bizRows ?? [])
+    .map((b) => ({ name: String((b as any).canonical_name ?? ""), text: String((b as any).attributes?.googleReviewSummary?.text ?? "").replace(/\s+/g, " ").trim() }))
+    .filter((s) => s.text)
+    .slice(0, 15);
+  if (reviewSnips.length < 4 && !summaries.length) return empty(at);
 
   // compact "what's already offered" list (distinct, most common) to ground "servedLocally"
   const offerCount = new Map<string, number>();
@@ -114,9 +121,13 @@ export async function generateDemand(ws: WorkspaceRow, db?: RlsClient): Promise<
 
   if (!isLlmConfigured()) return { summary: "", demands: [], reviewsSeen: reviewSnips.length, at, empty: true };
 
+  const summaryBlock = summaries.length
+    ? `AI SUMMARIES OF EACH PLACE'S FULL REVIEW CORPUS (Google/Gemini):\n${summaries.map((s) => `• ${s.name}: ${s.text}`).join("\n")}\n\n`
+    : "";
   const prompt =
     `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\n` +
-    `CUSTOMER REVIEWS ACROSS THE MARKET:\n${reviewSnips.join("\n")}\n\n` +
+    summaryBlock +
+    `CUSTOMER REVIEWS ACROSS THE MARKET:\n${reviewSnips.join("\n") || "(few individual reviews captured — lean on the summaries above)"}\n\n` +
     `ALREADY OFFERED NEARBY (to judge how served each want is):\n${offered || "(unknown)"}\n\n` +
     `Surface the unmet demand (fill the demands array).`;
 

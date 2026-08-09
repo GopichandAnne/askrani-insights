@@ -113,7 +113,7 @@ export class GoogleProvider implements PublicContentProvider {
               headers: {
                 "X-Goog-Api-Key": this.key,
                 "X-Goog-FieldMask":
-                  "id,displayName,rating,userRatingCount,reviews,photos,websiteUri,formattedAddress",
+                  "id,displayName,rating,userRatingCount,reviews,photos,websiteUri,formattedAddress,reviewSummary",
               },
             },
           );
@@ -123,6 +123,20 @@ export class GoogleProvider implements PublicContentProvider {
           }
           const p = (await res.json()) as any;
           const now = new Date().toISOString();
+          // AI-powered review summary (Places API, Gemini) — Google reads the
+          // FULL review corpus (not just the ≈5 the API returns) and returns a
+          // synthesized paragraph. We carry it on the businessHint so collect.ts
+          // stores it per-business; pillars fuse it in for whole-corpus breadth.
+          // Attribution ("Summarized with Gemini") is retained + must be shown.
+          const rs = p.reviewSummary;
+          const rsText = typeof rs?.text === "string" ? rs.text : rs?.text?.text;
+          const reviewSummary = rsText
+            ? {
+                text: String(rsText),
+                disclosure: typeof rs?.disclosureText === "string" ? rs.disclosureText : rs?.disclosureText?.text,
+                reviewsUri: rs?.reviewsUri,
+              }
+            : undefined;
           // Overall rating summary — the Places API returns the aggregate rating
           // + count; store it (mirrors Yelp) so reputation isn't Yelp-only.
           if (p.rating != null) {
@@ -134,7 +148,7 @@ export class GoogleProvider implements PublicContentProvider {
               contentKind: "review",
               externalRef: `${placeId}#google-rating`,
               sourceUrl: p.websiteUri,
-              businessHint: { name: p.displayName?.text, address: p.formattedAddress } as any,
+              businessHint: { name: p.displayName?.text, address: p.formattedAddress, reviewSummary } as any,
               text: summary,
               media: [],
               observedAt: now,

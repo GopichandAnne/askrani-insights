@@ -235,7 +235,9 @@ export default async function YouPage() {
         </section>
       </div>
 
-      <p className="text-center text-xs text-ink-faint">Read from {you.reviewsAnalyzed} of your reviews · updates after each scan.</p>
+      <p className="text-center text-xs text-ink-faint">
+        Read from {you.reviewsAnalyzed} of your reviews{you.usedGoogleSummary ? " + a full-review summary (Summarized with Gemini)" : ""} · updates after each scan.
+      </p>
     </div>
   );
 }

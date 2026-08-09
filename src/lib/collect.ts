@@ -374,6 +374,10 @@ export async function collectBusiness(
           // which needs an address). Same details call — no extra API cost.
           const addr = (rev.businessHint as any)?.address as string | undefined;
           if (addr && !attrs.address) { attrs.address = addr; attrsDirty = true; }
+          // Google's Gemini full-corpus review summary — refresh it each run so
+          // reputation/demand pillars always fuse in the latest whole-review read.
+          const rs = (rev.businessHint as any)?.reviewSummary as { text?: string; disclosure?: string; reviewsUri?: string } | undefined;
+          if (rs?.text) { attrs.googleReviewSummary = { ...rs, at: nowIso }; attrsDirty = true; }
           await upsertObsContentItem(svc, businessId, rev, nowIso);
           n++;
         }
