@@ -168,12 +168,15 @@ export function LiveRadarHero() {
     <section className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-20">
       {/* left — minimal words */}
       <div>
-        {/* Rani herself — the character introduces the product before the radar shows her job */}
-        <div className="relative mb-4 block w-fit">
-          <span className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/20 blur-2xl" aria-hidden />
-          <img src="/rani-3d.png" alt="Rani, your always-on local market analyst" width={120} height={120}
-            className={reduced ? "h-24 w-auto sm:h-28" : "h-24 w-auto animate-bob sm:h-28"}
-            style={{ filter: "drop-shadow(0 16px 22px rgba(13,148,136,.28))" }} />
+        {/* Rani herself — the character leads, spotlit, before the radar shows her job */}
+        <div className="relative mb-5 grid h-48 w-fit place-items-center sm:h-60">
+          <span className="pointer-events-none absolute h-56 w-56 rounded-full sm:h-72 sm:w-72" aria-hidden
+            style={{ background: "radial-gradient(circle, rgba(20,184,166,.28), rgba(20,184,166,.10) 46%, transparent 70%)" }} />
+          <span className="pointer-events-none absolute h-44 w-44 rounded-full border sm:h-56 sm:w-56" style={{ borderColor: "rgba(20,184,166,.22)" }} aria-hidden />
+          <span className="pointer-events-none absolute h-56 w-56 rounded-full border sm:h-72 sm:w-72" style={{ borderColor: "rgba(20,184,166,.12)" }} aria-hidden />
+          <img src="/rani-3d.png" alt="Rani, your always-on local market analyst" width={220} height={220}
+            className={reduced ? "relative h-44 w-auto sm:h-56" : "relative h-44 w-auto animate-bob sm:h-56"}
+            style={{ filter: "drop-shadow(0 26px 34px rgba(13,148,136,.34))" }} />
         </div>
         <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-brand-deep">
           <span className="rani-dots scale-75" aria-hidden><span /><span /><span /></span>
