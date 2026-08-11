@@ -168,6 +168,13 @@ export function LiveRadarHero() {
     <section className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-20">
       {/* left — minimal words */}
       <div>
+        {/* Rani herself — the character introduces the product before the radar shows her job */}
+        <div className="relative mb-4 block w-fit">
+          <span className="pointer-events-none absolute left-1/2 top-1/2 -z-10 h-32 w-32 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/20 blur-2xl" aria-hidden />
+          <img src="/rani-3d.png" alt="Rani, your always-on local market analyst" width={120} height={120}
+            className={reduced ? "h-24 w-auto sm:h-28" : "h-24 w-auto animate-bob sm:h-28"}
+            style={{ filter: "drop-shadow(0 16px 22px rgba(13,148,136,.28))" }} />
+        </div>
         <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-brand-deep">
           <span className="rani-dots scale-75" aria-hidden><span /><span /><span /></span>
           Your always-on local market analyst
