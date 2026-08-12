@@ -15,9 +15,11 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
  * CAPTIONS. Reading image flyers needs a collection change (download + vision).
  */
 
-const SOCIAL = ["instagram", "facebook", "tiktok"];
+// Where local businesses broadcast offers — social + Google posts + their own site.
+// Grocery/restaurant weekly specials often live on Google & the website, not only IG.
+const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "google", "website"];
 
-export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string }
+export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string; source?: string }
 export interface DealsReport {
   summary: string;
   deals: DealItem[];
@@ -63,55 +65,71 @@ function parseArrays(v: unknown): any[] {
   return [];
 }
 
-export async function generateDeals(ws: WorkspaceRow, db?: RlsClient): Promise<DealsReport> {
+/** Core deal extraction over a given set of businesses. `own=true` reframes it as
+ *  the owner's OWN current offers (their posts) rather than rivals'. */
+async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, own = false): Promise<DealsReport> {
   const at = new Date().toISOString();
-  const supabase = db ?? (await createClient());
-  const ids = await workspaceBusinessIds(ws, supabase);
-  if (!ids.competitorIds.length) return empty(at);
+  if (!businessIds.length) return empty(at);
 
-  const { data: posts } = await supabase
+  const { data: posts } = await db
     .from("content_item")
-    .select("text, url, published_at, observed_at, business:business_id(canonical_name)")
-    .in("business_id", ids.competitorIds)
-    .in("platform", SOCIAL)
+    .select("text, url, platform, observed_at, business:business_id(canonical_name)")
+    .in("business_id", businessIds)
+    .in("platform", PROMO_SOURCES)
     .order("observed_at", { ascending: false })
-    .limit(300);
+    .limit(400);
 
   const ranked = (posts ?? [])
     .map((p) => ({
-      rival: (p as any).business?.canonical_name ?? "A rival",
+      rival: (p as any).business?.canonical_name ?? (own ? ws.name : "A rival"),
       caption: String((p as any).text ?? "").replace(/\s+/g, " ").trim(),
       url: (p as any).url ?? undefined,
+      source: (p as any).platform as string | undefined,
     }))
     .filter((p) => p.caption.length > 8)
     .slice(0, 90);
   if (ranked.length < 3) return empty(at);
   if (!isLlmConfigured()) return { summary: "", deals: [], moves: [], postsSeen: ranked.length, at, empty: true };
 
-  const list = ranked.map((p, i) => `[${i}] ${p.rival}: ${p.caption.slice(0, 220)}`).join("\n");
-  const prompt = `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nRIVAL SOCIAL POSTS:\n${list}\n\nExtract the deals/promos they're running (fill the deals array).`;
+  const list = ranked.map((p, i) => `[${i}] ${p.rival} (${p.source ?? "web"}): ${p.caption.slice(0, 220)}`).join("\n");
+  const prompt = own
+    ? `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nTHIS BUSINESS'S OWN POSTS:\n${list}\n\nExtract the deals/promos THIS business is currently running (fill the deals array). Leave moves empty.`
+    : `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nRIVAL POSTS (social, Google, website):\n${list}\n\nExtract the deals/promos the rivals are running (fill the deals array).`;
+  const system = own ? SYSTEM.replace("a local business's rivals are posting", `the business "${ws.name}" is posting`) : SYSTEM;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const { data } = await getLlm().callStructured<{ deals: unknown; summary: string; moves: unknown }>({
-        system: SYSTEM, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 1800,
+        system, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 1800,
       });
       const deals: DealItem[] = parseArrays(data.deals)
         .map((d) => {
           const src = ranked[Number(d.index)];
           const deal = strip(d.deal);
           if (!src || !deal) return null;
-          return { rival: src.rival, deal, item: strip(d.item) || undefined, when: strip(d.when) || undefined, url: src.url } as DealItem;
+          return { rival: src.rival, deal, item: strip(d.item) || undefined, when: strip(d.when) || undefined, url: src.url, source: src.source } as DealItem;
         })
         .filter((d): d is DealItem => !!d)
-        .slice(0, 12);
+        .slice(0, 14);
       if (deals.length) {
-        return { summary: strip(data.summary), deals, moves: parseArrays(data.moves).map((m) => strip(String(m))).filter(Boolean).slice(0, 4), postsSeen: ranked.length, at };
+        return { summary: strip(data.summary), deals, moves: own ? [] : parseArrays(data.moves).map((m) => strip(String(m))).filter(Boolean).slice(0, 4), postsSeen: ranked.length, at };
       }
     } catch { /* retry */ }
     if (attempt < 2) await new Promise((r) => setTimeout(r, 4000));
   }
   return empty(at, true);
+}
+
+export async function generateDeals(ws: WorkspaceRow, db?: RlsClient): Promise<DealsReport> {
+  const supabase = db ?? (await createClient());
+  const ids = await workspaceBusinessIds(ws, supabase);
+  return runDeals(ws, ids.competitorIds, supabase, false);
+}
+
+/** The owner's OWN current offers — for the yours-vs-theirs comparison. */
+export async function generateMyDeals(ws: WorkspaceRow, db?: RlsClient): Promise<DealsReport> {
+  const supabase = db ?? (await createClient());
+  return runDeals(ws, ws.target_business_id ? [ws.target_business_id] : [], supabase, true);
 }
 
 export function dealsIsGood(d: DealsReport): boolean {
@@ -130,5 +148,19 @@ export async function getOrMakeDeals(ws: WorkspaceRow, maxAgeHours = 12): Promis
   const svc = createServiceClient();
   const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), deals: fresh } }).eq("id", ws.id);
+  return fresh;
+}
+
+/** Cached OWN-offers report (goals.myDeals), regenerated when older than maxAgeHours. */
+export async function getOrMakeMyDeals(ws: WorkspaceRow, maxAgeHours = 12): Promise<DealsReport> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const cached = (data?.goals as { myDeals?: DealsReport } | null)?.myDeals;
+  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
+
+  const fresh = await generateMyDeals(ws);
+  const svc = createServiceClient();
+  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), myDeals: fresh } }).eq("id", ws.id);
   return fresh;
 }
