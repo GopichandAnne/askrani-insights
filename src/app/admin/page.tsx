@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getUser, isSuperAdmin, isServiceConfigured } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 import { providerHealth } from "@/lib/providers/registry";
 import { isLlmConfigured, getLlm } from "@/lib/extraction/llm";
 import { analyticsSummary } from "@/lib/analytics";
+import { paymentLinks } from "@/lib/stripe";
+import { OrgBillingLinks, type OrgRow } from "@/components/OrgBillingLinks";
 
 export const metadata = { title: "Super Admin — Ask Rani Insights" };
 export const dynamic = "force-dynamic";
@@ -60,6 +63,20 @@ export default async function AdminPage() {
 
   const analytics = await analyticsSummary(30);
 
+  // orgs + billing links (for handing customers a pay link that credits their org)
+  const { data: orgRows } = svc
+    ? await svc.from("organization").select("id,name,plan,settings").order("created_at", { ascending: false }).limit(30)
+    : { data: [] as any[] };
+  const orgs: OrgRow[] = (orgRows ?? []).map((o: any) => {
+    const b = (o.settings?.billing ?? {}) as { plan?: string; planCredits?: number; topupCredits?: number };
+    return { id: o.id, name: o.name, plan: b.plan ?? o.plan ?? "free", balance: (b.planCredits ?? 0) + (b.topupCredits ?? 0) };
+  });
+  const links = paymentLinks();
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "insights.askrani.ai";
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const billingUrl = `${proto}://${host}/billing`;
+
   return (
     <div className="space-y-8 animate-fade-in">
       <section>
@@ -90,6 +107,12 @@ export default async function AdminPage() {
           ))}
         </section>
       )}
+
+      {/* organizations & billing links */}
+      <section>
+        <h2 className="mb-2 text-lg font-semibold">Organizations &amp; billing links</h2>
+        <OrgBillingLinks orgs={orgs} links={links} billingUrl={billingUrl} />
+      </section>
 
       {/* first-party funnel analytics (last 30 days) */}
       <section>

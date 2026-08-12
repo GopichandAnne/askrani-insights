@@ -33,6 +33,22 @@ export function availableKeys(): string[] {
   return Object.entries(CATALOG).filter(([, v]) => !!v.price).map(([k]) => k);
 }
 
+export interface PaymentLink { key: string; label: string; url: string }
+/** Optional shareable Stripe Payment Link URLs (created in the dashboard), read
+ *  from env. Used by the admin console to hand out per-org links. Only the ones
+ *  actually set are returned. */
+export function paymentLinks(): PaymentLink[] {
+  const defs: [string, string, string | undefined][] = [
+    ["starter", "Starter", process.env.STRIPE_LINK_STARTER],
+    ["growth", "Growth", process.env.STRIPE_LINK_GROWTH],
+    ["pro", "Pro", process.env.STRIPE_LINK_PRO],
+    ["topup_500", "500 credits", process.env.STRIPE_LINK_TOPUP_500],
+    ["topup_1500", "1,500 credits", process.env.STRIPE_LINK_TOPUP_1500],
+    ["topup_5000", "5,000 credits", process.env.STRIPE_LINK_TOPUP_5000],
+  ];
+  return defs.filter(([, , url]) => !!url).map(([key, label, url]) => ({ key, label, url: url as string }));
+}
+
 /** Resolve a catalog item from a Stripe price id — lets us credit purchases that
  *  arrive WITHOUT our metadata.key (e.g. a Payment Link created in the Stripe
  *  dashboard and shared over email/WhatsApp). The price id is the stable join. */
