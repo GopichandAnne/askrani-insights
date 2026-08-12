@@ -165,29 +165,19 @@ export function LiveRadarHero() {
   const story = market.stories[storyIdx] ?? market.stories[0];
 
   return (
-    <section className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-[0.92fr_1.08fr] lg:py-20">
+    <section className="mx-auto grid max-w-6xl items-center gap-10 px-6 py-12 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
       {/* left — minimal words */}
       <div>
-        {/* Rani herself — the character leads, spotlit, before the radar shows her job */}
-        <div className="relative mb-5 grid h-48 w-fit place-items-center sm:h-60">
-          <span className="pointer-events-none absolute h-56 w-56 rounded-full sm:h-72 sm:w-72" aria-hidden
-            style={{ background: "radial-gradient(circle, rgba(20,184,166,.28), rgba(20,184,166,.10) 46%, transparent 70%)" }} />
-          <span className="pointer-events-none absolute h-44 w-44 rounded-full border sm:h-56 sm:w-56" style={{ borderColor: "rgba(20,184,166,.22)" }} aria-hidden />
-          <span className="pointer-events-none absolute h-56 w-56 rounded-full border sm:h-72 sm:w-72" style={{ borderColor: "rgba(20,184,166,.12)" }} aria-hidden />
-          <img src="/rani-3d.png" alt="Rani, your always-on local market analyst" width={220} height={220}
-            className={reduced ? "relative h-44 w-auto sm:h-56" : "relative h-44 w-auto animate-bob sm:h-56"}
-            style={{ filter: "drop-shadow(0 26px 34px rgba(13,148,136,.34))" }} />
-        </div>
         <span className="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold text-brand-deep">
           <span className="rani-dots scale-75" aria-hidden><span /><span /><span /></span>
           Your always-on local market analyst
         </span>
-        <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.04] tracking-tight sm:text-5xl lg:text-6xl">
-          Know your competition.{" "}
-          <span className="text-gradient">Beat it.</span>
+        <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-5xl lg:text-5xl">
+          <span className="block whitespace-nowrap">Know your competition.</span>
+          <span className="block text-gradient">Beat it.</span>
         </h1>
         <p className="mt-5 max-w-sm text-lg text-ink-soft">
-          Rani watches every rival near you — and each week tells you the one move to make.
+          Rani watches every rival near you — and tells you the move to make.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
           <a href="#explore" className="btn btn-primary px-7 py-3.5 text-base">
@@ -243,12 +233,14 @@ export function LiveRadarHero() {
                 </span>
               ))}
 
-              {/* you at center */}
+              {/* Rani at center — she is the one scanning */}
               <span className="absolute left-1/2 top-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center">
-                <span className="absolute rounded-full" style={{ width: 50, height: 50, background: "rgba(20,184,166,.18)", filter: "blur(6px)" }} aria-hidden />
-                {!reduced && <span className="absolute animate-ping rounded-full" style={{ width: 36, height: 36, border: "1.5px solid rgba(94,234,212,.5)" }} aria-hidden />}
-                <span className={reduced ? "relative" : "relative animate-bob"}><RaniMark size={28} /></span>
-                <span className="absolute top-[30px] text-[9px] font-bold" style={{ color: "#5eead4" }}>YOU</span>
+                <span className="absolute rounded-full" style={{ width: 88, height: 88, background: "rgba(20,184,166,.24)", filter: "blur(9px)" }} aria-hidden />
+                {!reduced && <span className="absolute animate-ping rounded-full" style={{ width: 72, height: 72, border: "1.5px solid rgba(94,234,212,.5)" }} aria-hidden />}
+                <span className={reduced ? "relative" : "relative animate-bob"}>
+                  <img src="/rani-3d.png" alt="Rani" className="h-16 w-auto" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,.4))" }} />
+                </span>
+                <span className="absolute top-[42px] text-[9px] font-bold" style={{ color: "#5eead4" }}>YOU</span>
               </span>
             </div>
           </div>
