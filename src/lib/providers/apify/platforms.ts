@@ -141,8 +141,17 @@ function mapItem(cfg: PlatformConfig, it: any): RawObservation {
   const text = it.caption ?? it.text ?? it.title ?? it.description ?? it.postText ?? "";
   const url = it.url ?? it.postUrl ?? it.webVideoUrl ?? it.link;
   const media: RawObservation["media"] = [];
-  if (it.displayUrl) media.push({ type: "image", url: it.displayUrl });
-  for (const img of it.images ?? []) media.push({ type: "image", url: img });
+  // Image URLs live under different keys per platform/actor (IG: displayUrl/images;
+  // FB posts-scraper: media[].photo_image / image / attachments). Gather tolerantly.
+  const pushImg = (u: unknown) => { if (typeof u === "string" && /^https?:\/\//.test(u)) media.push({ type: "image", url: u }); };
+  pushImg(it.displayUrl); pushImg(it.image); pushImg(it.imageUrl); pushImg(it.photoUrl); pushImg(it.thumbnailUrl);
+  for (const img of it.images ?? []) pushImg(typeof img === "string" ? img : (img?.url ?? img?.src ?? img?.image));
+  for (const m of it.media ?? []) {
+    const t = String(m?.type ?? "").toLowerCase();
+    if (t && t !== "image" && t !== "photo") continue;
+    pushImg(typeof m === "string" ? m : (m?.url ?? m?.image ?? m?.src ?? m?.thumbnail ?? m?.photo_image?.uri));
+  }
+  for (const a of it.attachments ?? []) pushImg(a?.url ?? a?.image?.uri ?? a?.media?.image?.uri ?? a?.photo_image?.uri);
   if (it.videoUrl || it.webVideoUrl) media.push({ type: "video", url: it.videoUrl ?? it.webVideoUrl });
   // Engagement metrics (IG likesCount/commentsCount/videoViewCount; TikTok
   // diggCount/playCount…). Stored as a trailing media entry so it persists in

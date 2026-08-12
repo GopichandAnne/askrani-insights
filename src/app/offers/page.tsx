@@ -124,7 +124,10 @@ export default async function OffersPage() {
             {/* flyer-image deals (grocery weekly ads), when present */}
             {[...flyersByRival.entries()].map(([rival, items], gi) => (
               <div key={`f-${gi}`} className="rounded-2xl bg-white/55 p-3.5">
-                <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-brand-deep">{rival} <span className="chip bg-coral/15 text-coral-dark">🧾 flyer</span></p>
+                <p className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-brand-deep">
+                  {rival}
+                  <span className="chip bg-coral/15 text-coral-dark">🧾 flyer{items[0]?.source ? ` · ${sourceLabel(items[0].source)}` : ""}</span>
+                </p>
                 <ul className="divide-y divide-line/50">
                   {items.slice(0, 8).map((d, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
@@ -133,6 +136,9 @@ export default async function OffersPage() {
                     </li>
                   ))}
                 </ul>
+                {(items[0]?.postUrl || items[0]?.imageUrl) && (
+                  <a href={items[0].postUrl || items[0].imageUrl} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex text-xs font-medium text-brand hover:underline">see flyer ↗</a>
+                )}
               </div>
             ))}
           </div>

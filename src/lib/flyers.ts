@@ -16,7 +16,7 @@ import { collectApifyPlatform, apifyConfigured } from "@/lib/providers/apify/pla
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 const BUCKET = "flyers";
 
-export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string }
+export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string }
 export interface FlyerReport { deals: FlyerDeal[]; flyersRead: number; at: string; empty?: boolean }
 
 export function flyersConfigured(): boolean {
@@ -100,25 +100,28 @@ export async function refreshFlyers(
   const svc = createServiceClient();
   await ensureBucket(svc);
 
-  // resolve which IG profiles to scrape (competitors with an instagram identity)
-  const targets: { url: string; rival: string }[] = opts.igUrls ?? (await (async () => {
-    const ids = await workspaceBusinessIds(ws, svc as any);
-    const compIds = ids.competitorIds.slice(0, opts.maxCompetitors ?? 6);
-    const [{ data: biz }, { data: idents }] = await Promise.all([
-      svc.from("business").select("id, canonical_name").in("id", compIds),
-      svc.from("external_identity").select("business_id, url").eq("platform", "instagram").in("business_id", compIds),
-    ]);
-    const nameById = new Map((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
-    return (idents ?? []).map((r: any) => ({ url: r.url as string, rival: nameById.get(r.business_id) ?? "A rival" }));
-  })());
+  // resolve which profiles to scrape — competitors' Instagram AND Facebook pages
+  const maxComp = opts.maxCompetitors ?? 6;
+  const targets: { url: string; rival: string; platform: string }[] =
+    opts.igUrls?.map((t) => ({ ...t, platform: "instagram" })) ?? (await (async () => {
+      const ids = await workspaceBusinessIds(ws, svc as any);
+      const compIds = ids.competitorIds.slice(0, maxComp);
+      const [{ data: biz }, { data: idents }] = await Promise.all([
+        svc.from("business").select("id, canonical_name").in("id", compIds),
+        svc.from("external_identity").select("business_id, url, platform").in("platform", ["instagram", "facebook"]).in("business_id", compIds),
+      ]);
+      const nameById = new Map((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
+      return (idents ?? []).map((r: any) => ({ url: r.url as string, rival: nameById.get(r.business_id) ?? "A rival", platform: r.platform as string }));
+    })());
   if (!targets.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
 
-  // scrape fresh + download images immediately (fresh CDN signatures are valid)
-  const flyers: { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string }[] = [];
+  // scrape fresh + download images immediately (fresh CDN signatures are valid).
+  // Cap total profiles so cost stays bounded even when rivals have IG *and* FB.
+  const flyers: { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string }[] = [];
   let costUsd = 0;
   const per = opts.postsPerCompetitor ?? 4;
-  for (const t of targets.slice(0, opts.maxCompetitors ?? 6)) {
-    const { items, costUsd: c } = await collectApifyPlatform("instagram", t.url, { maxMs: 90000 });
+  for (const t of targets.slice(0, maxComp * 2)) {
+    const { items, costUsd: c } = await collectApifyPlatform(t.platform, t.url, { maxMs: 90000 });
     costUsd += c;
     let n = 0;
     for (const it of items) {
@@ -127,7 +130,7 @@ export async function refreshFlyers(
       if (!imgUrl?.url) continue;
       const stored = await storeImage(svc, imgUrl.url, `${ws.id}/${keyOf(t.rival + imgUrl.url)}`);
       if (!stored) continue;
-      flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType });
+      flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: t.platform });
       n++;
     }
   }
@@ -153,7 +156,7 @@ export async function refreshFlyers(
         for (const d of Array.isArray(im.deals) ? im.deals : []) {
           const item = String(d.item ?? "").replace(/\s+/g, " ").trim();
           if (!item) continue;
-          deals.push({ rival: src.rival, item, price: String(d.price ?? "").trim() || undefined, terms: String(d.terms ?? "").trim() || undefined, imageUrl: src.storedUrl, postUrl: src.postUrl });
+          deals.push({ rival: src.rival, item, price: String(d.price ?? "").trim() || undefined, terms: String(d.terms ?? "").trim() || undefined, imageUrl: src.storedUrl, postUrl: src.postUrl, source: src.source });
         }
       }
     } catch { /* skip this batch */ }
