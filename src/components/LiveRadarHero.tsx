@@ -199,7 +199,7 @@ export function LiveRadarHero() {
         <div className="relative overflow-hidden rounded-3xl border p-4 shadow-glass" style={{ borderColor: "rgba(45,212,191,.16)", background: "radial-gradient(120% 120% at 50% 15%, #0a3a38, #06201f)" }}>
           {/* header + real search */}
           <div className="flex items-center justify-between text-[12.5px] font-semibold" style={{ color: "#a7f3d0" }}>
-            <span>◎ Rani scanning nearby</span>
+            <span>◎ Rani scanning competition</span>
             <span className="inline-flex items-center gap-1.5" style={{ color: "#5eead4" }}>
               <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: "#5eead4", boxShadow: "0 0 8px #5eead4" }} />
               {mode === "live" ? "your market" : `live demo · ${market.label}`}
