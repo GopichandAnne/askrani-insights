@@ -238,7 +238,8 @@ export function LiveRadarHero() {
                 </g>
                 <rect x="196" y="150" width="56" height="44" rx="10" fill="rgba(52,211,153,.10)" />
                 <g stroke="rgba(125,211,197,.20)" strokeWidth="3.5" strokeLinecap="round">
-                  <line x1="150" y1="-10" x2="162" y2="310" /><line x1="-10" y1="140" x2="310" y2="150" /><line x1="-10" y1="20" x2="310" y2="250" />
+                  <line x1="150" y1="-10" x2="162" y2="310" /><line x1="-10" y1="140" x2="310" y2="150" />
+                  <line x1="-10" y1="20" x2="310" y2="250" /><line x1="-10" y1="280" x2="310" y2="50" />
                 </g>
                 <g stroke="rgba(125,211,197,.12)" strokeWidth="1.6">
                   <line x1="92" y1="0" x2="98" y2="300" /><line x1="210" y1="0" x2="206" y2="300" /><line x1="0" y1="86" x2="300" y2="80" /><line x1="0" y1="212" x2="300" y2="220" />
