@@ -115,13 +115,21 @@ export async function refreshFlyers(
     })());
   if (!targets.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
 
-  // scrape fresh + download images immediately (fresh CDN signatures are valid).
-  // Cap total profiles so cost stays bounded even when rivals have IG *and* FB.
+  // Interleave IG/FB and cap TOTAL profiles at maxComp — scraping is sequential
+  // and each profile polls up to ~1 min, so an unbounded list overruns the
+  // serverless budget. Round-robin gives a mix of both platforms within the cap.
+  const igT = targets.filter((t) => t.platform === "instagram");
+  const fbT = targets.filter((t) => t.platform === "facebook");
+  const ordered: typeof targets = [];
+  for (let i = 0; i < Math.max(igT.length, fbT.length); i++) { if (igT[i]) ordered.push(igT[i]); if (fbT[i]) ordered.push(fbT[i]); }
+  const scrapeList = ordered.slice(0, maxComp);
+
+  // scrape fresh + download images immediately (fresh CDN signatures are valid)
   const flyers: { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string }[] = [];
   let costUsd = 0;
   const per = opts.postsPerCompetitor ?? 4;
-  for (const t of targets.slice(0, maxComp * 2)) {
-    const { items, costUsd: c } = await collectApifyPlatform(t.platform, t.url, { maxMs: 90000 });
+  for (const t of scrapeList) {
+    const { items, costUsd: c } = await collectApifyPlatform(t.platform, t.url, { maxMs: 55000 });
     costUsd += c;
     let n = 0;
     for (const it of items) {
