@@ -133,6 +133,18 @@ export function quoteAreaMonitor(businessCount = 0): number {
   return AREA_MONITOR_BASE_CREDITS + AREA_MONITOR_PER_BUSINESS_CREDITS * Math.min(Math.max(0, businessCount), AREA_MONITOR_BUSINESS_CAP);
 }
 
+// ── Flyer read — scrape rivals' Instagram fresh, download the sale-flyer images,
+// and vision-read the printed prices. Cost-bearing (Apify scrape + vision), so it's
+// an explicit, credit-charged action (refunded if no flyers are found).
+export const FLYER_READ_BASE_CREDITS = 15;
+export const FLYER_READ_PER_COMPETITOR_CREDITS = 8;
+export const FLYER_READ_COMPETITOR_CAP = 6;
+
+/** Credits to read rivals' sale flyers = base + per-competitor (capped). */
+export function quoteFlyerRead(competitorCount = 0): number {
+  return FLYER_READ_BASE_CREDITS + FLYER_READ_PER_COMPETITOR_CREDITS * Math.min(Math.max(0, competitorCount), FLYER_READ_COMPETITOR_CAP);
+}
+
 /** Charge an explicit credit amount for a discrete action (deep read). Debits plan
  *  first then top-up. Returns false without charging if the balance is short. */
 export async function spendCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<boolean> {

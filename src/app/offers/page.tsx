@@ -1,6 +1,9 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
+import { flyersConfigured } from "@/lib/flyers";
+import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP } from "@/lib/credits";
+import { FlyerReadButton } from "@/components/FlyerReadButton";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { TrustChip, ProvenanceBadge } from "@/components/TrustChip";
 import { MarketTabs } from "@/components/MarketTabs";
@@ -57,6 +60,8 @@ export default async function OffersPage() {
   const usd = (n: number | null) => (n == null ? "—" : `$${n.toFixed(2)}`);
 
   const hasRivalDeals = dealsByRival.size > 0 || flyersByRival.size > 0;
+  const canFlyer = flyersConfigured() && ids.competitorIds.length > 0;
+  const flyerCost = quoteFlyerRead(Math.min(ids.competitorIds.length, FLYER_READ_COMPETITOR_CAP));
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -80,6 +85,16 @@ export default async function OffersPage() {
           {hasRivalDeals && <span className="text-xs text-ink-faint">{rivalDeals.deals.length + flyerDeals.length} live offers · {dealsByRival.size + flyersByRival.size} rivals</span>}
         </div>
         {rivalDeals.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{rivalDeals.summary}</p>}
+
+        {/* Flyer read — the grocery goldmine: prices printed inside rivals' IG/FB flyer images */}
+        {canFlyer && (
+          <div className="mb-3 rounded-2xl border border-brand/20 bg-brand-soft/40 p-3">
+            <p className="mb-1.5 text-sm font-medium text-brand-deep">
+              🧾 Rivals often post their sale prices inside <b>flyer images</b> on Instagram — Rani can read the prices right off them.
+            </p>
+            <FlyerReadButton workspaceId={ws.id} cost={flyerCost} />
+          </div>
+        )}
 
         {!hasRivalDeals ? (
           <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
