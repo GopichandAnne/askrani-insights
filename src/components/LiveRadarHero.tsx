@@ -183,7 +183,7 @@ export function LiveRadarHero() {
           Your always-on local market analyst
         </span>
         <h1 className="mt-6 font-display text-4xl font-extrabold leading-[1.04] tracking-tight sm:text-5xl lg:text-6xl">
-          Know your street.{" "}
+          Know your competition.{" "}
           <span className="text-gradient">Beat it.</span>
         </h1>
         <p className="mt-5 max-w-sm text-lg text-ink-soft">
