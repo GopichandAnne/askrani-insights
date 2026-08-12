@@ -13,7 +13,8 @@ const REASON_LABEL: Record<string, string> = {
   topup_purchase: "Top-up", collection_debit: "Monitoring", ai_debit: "AI analysis", adjustment: "Adjustment", refund: "Refund",
 };
 
-export default async function BillingPage() {
+export default async function BillingPage({ searchParams }: { searchParams: Promise<{ purchase?: string }> }) {
+  const purchase = (await searchParams)?.purchase;
   const user = await getUser();
   if (!user) return <p className="rounded-2xl border border-dashed border-line p-6 text-sm text-ink-faint">Sign in to see your credits.</p>;
   const auth = await requireOrg();
@@ -30,6 +31,15 @@ export default async function BillingPage() {
 
   return (
     <div className="animate-fade-in space-y-6">
+      {purchase === "success" && (
+        <div className="flex items-start gap-2 rounded-2xl border border-trust-direct/30 bg-trust-direct/10 p-4 text-sm font-medium text-trust-direct">
+          <span aria-hidden>✓</span>
+          <span>Payment received — thank you! Your plan and credits below are updated. If the balance looks unchanged, give it a few seconds and refresh.</span>
+        </div>
+      )}
+      {purchase === "cancelled" && (
+        <div className="rounded-2xl border border-line bg-surface p-4 text-sm text-ink-soft">Checkout cancelled — no charge was made.</div>
+      )}
       <header>
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
         <h1 className="mt-0.5 font-display text-3xl font-extrabold tracking-tight sm:text-4xl">Billing &amp; credits</h1>

@@ -45,7 +45,9 @@ export async function POST(req: Request) {
           await grantTopup(orgId, item.credits, { stripe_session: s.id, key });
           await requeuePausedForOrg(orgId);
         } else if (s.mode === "subscription" && item.plan) {
-          await setPlan(orgId, item.plan, "active"); // credits granted on invoice.paid
+          await setPlan(orgId, item.plan, "active");
+          await grantPlanCredits(orgId); // grant now too, so credits don't depend on invoice.paid arriving after setPlan
+          await requeuePausedForOrg(orgId);
         }
       }
     } else if (event.type === "invoice.paid") {
