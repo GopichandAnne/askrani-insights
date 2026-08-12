@@ -1,6 +1,7 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
+import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
 import type { FlyerDeal } from "@/lib/flyers";
 import { flyersConfigured } from "@/lib/flyers";
 import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP } from "@/lib/credits";
@@ -24,7 +25,7 @@ export default async function OffersPage() {
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
-  const [rivalDeals, myDeals] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws)]);
+  const [rivalDeals, myDeals, priceGaps] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws)]);
   const flyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
 
   // merge everything into ONE bundle per rival (promos + priced flyer items)
@@ -117,6 +118,39 @@ export default async function OffersPage() {
           </div>
         </section>
       )}
+
+      {/* You vs them — intelligent price-gap findings (only what matters) */}
+      {priceGaps.gaps.length > 0 && (() => {
+        const STYLE: Record<GapVerdict, { badge: string; label: string; ring: string }> = {
+          undercut: { badge: "bg-coral/15 text-coral-dark", label: "You're higher", ring: "border-coral/30" },
+          you_cheaper: { badge: "bg-trust-direct/15 text-trust-direct", label: "You win", ring: "border-trust-direct/30" },
+          you_absent: { badge: "bg-amber-400/20 text-amber-700", label: "You're silent", ring: "border-amber-400/40" },
+        };
+        return (
+          <section className="card">
+            <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">⚖️</span>You vs your rivals on price</h2>
+            {priceGaps.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{priceGaps.summary}</p>}
+            <div className="space-y-2">
+              {priceGaps.gaps.map((g, i) => {
+                const s = STYLE[g.verdict];
+                return (
+                  <div key={i} className={`rounded-2xl border ${s.ring} bg-white/55 p-3`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`chip font-semibold ${s.badge}`}>{s.label}</span>
+                      <span className="font-semibold text-ink">{g.item}</span>
+                      <span className="text-sm text-ink-soft">
+                        {g.yourPrice ? <>you <b>{g.yourPrice}</b> · </> : null}{g.rival} <b className="text-coral-dark">{g.rivalPrice}</b>
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-sm text-ink-soft">{g.note}</p>
+                    <p className="mt-1 text-sm font-semibold text-brand-deep">✦ {g.action}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* one merged card per rival */}
       {rivals.length > 0 && (

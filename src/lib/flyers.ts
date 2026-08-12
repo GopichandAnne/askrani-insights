@@ -23,7 +23,7 @@ type Svc = ReturnType<typeof createServiceClient>;
 
 export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string }
 export interface FlyerReport { deals: FlyerDeal[]; flyersRead: number; at: string; empty?: boolean }
-export interface FlyerProfile { url: string; rival: string; platform: string }
+export interface FlyerProfile { url: string; rival: string; platform: string; own?: boolean }
 export interface FlyerJob {
   status: "running" | "done" | "error";
   profiles: FlyerProfile[];
@@ -118,6 +118,21 @@ export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompet
   return ordered;
 }
 
+/** The OWNER's own Instagram + Facebook profiles — so we can read their advertised
+ *  prices and compare them to rivals'. */
+export async function resolveOwnProfiles(ws: WorkspaceRow, svc: Svc): Promise<FlyerProfile[]> {
+  if (!ws.target_business_id) return [];
+  const { data: idents } = await svc.from("external_identity").select("url, platform").in("platform", ["instagram", "facebook"]).eq("business_id", ws.target_business_id);
+  const ig = (idents ?? []).filter((i: any) => i.platform === "instagram");
+  const fb = (idents ?? []).filter((i: any) => i.platform === "facebook");
+  const out: FlyerProfile[] = [];
+  for (let i = 0; i < Math.max(ig.length, fb.length); i++) {
+    if (ig[i]) out.push({ url: (ig[i] as any).url, rival: ws.name, platform: "instagram", own: true });
+    if (fb[i]) out.push({ url: (fb[i] as any).url, rival: ws.name, platform: "facebook", own: true });
+  }
+  return out;
+}
+
 async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, per: number): Promise<{ flyers: Flyer[]; costUsd: number }> {
   const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 45000 });
   const flyers: Flyer[] = [];
@@ -173,7 +188,9 @@ function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], cap = 60): FlyerDeal[
 export async function enqueueFlyerJob(ws: WorkspaceRow, orgId: string, charged: number): Promise<{ total: number }> {
   const svc = createServiceClient();
   await ensureBucket(svc);
-  const profiles = await resolveFlyerProfiles(ws, svc);
+  // owner's own profiles first (so their prices are captured early), then rivals'
+  const [ownProfiles, rivalProfiles] = await Promise.all([resolveOwnProfiles(ws, svc), resolveFlyerProfiles(ws, svc)]);
+  const profiles = [...ownProfiles, ...rivalProfiles];
   const now = new Date().toISOString();
   const job: FlyerJob = { status: "running", profiles, cursor: 0, total: profiles.length, flyersRead: 0, dealsFound: 0, charged, orgId, costUsd: 0, startedAt: now, updatedAt: now };
   const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
@@ -197,34 +214,39 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const deadline = Date.now() + (opts.timeBudgetMs ?? 95000);
   const slice = job.profiles.slice(job.cursor, job.cursor + batchSize);
 
-  const flyers: Flyer[] = [];
+  const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
   let costUsd = job.costUsd;
   let done = 0;
   for (const t of slice) {
     if (Date.now() > deadline) break;
     const r = await scrapeProfileFlyers(ws, svc, t, 4);
-    flyers.push(...r.flyers);
+    (t.own ? ownFlyers : rivalFlyers).push(...r.flyers);
     costUsd += r.costUsd;
     done++;
   }
-  const freshDeals = flyers.length ? await visionExtract(ws, flyers) : [];
+  const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
+  const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
 
-  // merge into cached flyerDeals + advance the job
-  const prevReport = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: new Date().toISOString() };
-  const mergedDeals = mergeDeals(prevReport.deals ?? [], freshDeals);
+  // merge into rivals' vs owner's caches separately + advance the job
+  const now = new Date().toISOString();
+  const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
+  const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh);
   const cursor = job.cursor + done;
-  const flyersRead = job.flyersRead + flyers.length;
+  const flyersRead = job.flyersRead + ownFlyers.length + rivalFlyers.length;
   const finished = cursor >= job.total || done === 0;
 
-  const nextJob: FlyerJob = { ...job, cursor, flyersRead, dealsFound: mergedDeals.length, costUsd: Number(costUsd.toFixed(4)), updatedAt: new Date().toISOString(), status: finished ? "done" : "running" };
-  const report: FlyerReport = { deals: mergedDeals, flyersRead, at: new Date().toISOString(), ...(mergedDeals.length ? {} : { empty: true }) };
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: report, flyerJob: nextJob } }).eq("id", ws.id);
+  const nextJob: FlyerJob = { ...job, cursor, flyersRead, dealsFound: mergedRival.length, costUsd: Number(costUsd.toFixed(4)), updatedAt: now, status: finished ? "done" : "running" };
+  const rivalReport: FlyerReport = { deals: mergedRival, flyersRead, at: now, ...(mergedRival.length ? {} : { empty: true }) };
+  const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
+  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob } }).eq("id", ws.id);
 
   // refund if the whole run turned up no flyer images at all
   if (finished && flyersRead === 0 && job.charged > 0) {
     await refundCredits(job.orgId, job.charged, "flyer_read_refund", { workspaceId: ws.id });
   }
-  return { status: finished ? "done" : "running", processed: cursor, total: job.total, flyersRead, deals: mergedDeals.length };
+  return { status: finished ? "done" : "running", processed: cursor, total: job.total, flyersRead, deals: mergedRival.length };
 }
 
 /** Read the cached flyer deals (never scrapes). */
@@ -243,28 +265,37 @@ export async function refreshFlyers(
   if (!flyersConfigured()) return { activated: false, flyers: 0, deals: 0, costUsd: 0 };
   const svc = createServiceClient();
   await ensureBucket(svc);
-  const profiles = await resolveFlyerProfiles(ws, svc, opts.maxCompetitors ?? 6);
-  if (!profiles.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
+  const max = opts.maxCompetitors ?? 6;
+  const [ownProfiles, rivalProfiles] = await Promise.all([resolveOwnProfiles(ws, svc), resolveFlyerProfiles(ws, svc, max)]);
+  if (!rivalProfiles.length && !ownProfiles.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
 
   const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
-  const prevReport = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
+  const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
+  const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const cursor = Number((goals as any).flyerCursor ?? 0) || 0;
-  const start = profiles.length ? cursor % profiles.length : 0;
-  const rotated = [...profiles.slice(start), ...profiles.slice(0, start)];
+  const start = rivalProfiles.length ? cursor % rivalProfiles.length : 0;
+  const rotatedRivals = [...rivalProfiles.slice(start), ...rivalProfiles.slice(0, start)].slice(0, max);
+  // own profiles always read (few, cheap) so owner prices refresh every run
+  const scrapeList = [...ownProfiles, ...rotatedRivals];
 
-  const flyers: Flyer[] = [];
-  let costUsd = 0; let scraped = 0;
+  const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
+  let costUsd = 0; let rivalScraped = 0;
   const hardStop = Date.now() + 230000;
-  for (const t of rotated.slice(0, opts.maxCompetitors ?? 6)) {
+  for (const t of scrapeList) {
     if (Date.now() > hardStop) break;
     const r = await scrapeProfileFlyers(ws, svc, t, opts.postsPerCompetitor ?? 4);
-    flyers.push(...r.flyers); costUsd += r.costUsd; scraped++;
+    (t.own ? ownFlyers : rivalFlyers).push(...r.flyers); costUsd += r.costUsd;
+    if (!t.own) rivalScraped++;
   }
-  const freshDeals = flyers.length ? await visionExtract(ws, flyers) : [];
-  const merged = mergeDeals(prevReport.deals ?? [], freshDeals);
-  const nextCursor = profiles.length ? (start + scraped) % profiles.length : 0;
-  const report: FlyerReport = { deals: merged, flyersRead: flyers.length, at: new Date().toISOString(), ...(merged.length ? {} : { empty: true }) };
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: report, flyerCursor: nextCursor } }).eq("id", ws.id);
-  return { activated: true, flyers: flyers.length, deals: freshDeals.length, costUsd: Number(costUsd.toFixed(4)) };
+  const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
+  const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
+  const now = new Date().toISOString();
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh);
+  const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
+  const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
+  const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
+  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor } }).eq("id", ws.id);
+  return { activated: true, flyers: rivalFlyers.length + ownFlyers.length, deals: rivalFresh.length + ownFresh.length, costUsd: Number(costUsd.toFixed(4)) };
 }
