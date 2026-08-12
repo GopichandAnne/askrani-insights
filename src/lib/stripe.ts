@@ -13,7 +13,10 @@ export function isStripeConfigured(): boolean {
 }
 let _stripe: Stripe | null = null;
 export function stripe(): Stripe {
-  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
+  // Pin to a version that supports the account's Managed Payments. The installed
+  // SDK's types default to an older version (acacia); basil+ is required. Cast
+  // because the string literal isn't in this SDK version's apiVersion union.
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? "", { apiVersion: "2025-03-31.basil" as Stripe.StripeConfig["apiVersion"] });
   return _stripe;
 }
 
