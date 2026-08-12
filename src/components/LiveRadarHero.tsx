@@ -220,6 +220,30 @@ export function LiveRadarHero() {
           {/* dial */}
           <div className="relative mx-auto mt-3 aspect-square w-full" style={{ maxWidth: 300 }}>
             <div className="absolute inset-0 overflow-hidden rounded-full" style={{ background: "radial-gradient(120% 120% at 50% 45%, #0f3b39 0%, #0a2430 55%, #06131c 100%)", boxShadow: "0 0 0 1px rgba(20,184,166,.25), inset 0 0 50px rgba(6,19,28,.6)" }}>
+              {/* a stylised night-map so it reads as "Rani scanning your neighbourhood" */}
+              <svg viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden>
+                <defs>
+                  <radialGradient id="raniMap" cx="50%" cy="42%" r="75%">
+                    <stop offset="0%" stopColor="#123f3c" />
+                    <stop offset="55%" stopColor="#0b262c" />
+                    <stop offset="100%" stopColor="#06131c" />
+                  </radialGradient>
+                </defs>
+                <rect width="300" height="300" fill="url(#raniMap)" />
+                <g fill="rgba(94,234,212,.05)">
+                  <rect x="26" y="34" width="58" height="40" rx="4" /><rect x="96" y="30" width="52" height="46" rx="4" />
+                  <rect x="212" y="44" width="60" height="40" rx="4" /><rect x="34" y="150" width="54" height="48" rx="4" />
+                  <rect x="120" y="152" width="60" height="50" rx="4" /><rect x="30" y="228" width="66" height="42" rx="4" />
+                  <rect x="210" y="214" width="60" height="56" rx="4" />
+                </g>
+                <rect x="196" y="150" width="56" height="44" rx="10" fill="rgba(52,211,153,.10)" />
+                <g stroke="rgba(125,211,197,.20)" strokeWidth="3.5" strokeLinecap="round">
+                  <line x1="150" y1="-10" x2="162" y2="310" /><line x1="-10" y1="140" x2="310" y2="150" /><line x1="-10" y1="20" x2="310" y2="250" />
+                </g>
+                <g stroke="rgba(125,211,197,.12)" strokeWidth="1.6">
+                  <line x1="92" y1="0" x2="98" y2="300" /><line x1="210" y1="0" x2="206" y2="300" /><line x1="0" y1="86" x2="300" y2="80" /><line x1="0" y1="212" x2="300" y2="220" />
+                </g>
+              </svg>
               {[0.4, 0.7, 1.0].map((f, i) => (
                 <span key={i} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ width: `${f * 92}%`, height: `${f * 92}%`, border: "1px solid rgba(94,234,212,.15)" }} />
               ))}
@@ -235,12 +259,11 @@ export function LiveRadarHero() {
 
               {/* Rani at center — she is the one scanning */}
               <span className="absolute left-1/2 top-1/2 grid -translate-x-1/2 -translate-y-1/2 place-items-center">
-                <span className="absolute rounded-full" style={{ width: 88, height: 88, background: "rgba(20,184,166,.24)", filter: "blur(9px)" }} aria-hidden />
-                {!reduced && <span className="absolute animate-ping rounded-full" style={{ width: 72, height: 72, border: "1.5px solid rgba(94,234,212,.5)" }} aria-hidden />}
+                <span className="absolute rounded-full" style={{ width: 108, height: 108, background: "rgba(20,184,166,.22)", filter: "blur(11px)" }} aria-hidden />
+                {!reduced && <span className="absolute animate-ping rounded-full" style={{ width: 94, height: 94, border: "1.5px solid rgba(94,234,212,.45)" }} aria-hidden />}
                 <span className={reduced ? "relative" : "relative animate-bob"}>
-                  <img src="/rani-3d.png" alt="Rani" className="h-16 w-auto" style={{ filter: "drop-shadow(0 6px 12px rgba(0,0,0,.4))" }} />
+                  <img src="/rani-3d.png" alt="Rani" className="h-20 w-auto" style={{ filter: "drop-shadow(0 8px 14px rgba(0,0,0,.45))" }} />
                 </span>
-                <span className="absolute top-[42px] text-[9px] font-bold" style={{ color: "#5eead4" }}>YOU</span>
               </span>
             </div>
           </div>
