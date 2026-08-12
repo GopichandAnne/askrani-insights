@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { isStripeConfigured, stripe, CATALOG } from "@/lib/stripe";
+import { isStripeConfigured, stripe, CATALOG, catalogByPrice } from "@/lib/stripe";
 import { grantTopup, setPlan, grantPlanCredits, markEventProcessed, orgByStripeCustomer, setStripeCustomer } from "@/lib/credits";
 import { requeuePausedForOrg } from "@/lib/jobs";
 
@@ -28,11 +28,21 @@ export async function POST(req: Request) {
     if (event.type === "checkout.session.completed") {
       const s = event.data.object as Stripe.Checkout.Session;
       const orgId = (s.metadata?.orgId as string) ?? (s.client_reference_id as string) ?? null;
-      const item = CATALOG[String(s.metadata?.key)];
+      let key = String(s.metadata?.key ?? "");
+      let item = CATALOG[key];
+      // Payment Links / dashboard checkouts don't carry our metadata.key — fall
+      // back to the line item's price id, the stable join to the catalog.
+      if (!item) {
+        try {
+          const li = await stripe().checkout.sessions.listLineItems(s.id, { limit: 1 });
+          const hit = catalogByPrice(li.data[0]?.price?.id);
+          if (hit) { key = hit.key; item = hit.item; }
+        } catch { /* leave item undefined → we simply don't grant */ }
+      }
       if (orgId && s.customer) await setStripeCustomer(orgId, String(s.customer));
       if (orgId && item && (await markEventProcessed(orgId, event.id))) {
         if (s.mode === "payment" && item.credits) {
-          await grantTopup(orgId, item.credits, { stripe_session: s.id, key: s.metadata?.key });
+          await grantTopup(orgId, item.credits, { stripe_session: s.id, key });
           await requeuePausedForOrg(orgId);
         } else if (s.mode === "subscription" && item.plan) {
           await setPlan(orgId, item.plan, "active"); // credits granted on invoice.paid

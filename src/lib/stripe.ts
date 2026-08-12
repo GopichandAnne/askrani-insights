@@ -32,3 +32,12 @@ export const CATALOG: Record<string, CatalogItem> = {
 export function availableKeys(): string[] {
   return Object.entries(CATALOG).filter(([, v]) => !!v.price).map(([k]) => k);
 }
+
+/** Resolve a catalog item from a Stripe price id — lets us credit purchases that
+ *  arrive WITHOUT our metadata.key (e.g. a Payment Link created in the Stripe
+ *  dashboard and shared over email/WhatsApp). The price id is the stable join. */
+export function catalogByPrice(priceId?: string | null): { key: string; item: CatalogItem } | null {
+  if (!priceId) return null;
+  const hit = Object.entries(CATALOG).find(([, v]) => v.price === priceId);
+  return hit ? { key: hit[0], item: hit[1] } : null;
+}
