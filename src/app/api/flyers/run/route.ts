@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireOrg } from "@/lib/api";
 import { createServiceClient } from "@/lib/supabase/server";
-import { refreshFlyers, flyersConfigured } from "@/lib/flyers";
+import { enqueueFlyerJob, flyersConfigured } from "@/lib/flyers";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
-import { quoteFlyerRead, spendCredits, refundCredits, FLYER_READ_COMPETITOR_CAP } from "@/lib/credits";
+import { quoteFlyerRead, spendCredits, FLYER_READ_COMPETITOR_CAP } from "@/lib/credits";
 
 /**
- * Owner-triggered flyer read for the signed-in org's workspace. Charges credits
- * up front (quoteFlyerRead), scrapes rivals' Instagram fresh, downloads the sale
- * flyers, and vision-extracts the printed prices. Refunds the charge if no flyer
- * images are found or the run errors, so the owner only pays when it delivers.
+ * Start an async flyer read for the signed-in org's workspace. Charges credits up
+ * front, resolves the competitor IG+FB profile list, and stores the job on
+ * goals.flyerJob. The client then drives /api/flyers/tick until the job is done.
  */
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const auth = await requireOrg();
@@ -29,21 +27,13 @@ export async function POST(req: Request) {
 
   const ids = await workspaceBusinessIds(ws as WorkspaceRow, svc as any);
   const count = Math.min(ids.competitorIds.length, FLYER_READ_COMPETITOR_CAP);
-  if (!count) return NextResponse.json({ activated: true, flyers: 0, deals: 0, reason: "Add competitors with Instagram pages first." });
+  if (!count) return NextResponse.json({ activated: true, status: "idle", reason: "Add competitors with Instagram or Facebook pages first." });
 
   const quote = quoteFlyerRead(count);
   const charged = await spendCredits(auth.orgId, quote, "flyer_read", { workspaceId, competitors: count });
   if (!charged) return NextResponse.json({ error: "Not enough credits.", needed: quote }, { status: 402 });
 
-  try {
-    const result = await refreshFlyers(ws as WorkspaceRow, { maxCompetitors: FLYER_READ_COMPETITOR_CAP, postsPerCompetitor: 4 });
-    if (!result.flyers) {
-      await refundCredits(auth.orgId, quote, "flyer_read_refund", { workspaceId });
-      return NextResponse.json({ ...result, refunded: true, reason: "No flyer images found on rivals' Instagram right now." });
-    }
-    return NextResponse.json({ ...result, charged: quote });
-  } catch (e) {
-    await refundCredits(auth.orgId, quote, "flyer_read_refund", { workspaceId });
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
+  const { total } = await enqueueFlyerJob(ws as WorkspaceRow, auth.orgId, quote);
+  if (!total) return NextResponse.json({ activated: true, status: "idle", reason: "No Instagram/Facebook pages connected for your competitors yet." });
+  return NextResponse.json({ status: "running", total, charged: quote });
 }
