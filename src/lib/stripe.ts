@@ -33,6 +33,20 @@ export function availableKeys(): string[] {
   return Object.entries(CATALOG).filter(([, v]) => !!v.price).map(([k]) => k);
 }
 
+/** Tolerate a product id in a STRIPE_PRICE_* env: if given a `prod_…`, resolve
+ *  it to that product's default price. A `price_…` passes straight through. */
+export async function resolvePriceId(idOrProduct?: string): Promise<string | null> {
+  if (!idOrProduct) return null;
+  if (idOrProduct.startsWith("prod_")) {
+    try {
+      const p = await stripe().products.retrieve(idOrProduct);
+      const dp = p.default_price;
+      return typeof dp === "string" ? dp : (dp?.id ?? null);
+    } catch { return null; }
+  }
+  return idOrProduct; // already a price id (or a test placeholder)
+}
+
 export interface PaymentLink { key: string; label: string; url: string }
 /** Optional shareable Stripe Payment Link URLs (created in the dashboard), read
  *  from env. Used by the admin console to hand out per-org links. Only the ones

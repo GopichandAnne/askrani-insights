@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrg } from "@/lib/api";
 import { getUser } from "@/lib/auth";
-import { isStripeConfigured, stripe, CATALOG } from "@/lib/stripe";
+import { isStripeConfigured, stripe, CATALOG, resolvePriceId } from "@/lib/stripe";
 import { getStripeCustomer, setStripeCustomer } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,8 @@ export async function POST(req: Request) {
   const { key } = await req.json().catch(() => ({}));
   const item = CATALOG[String(key)];
   if (!item?.price) return NextResponse.json({ error: "That option isn't available." }, { status: 400 });
+  const priceId = await resolvePriceId(item.price);
+  if (!priceId) return NextResponse.json({ error: "That price isn't set up in Stripe yet." }, { status: 400 });
 
   const origin = new URL(req.url).origin;
   const s = stripe();
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
     const session = await s.checkout.sessions.create({
       mode: item.mode,
       customer,
-      line_items: [{ price: item.price, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       client_reference_id: auth.orgId,
       metadata: { orgId: auth.orgId, key: String(key) },
       success_url: `${origin}/billing?purchase=success`,
