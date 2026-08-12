@@ -115,21 +115,33 @@ export async function refreshFlyers(
     })());
   if (!targets.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
 
-  // Interleave IG/FB and cap TOTAL profiles at maxComp — scraping is sequential
-  // and each profile polls up to ~1 min, so an unbounded list overruns the
-  // serverless budget. Round-robin gives a mix of both platforms within the cap.
+  // Interleave IG/FB so both platforms are sampled, then ROTATE by a stored cursor
+  // so successive runs cover DIFFERENT profiles (accumulating coverage across runs
+  // via the merge below). Scraping is sequential (~45s/profile), so we bound the
+  // whole loop by a wall-clock deadline to stay inside the serverless budget.
   const igT = targets.filter((t) => t.platform === "instagram");
   const fbT = targets.filter((t) => t.platform === "facebook");
   const ordered: typeof targets = [];
   for (let i = 0; i < Math.max(igT.length, fbT.length); i++) { if (igT[i]) ordered.push(igT[i]); if (fbT[i]) ordered.push(fbT[i]); }
-  const scrapeList = ordered.slice(0, maxComp);
+
+  const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const prevGoals = ((gRow?.goals as Record<string, unknown>) ?? {});
+  const prevDeals = (((prevGoals.flyerDeals as { deals?: FlyerDeal[] } | undefined)?.deals) ?? []) as FlyerDeal[];
+  const cursor = Number((prevGoals as any).flyerCursor ?? 0) || 0;
+  const start = ordered.length ? cursor % ordered.length : 0;
+  const rotated = [...ordered.slice(start), ...ordered.slice(0, start)];
 
   // scrape fresh + download images immediately (fresh CDN signatures are valid)
   const flyers: { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string }[] = [];
   let costUsd = 0;
+  let scraped = 0;
   const per = opts.postsPerCompetitor ?? 4;
-  for (const t of scrapeList) {
-    const { items, costUsd: c } = await collectApifyPlatform(t.platform, t.url, { maxMs: 55000 });
+  const deadline = Date.now() + (maxComp * 2 + 2) * 1000 * 20; // ~20s/profile budget headroom
+  const hardStop = Date.now() + 230000; // never exceed ~3.8 min of scraping
+  for (const t of rotated) {
+    if (Date.now() > Math.min(deadline, hardStop)) break;
+    scraped++;
+    const { items, costUsd: c } = await collectApifyPlatform(t.platform, t.url, { maxMs: 45000 });
     costUsd += c;
     let n = 0;
     for (const it of items) {
@@ -142,7 +154,11 @@ export async function refreshFlyers(
       n++;
     }
   }
-  if (!flyers.length) return { activated: true, flyers: 0, deals: 0, costUsd: Number(costUsd.toFixed(4)) };
+  if (!flyers.length) {
+    const nextCursor = ordered.length ? (start + scraped) % ordered.length : 0;
+    await svc.from("workspace").update({ goals: { ...prevGoals, flyerCursor: nextCursor } }).eq("id", ws.id);
+    return { activated: true, flyers: 0, deals: 0, costUsd: Number(costUsd.toFixed(4)) };
+  }
 
   // vision-extract deals from stored flyer images, in batches
   const deals: FlyerDeal[] = [];
@@ -170,9 +186,14 @@ export async function refreshFlyers(
     } catch { /* skip this batch */ }
   }
 
-  const report: FlyerReport = { deals: deals.slice(0, 40), flyersRead: flyers.length, at: new Date().toISOString(), ...(deals.length ? {} : { empty: true }) };
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), flyerDeals: report } }).eq("id", ws.id);
+  // MERGE with previously-found deals (dedupe) so a run never regresses coverage;
+  // advance the cursor so the next run samples the following profiles.
+  const dkey = (d: FlyerDeal) => `${d.rival}|${d.item}|${d.price ?? ""}`.toLowerCase();
+  const freshKeys = new Set(deals.map(dkey));
+  const merged = [...deals, ...prevDeals.filter((d) => !freshKeys.has(dkey(d)))].slice(0, 40);
+  const nextCursor = ordered.length ? (start + scraped) % ordered.length : 0;
+  const report: FlyerReport = { deals: merged, flyersRead: flyers.length, at: new Date().toISOString(), ...(merged.length ? {} : { empty: true }) };
+  await svc.from("workspace").update({ goals: { ...prevGoals, flyerDeals: report, flyerCursor: nextCursor } }).eq("id", ws.id);
   return { activated: true, flyers: flyers.length, deals: deals.length, costUsd: Number(costUsd.toFixed(4)) };
 }
 
