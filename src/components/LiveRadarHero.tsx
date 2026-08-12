@@ -221,7 +221,7 @@ export function LiveRadarHero() {
           <div className="relative mx-auto mt-3 aspect-square w-full" style={{ maxWidth: 300 }}>
             <div className="absolute inset-0 overflow-hidden rounded-full" style={{ background: "radial-gradient(120% 120% at 50% 45%, #0f3b39 0%, #0a2430 55%, #06131c 100%)", boxShadow: "0 0 0 1px rgba(20,184,166,.25), inset 0 0 50px rgba(6,19,28,.6)" }}>
               {/* a stylised night-map so it reads as "Rani scanning your neighbourhood" */}
-              <svg viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full" aria-hidden>
+              <svg viewBox="0 0 300 300" preserveAspectRatio="xMidYMid slice" className="map-drift absolute inset-0 h-full w-full" aria-hidden>
                 <defs>
                   <radialGradient id="raniMap" cx="50%" cy="42%" r="75%">
                     <stop offset="0%" stopColor="#123f3c" />

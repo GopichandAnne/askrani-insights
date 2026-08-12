@@ -170,6 +170,16 @@ h2,
   50% { transform: translateY(-4px); }
 }
 .animate-bob { animation: bob 1.3s ease-in-out infinite; }
+/* Slow neighbourhood-map drift under the radar sweep — a gentle survey pan so the
+ * dial feels live. Scaled up so the drift never reveals the dial edge. */
+@keyframes map-drift {
+  0%   { transform: scale(1.12) translate(0px, 0px); }
+  25%  { transform: scale(1.12) translate(-9px, 5px); }
+  50%  { transform: scale(1.12) translate(-4px, 11px); }
+  75%  { transform: scale(1.12) translate(7px, 5px); }
+  100% { transform: scale(1.12) translate(0px, 0px); }
+}
+.map-drift { transform: scale(1.12); transform-origin: 50% 50%; animation: map-drift 26s ease-in-out infinite; }
 /* Radar blip discovery ping — a ring that expands + fades as the sweep locks a
  * competitor (LiveRadarHero). Own keyframe so it starts visible and ends clear. */
 @keyframes radar-ping {
@@ -194,6 +204,7 @@ h2,
 .rani-run { transition: left 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) {
   .animate-bob { animation: none; }
+  .map-drift { animation: none; }
   .rani-run { transition: none; }
 }
 .card-hover:hover {
