@@ -17,7 +17,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 // Where local businesses broadcast offers — social + Google posts + their own site.
 // Grocery/restaurant weekly specials often live on Google & the website, not only IG.
-const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "google", "website"];
+const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "youtube", "google", "website"];
 
 export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string; source?: string; postedAt?: string }
 export interface DealsReport {
