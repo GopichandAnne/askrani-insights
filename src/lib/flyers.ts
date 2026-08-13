@@ -21,7 +21,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const BUCKET = "flyers";
 type Svc = ReturnType<typeof createServiceClient>;
 
-export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string }
+export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string; postedAt?: string; seenAt?: string; lastSeen?: string }
 export interface FlyerReport { deals: FlyerDeal[]; flyersRead: number; at: string; empty?: boolean }
 export interface FlyerProfile { url: string; rival: string; platform: string; own?: boolean; placeId?: string }
 const googleConfigured = () => !!process.env.GOOGLE_MAPS_API_KEY;
@@ -52,7 +52,7 @@ export interface FlyerJob {
   updatedAt: string;
 }
 
-interface Flyer { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string }
+interface Flyer { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string; postedAt?: string }
 
 export function flyersConfigured(): boolean {
   // Need an AI key to read images, plus at least one image source (social via
@@ -185,7 +185,7 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     if (!imgUrl?.url) continue;
     const stored = await storeImage(svc, imgUrl.url, `${ws.id}/${keyOf(t.rival + imgUrl.url)}`);
     if (!stored) continue;
-    flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: t.platform });
+    flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: t.platform, postedAt: (it as any).publishedAt });
     n++;
   }
   return { flyers, costUsd };
@@ -209,7 +209,7 @@ async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDe
         for (const d of Array.isArray(im.deals) ? im.deals : []) {
           const item = String(d.item ?? "").replace(/\s+/g, " ").trim();
           if (!item) continue;
-          deals.push({ rival: src.rival, item, price: String(d.price ?? "").trim() || undefined, terms: String(d.terms ?? "").trim() || undefined, imageUrl: src.storedUrl, postUrl: src.postUrl, source: src.source });
+          deals.push({ rival: src.rival, item, price: String(d.price ?? "").trim() || undefined, terms: String(d.terms ?? "").trim() || undefined, imageUrl: src.storedUrl, postUrl: src.postUrl, source: src.source, postedAt: src.postedAt });
         }
       }
     } catch { /* skip this batch */ }
@@ -217,10 +217,27 @@ async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDe
   return deals;
 }
 
-function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], cap = 60): FlyerDeal[] {
+const RETENTION_DAYS = 30;   // how long history is kept
+const HISTORY_CAP = 300;     // safety bound on stored items
+/** Append-only, date-stamped merge: a deal keeps the `seenAt` from the FIRST time
+ *  we caught it (so we can tell new vs ongoing), a changed price is a NEW dated
+ *  entry, and items older than the retention window are pruned. */
+function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], now: string): FlyerDeal[] {
   const dkey = (d: FlyerDeal) => `${d.rival}|${d.item}|${d.price ?? ""}`.toLowerCase();
-  const freshKeys = new Set(fresh.map(dkey));
-  return [...fresh, ...prev.filter((d) => !freshKeys.has(dkey(d)))].slice(0, cap);
+  const prevByKey = new Map(prev.map((d) => [dkey(d), d] as const));
+  const freshKeys = new Set<string>();
+  const out: FlyerDeal[] = [];
+  for (const d of fresh) {
+    const k = dkey(d); if (freshKeys.has(k)) continue; freshKeys.add(k);
+    const was = prevByKey.get(k);
+    out.push({ ...d, seenAt: was?.seenAt ?? now, postedAt: d.postedAt ?? was?.postedAt, lastSeen: now } as FlyerDeal);
+  }
+  for (const d of prev) { if (!freshKeys.has(dkey(d))) out.push(d); }
+  const cutoff = Date.now() - RETENTION_DAYS * 86400000;
+  return out
+    .filter((d) => { const t = d.seenAt ? new Date(d.seenAt).getTime() : Date.now(); return t >= cutoff; })
+    .sort((a, b) => new Date(b.seenAt ?? 0).getTime() - new Date(a.seenAt ?? 0).getTime())
+    .slice(0, HISTORY_CAP);
 }
 
 // ── Async job ───────────────────────────────────────────────────────────────
@@ -273,8 +290,8 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const now = new Date().toISOString();
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
-  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh);
-  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh);
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now);
   const cursor = job.cursor + done;
   const flyersRead = job.flyersRead + ownFlyers.length + rivalFlyers.length;
   const finished = cursor >= job.total || done === 0;
@@ -333,8 +350,8 @@ export async function refreshFlyers(
   const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
   const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
   const now = new Date().toISOString();
-  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh);
-  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh);
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now);
   const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
