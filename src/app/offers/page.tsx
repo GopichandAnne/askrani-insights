@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
 import { getCompetitorSocial } from "@/lib/social";
+import { getOrMakeMenuCompare } from "@/lib/menucompare";
 import type { FlyerDeal } from "@/lib/flyers";
 import { flyersConfigured } from "@/lib/flyers";
 import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
@@ -59,7 +60,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
-  const [rivalDeals, myDeals, priceGaps, social] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days)]);
+  const [rivalDeals, myDeals, priceGaps, social, menuCompare] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days), getOrMakeMenuCompare(ws)]);
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
 
   // price-drop detection over FULL history (a competitor lowered an item's price)
@@ -319,6 +320,53 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
           </ul>
         )}
       </section>
+
+      {/* menu / service price comparison — item-level, for bounded-menu verticals */}
+      {(menuCompare.overview.length > 0 || menuCompare.matches.length > 0) && (() => {
+        const POS: Record<string, { chip: string; label: string }> = {
+          cheaper: { chip: "bg-coral/15 text-coral-dark", label: "cheaper than you" },
+          pricier: { chip: "bg-trust-direct/15 text-trust-direct", label: "pricier than you" },
+          similar: { chip: "bg-surface-sunken text-ink-soft", label: "similar to you" },
+        };
+        return (
+          <section className="card">
+            <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">💲</span>Menu &amp; service price comparison</h2>
+            {menuCompare.summary && <p className="mb-3 max-w-3xl text-sm text-ink-soft">{menuCompare.summary}</p>}
+            {menuCompare.overview.length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {menuCompare.overview.map((o, i) => (
+                  <div key={i} className="flex items-start gap-2 rounded-2xl bg-white/55 p-3">
+                    <span className={`chip shrink-0 font-semibold ${(POS[o.positioning] ?? POS.similar).chip}`}>{(POS[o.positioning] ?? POS.similar).label}</span>
+                    <span className="min-w-0 text-sm"><b className="text-ink">{o.name}</b> <span className="text-ink-soft">— {o.note}</span></span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {menuCompare.matches.length > 0 && (
+              <div className="mt-4">
+                <h3 className="mb-2 text-sm font-semibold">Same item, side by side</h3>
+                <ul className="space-y-1.5">
+                  {menuCompare.matches.map((m, i) => {
+                    const cheapest = m.entries[0]?.price;
+                    return (
+                      <li key={i} className="rounded-2xl bg-white/55 p-2.5 text-sm">
+                        <div className="font-medium">{m.item}{m.note ? <span className="ml-1 text-xs font-normal text-ink-faint">· {m.note}</span> : null}</div>
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {m.entries.map((e, j) => (
+                            <span key={j} className={`chip ${e.price === cheapest ? "bg-trust-direct/15 text-trust-direct" : e.isYou ? "bg-brand-soft text-brand-deep" : "bg-surface-sunken text-ink-soft"}`}>
+                              {e.isYou ? "You" : e.business.split(" ").slice(0, 2).join(" ")} ${e.price.toFixed(2)}{e.price === cheapest ? " · cheapest" : ""}
+                            </span>
+                          ))}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </section>
+        );
+      })()}
 
       {/* price positioning (secondary) */}
       {priceRows.length > 0 && (
