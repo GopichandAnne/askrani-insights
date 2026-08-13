@@ -13,8 +13,11 @@ export function ReportToolbar() {
   ];
   return (
     <div className="no-print flex flex-wrap items-center gap-2">
-      <button onClick={() => window.print()} className="btn btn-primary">
-        Print / Save as PDF
+      <a href="/api/reports/pdf?period=weekly" className="btn btn-primary">
+        📄 Download PDF report
+      </a>
+      <button onClick={() => window.print()} className="btn btn-secondary">
+        Print this page
       </button>
       {exports.map((e) => (
         <a
