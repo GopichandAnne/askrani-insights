@@ -2,6 +2,7 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
+import { getCompetitorSocial } from "@/lib/social";
 import type { FlyerDeal } from "@/lib/flyers";
 import { flyersConfigured } from "@/lib/flyers";
 import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
@@ -56,7 +57,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
-  const [rivalDeals, myDeals, priceGaps] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws)]);
+  const [rivalDeals, myDeals, priceGaps, social] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days)]);
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
 
   // price-drop detection over FULL history (a competitor lowered an item's price)
@@ -261,6 +262,36 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
             );
           })}
         </div>
+      )}
+
+      {/* competitor social signals — followers + content performance over time */}
+      {social.rows.some((r) => r.engagement > 0 || r.followers != null) && (
+        <section className="card">
+          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📈</span>Competitor social signals</h2>
+          <p className="mb-3 text-xs text-ink-faint">Followers and content performance over the last {days} days — how their reach and engagement are moving.</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {social.rows.filter((r) => r.engagement > 0 || r.followers != null).slice(0, 6).map((r, i) => (
+              <div key={i} className="rounded-2xl bg-white/55 p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{r.rival}</span>
+                  {r.trendPct != null && <span className={`chip ${r.trendPct >= 0 ? "bg-trust-direct/15 text-trust-direct" : "bg-coral/15 text-coral-dark"}`}>{r.trendPct >= 0 ? "▲" : "▼"} {Math.abs(r.trendPct)}% engagement</span>}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
+                  {r.followers != null && <span>👥 {r.followers.toLocaleString()} followers{r.followersDelta ? <b className={r.followersDelta >= 0 ? "text-trust-direct" : "text-coral-dark"}> {r.followersDelta >= 0 ? "+" : ""}{r.followersDelta.toLocaleString()}</b> : null}</span>}
+                  <span>📝 {r.posts} posts</span>
+                  {r.topFormat && <span>🎬 {r.topFormat === "video" ? "reels/video work best" : "images work best"}</span>}
+                </div>
+                {r.topPost && (
+                  <div className="mt-2 rounded-xl bg-surface-sunken/60 p-2 text-xs">
+                    <span className="font-semibold text-brand-deep">Top post</span> <span className="text-ink-soft">{r.topPost.caption || "(no caption)"}</span>
+                    {r.topPost.url && <a href={r.topPost.url} target="_blank" rel="noreferrer" className="ml-1 font-medium text-brand hover:underline">↗</a>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-ink-faint">Follower history builds each time you run a scan — the trend sharpens over the weeks.</p>
+        </section>
       )}
 
       {/* your offers */}

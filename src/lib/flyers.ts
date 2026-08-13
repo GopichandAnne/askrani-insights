@@ -162,7 +162,7 @@ export async function resolveOwnProfiles(ws: WorkspaceRow, svc: Svc): Promise<Fl
   return out;
 }
 
-async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, per: number): Promise<{ flyers: Flyer[]; costUsd: number }> {
+async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, per: number): Promise<{ flyers: Flyer[]; costUsd: number; followers?: number }> {
   // Google Maps photos path — menu boards / flyers posted on the business's
   // Google profile. Same download + vision pipeline as social flyers.
   if (t.platform === "google") {
@@ -177,6 +177,12 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     return { flyers, costUsd: Number((0.007 * urls.length).toFixed(4)) };
   }
   const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 70000 });
+  // best-effort follower count off the scraped profile (fields vary by actor)
+  const followers = items.reduce((mx, it) => {
+    const r = ((it as any).raw ?? {}) as Record<string, unknown>;
+    const f = Number(r.followersCount ?? r.ownerFollowersCount ?? r.followers ?? r.followedByCount ?? r.followersCountNumber);
+    return Number.isFinite(f) && f > mx ? f : mx;
+  }, 0) || undefined;
   const flyers: Flyer[] = [];
   let n = 0;
   for (const it of items) {
@@ -188,7 +194,16 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: t.platform, postedAt: (it as any).publishedAt });
     n++;
   }
-  return { flyers, costUsd };
+  return { flyers, costUsd, followers };
+}
+
+/** Bank a dated follower point into goals.socialTimeline (one per rival per day). */
+function bankFollowers(timeline: Record<string, { date: string; followers?: number; source?: string }[]>, rival: string, followers: number, now: string, retentionDays: number) {
+  const today = now.slice(0, 10);
+  const arr = (timeline[rival] ?? []).filter((p) => p.date.slice(0, 10) !== today);
+  arr.push({ date: now, followers, source: "social" });
+  const cutoff = Date.now() - retentionDays * 86400000;
+  timeline[rival] = arr.filter((p) => new Date(p.date).getTime() >= cutoff).slice(-90);
 }
 
 async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDeal[]> {
@@ -273,6 +288,7 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const slice = job.profiles.slice(job.cursor, job.cursor + batchSize);
 
   const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
+  const followersByRival = new Map<string, number>();
   let costUsd = job.costUsd;
   let done = 0;
   for (const t of slice) {
@@ -280,6 +296,7 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
     const r = await scrapeProfileFlyers(ws, svc, t, 4);
     (t.own ? ownFlyers : rivalFlyers).push(...r.flyers);
     costUsd += r.costUsd;
+    if (r.followers) followersByRival.set(t.rival, Math.max(r.followers, followersByRival.get(t.rival) ?? 0));
     done++;
   }
   const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
@@ -299,7 +316,9 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const nextJob: FlyerJob = { ...job, cursor, flyersRead, dealsFound: mergedRival.length, costUsd: Number(costUsd.toFixed(4)), updatedAt: now, status: finished ? "done" : "running" };
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob } }).eq("id", ws.id);
+  const socialTimeline = { ...((goals.socialTimeline as Record<string, { date: string; followers?: number; source?: string }[]>) ?? {}) };
+  for (const [rival, f] of followersByRival) bankFollowers(socialTimeline, rival, f, now, retentionDays);
+  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob, socialTimeline } }).eq("id", ws.id);
 
   // refund if the whole run turned up no flyer images at all
   if (finished && flyersRead === 0 && job.charged > 0) {
@@ -340,12 +359,14 @@ export async function refreshFlyers(
   const scrapeList = [...ownProfiles, ...rotatedRivals];
 
   const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
+  const followersByRival = new Map<string, number>();
   let costUsd = 0; let rivalScraped = 0;
   const hardStop = Date.now() + 230000;
   for (const t of scrapeList) {
     if (Date.now() > hardStop) break;
     const r = await scrapeProfileFlyers(ws, svc, t, opts.postsPerCompetitor ?? 4);
     (t.own ? ownFlyers : rivalFlyers).push(...r.flyers); costUsd += r.costUsd;
+    if (r.followers) followersByRival.set(t.rival, Math.max(r.followers, followersByRival.get(t.rival) ?? 0));
     if (!t.own) rivalScraped++;
   }
   const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
@@ -356,6 +377,8 @@ export async function refreshFlyers(
   const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor } }).eq("id", ws.id);
+  const socialTimeline = { ...((goals.socialTimeline as Record<string, { date: string; followers?: number; source?: string }[]>) ?? {}) };
+  for (const [rival, f] of followersByRival) bankFollowers(socialTimeline, rival, f, now, retentionDays);
+  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor, socialTimeline } }).eq("id", ws.id);
   return { activated: true, flyers: rivalFlyers.length + ownFlyers.length, deals: rivalFresh.length + ownFresh.length, costUsd: Number(costUsd.toFixed(4)) };
 }
