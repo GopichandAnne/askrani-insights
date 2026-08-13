@@ -13,7 +13,7 @@ import { MarketTabs } from "@/components/MarketTabs";
 
 export const dynamic = "force-dynamic";
 
-const SOURCE_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", google: "Google", website: "website" };
+const SOURCE_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube", google: "Google", website: "website", doordash: "DoorDash", ubereats: "Uber Eats" };
 const sourceLabel = (s?: string) => (s && SOURCE_LABEL[s]) || "online";
 const CHAN_LABEL: Record<string, string> = { instagram: "IG", facebook: "FB", tiktok: "TikTok", youtube: "YT" };
 const chanLabel = (c: string) => CHAN_LABEL[c] ?? c;

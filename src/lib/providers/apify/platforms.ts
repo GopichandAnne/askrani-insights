@@ -87,6 +87,20 @@ function parsePrice(s: any): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** Gather store-level promotion strings from a delivery store record — field names
+ *  vary by actor, so read several defensively. Deduped, capped. */
+function promoStrings(...arrs: any[]): string[] {
+  const out: string[] = [];
+  for (const arr of arrs) {
+    if (!Array.isArray(arr)) continue;
+    for (const p of arr) {
+      const t = typeof p === "string" ? p : (p?.title ?? p?.description ?? p?.text ?? p?.name ?? p?.promoTitle ?? p?.headline ?? "");
+      if (t) out.push(String(t).replace(/\s+/g, " ").trim());
+    }
+  }
+  return [...new Set(out.filter(Boolean))].slice(0, 6);
+}
+
 /**
  * Map a DoorDash store record (dz_omar/doordash-scraper) into a rich menu
  * observation: menu items become structured offers (via structuredHints.jsonld,
@@ -108,9 +122,11 @@ function mapDoorDashStore(r: any): RawObservation {
     }
   }
   const itemCount = menuItems.length + offers.length;
+  const promos = promoStrings(r.promotions, r.offers, r.deals, r.cmsBanners, r.storeOffers);
   const text =
     `${r.name} on DoorDash - ${r.rating ?? "?"} stars (${r.num_ratings ?? "?"} ratings) | ` +
-    `${r.price_range_display ?? ""} | ${r.delivery_fee_display ?? ""} | ~${r.asap_minutes ?? "?"} min | ${itemCount} menu items.`;
+    `${r.price_range_display ?? ""} | ${r.delivery_fee_display ?? ""} | ~${r.asap_minutes ?? "?"} min | ${itemCount} menu items.` +
+    (promos.length ? ` | Promotions: ${promos.join("; ")}` : "");
   return {
     provider: "apify",
     provenance: "MANAGED_PUBLIC_PROVIDER_APIFY",
@@ -195,9 +211,11 @@ function mapUberEatsStore(r: any): RawObservation {
     menuItems.push({ name, price, currency, section: it.section ?? it.sectionName ?? it.categoryName });
   }
   const name = r.shopName ?? r.title ?? r.seoTitle ?? "Store";
+  const promos = promoStrings(r.promos, r.promotions, r.offers, r.storeOffers);
   const text =
     `${name} on Uber Eats - ${r.ratingValue ?? "?"} stars (${r.reviewCount ?? "?"} reviews) | ` +
-    `${r.priceBucket ?? ""} | ${r.deliveryFeeText ?? ""} | ${r.etaRange ?? ""} | ${menuItems.length} menu items.`;
+    `${r.priceBucket ?? ""} | ${r.deliveryFeeText ?? ""} | ${r.etaRange ?? ""} | ${menuItems.length} menu items.` +
+    (promos.length ? ` | Promotions: ${promos.join("; ")}` : "");
   const url = r.canonicalUrl ?? r.url ?? r.restaurantUrl;
   return {
     provider: "apify",

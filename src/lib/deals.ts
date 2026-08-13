@@ -17,7 +17,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 // Where local businesses broadcast offers — social + Google posts + their own site.
 // Grocery/restaurant weekly specials often live on Google & the website, not only IG.
-const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "youtube", "google", "website"];
+const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "youtube", "google", "website", "doordash", "ubereats"];
 
 export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string; source?: string; postedAt?: string }
 export interface DealsReport {
@@ -95,7 +95,7 @@ async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, 
   const list = ranked.map((p, i) => `[${i}] ${p.rival} (${p.source ?? "web"}): ${p.caption.slice(0, 220)}`).join("\n");
   const prompt = own
     ? `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nTHIS BUSINESS'S OWN POSTS:\n${list}\n\nExtract the deals/promos THIS business is currently running (fill the deals array). Leave moves empty.`
-    : `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nRIVAL POSTS (social, Google, website):\n${list}\n\nExtract the deals/promos the rivals are running (fill the deals array).`;
+    : `Business: "${ws.name}" (vertical: ${ws.vertical}).\n\nRIVAL POSTS (social, Google, website, delivery apps):\n${list}\n\nExtract the deals/promos the rivals are running — including DoorDash/Uber Eats promotions like free/discounted delivery, % off, or BOGO (fill the deals array).`;
   const system = own ? SYSTEM.replace("a local business's rivals are posting", `the business "${ws.name}" is posting`) : SYSTEM;
 
   for (let attempt = 0; attempt < 3; attempt++) {
