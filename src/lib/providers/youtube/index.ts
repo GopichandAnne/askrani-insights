@@ -28,12 +28,23 @@ async function ytResolveChannelId(ref: string): Promise<string | undefined> {
   if (/^UC[\w-]{20,}$/.test(ref)) return ref;
   const idMatch = ref.match(/channel\/(UC[\w-]+)/);
   if (idMatch) return idMatch[1];
-  const handleMatch = ref.match(/@([A-Za-z0-9._-]+)/);
+  // legacy /user/NAME → forUsername
+  const userMatch = ref.match(/\/user\/([A-Za-z0-9._-]+)/);
+  if (userMatch) {
+    const res = await ytApi("channels", { part: "id", forUsername: userMatch[1] });
+    const id = ((await res.json()) as any).items?.[0]?.id;
+    if (id) return id;
+  }
+  // @handle or /c/NAME → forHandle
+  const handleMatch = ref.match(/@([A-Za-z0-9._-]+)/) ?? ref.match(/\/c\/([A-Za-z0-9._-]+)/);
   if (handleMatch) {
     const res = await ytApi("channels", { part: "id", forHandle: `@${handleMatch[1]}` });
-    return ((await res.json()) as any).items?.[0]?.id;
+    const id = ((await res.json()) as any).items?.[0]?.id;
+    if (id) return id;
   }
-  const res = await ytApi("search", { part: "snippet", type: "channel", q: ref, maxResults: "1" });
+  // fallback: search by the extracted name (not the whole URL)
+  const q = userMatch?.[1] ?? handleMatch?.[1] ?? ref;
+  const res = await ytApi("search", { part: "snippet", type: "channel", q, maxResults: "1" });
   return ((await res.json()) as any).items?.[0]?.snippet?.channelId;
 }
 const ytNum = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
@@ -179,21 +190,8 @@ export class YouTubeProvider implements PublicContentProvider {
     return { jobId, provider: this.name, status: "running", submittedAt: new Date().toISOString() };
   }
 
-  private async resolveChannelId(ref: string): Promise<string | undefined> {
-    if (/^UC[\w-]{20,}$/.test(ref)) return ref; // already a channel id
-    // handle or URL → extract @handle or channel id
-    const handleMatch = ref.match(/@([A-Za-z0-9._-]+)/);
-    const idMatch = ref.match(/channel\/(UC[\w-]+)/);
-    if (idMatch) return idMatch[1];
-    if (handleMatch) {
-      const res = await this.api("channels", { part: "id", forHandle: `@${handleMatch[1]}` });
-      const data = (await res.json()) as any;
-      return data.items?.[0]?.id;
-    }
-    // fallback: search by the raw ref
-    const res = await this.api("search", { part: "snippet", type: "channel", q: ref, maxResults: "1" });
-    const data = (await res.json()) as any;
-    return data.items?.[0]?.snippet?.channelId;
+  private resolveChannelId(ref: string): Promise<string | undefined> {
+    return ytResolveChannelId(ref); // shared resolver (handles UC id, /channel, /user, @handle, /c)
   }
 
   async getJob(jobId: string): Promise<ProviderJobStatus> {
