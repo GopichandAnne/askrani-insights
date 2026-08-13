@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, markDigestSeen } from "@/lib/digest";
 import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
+import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
 
 /**
  * Weekly digest push. A cron calls this; for each workspace due for a digest
@@ -55,10 +56,15 @@ export async function GET(req: Request) {
     // store the digest for the in-app feed + stamp cadence
     await svc.from("workspace").update({ goals: { ...goals, digest, lastDigestAt: new Date(now).toISOString() } }).eq("id", w.id);
 
-    // push via email if configured + a recipient resolves
+    // push via email if configured + a recipient resolves — with the full PDF report attached
     if (emailConfigured()) {
       const to = await digestRecipient(svc, w.organization_id, goals);
-      if (to && (await sendDigest(to, w.name, digest))) emailed++;
+      if (to) {
+        let pdf: Buffer | undefined;
+        try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, "weekly")); }
+        catch { pdf = undefined; } // never let a render hiccup block the digest email
+        if (await sendDigest(to, w.name, digest, pdf)) emailed++;
+      }
     }
 
     await markDigestSeen(w.id, digest.items.map((i) => i.id), new Date(now));

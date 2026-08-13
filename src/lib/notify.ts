@@ -44,13 +44,17 @@ export async function digestRecipient(
   return null;
 }
 
-async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+interface EmailAttachment { filename: string; content: string } // content = base64
+
+async function sendEmail(to: string, subject: string, html: string, attachments?: EmailAttachment[]): Promise<boolean> {
   if (!emailConfigured()) return false;
   try {
+    const body: Record<string, unknown> = { from: FROM(), to, subject, html };
+    if (attachments?.length) body.attachments = attachments;
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: FROM(), to, subject, html }),
+      body: JSON.stringify(body),
     });
     return r.ok;
   } catch {
@@ -73,27 +77,33 @@ function itemRow(it: DigestItem): string {
   </td></tr>`;
 }
 
-export function renderDigestEmail(business: string, digest: Digest): { subject: string; html: string } {
+export function renderDigestEmail(business: string, digest: Digest, opts?: { hasPdf?: boolean }): { subject: string; html: string } {
   const subject = digest.alertCount > 0
     ? `${business}: ${digest.headline}`
     : `${business} — your weekly market digest`;
   const rows = digest.items.map(itemRow).join("");
+  const pdfNote = opts?.hasPdf
+    ? `<div style="font-size:13px;color:#0f766e;background:#ecfdf5;border-radius:10px;padding:11px 14px;margin-top:16px">📄 <b>Your full market report is attached as a PDF</b> — sales, marketing moves, what's popular and what's changing in your market.</div>`
+    : "";
   const html = `<!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
     <div style="max-width:560px;margin:0 auto;padding:24px 20px">
-      <div style="font-size:13px;font-weight:700;color:#7c3aed;letter-spacing:.04em">ASK RANI INSIGHTS</div>
+      <div style="font-size:13px;font-weight:700;color:#0d9488;letter-spacing:.04em">ASK RANI INSIGHTS</div>
       <h1 style="font-size:22px;color:#111827;margin:6px 0 2px">${escapeHtml(business)}</h1>
       <div style="font-size:15px;color:#374151">${escapeHtml(digest.headline)}</div>
       <table role="presentation" width="100%" style="border-collapse:collapse;margin-top:10px">${rows}</table>
-      <div style="margin-top:22px"><a href="${APP_URL()}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px">Open your dashboard</a></div>
+      ${pdfNote}
+      <div style="margin-top:22px"><a href="${APP_URL()}" style="display:inline-block;background:#0d9488;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px">Open your dashboard</a></div>
       <div style="font-size:12px;color:#9ca3af;margin-top:20px">You're getting this because you watch ${escapeHtml(business)} on Ask Rani Insights.</div>
     </div>
   </body></html>`;
   return { subject, html };
 }
 
-export async function sendDigest(to: string, business: string, digest: Digest): Promise<boolean> {
-  const { subject, html } = renderDigestEmail(business, digest);
-  return sendEmail(to, subject, html);
+export async function sendDigest(to: string, business: string, digest: Digest, pdf?: Buffer): Promise<boolean> {
+  const { subject, html } = renderDigestEmail(business, digest, { hasPdf: !!pdf });
+  const safe = business.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const attachments = pdf ? [{ filename: `askrani-${safe}-weekly-report.pdf`, content: pdf.toString("base64") }] : undefined;
+  return sendEmail(to, subject, html, attachments);
 }
 
 function escapeHtml(s: string): string {
