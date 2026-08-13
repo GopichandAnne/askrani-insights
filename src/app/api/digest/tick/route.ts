@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, markDigestSeen } from "@/lib/digest";
 import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
+import { whatsappConfigured, whatsAppRecipient, sendWhatsAppReport } from "@/lib/whatsapp";
 import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 
@@ -44,7 +45,7 @@ export async function GET(req: Request) {
   const workspaces = (wss ?? []).filter((w: any) => (w.target_business_id || w.goals?.subjectType === "area") && !w.goals?.ephemeral);
 
   const now = Date.now();
-  let due = 0, built = 0, emailed = 0, empty = 0;
+  let due = 0, built = 0, emailed = 0, whatsapped = 0, empty = 0;
 
   for (const w of workspaces as any[]) {
     const goals = (w.goals as Record<string, any>) ?? {};
@@ -62,21 +63,27 @@ export async function GET(req: Request) {
     // store the digest for the in-app feed + stamp cadence
     await svc.from("workspace").update({ goals: { ...goals, digest, lastDigestAt: new Date(now).toISOString() } }).eq("id", w.id);
 
-    // push via email if configured + a recipient resolves — with the full PDF report attached
+    // render the report PDF once, share it across every configured channel
+    let pdf: Buffer | undefined;
+    try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, cadence)); }
+    catch { pdf = undefined; } // never let a render hiccup block delivery
+
+    // push via email (+ PDF attached) if configured + a recipient resolves
     if (emailConfigured()) {
       const to = await digestRecipient(svc, w.organization_id, goals);
-      if (to) {
-        let pdf: Buffer | undefined;
-        try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, cadence)); }
-        catch { pdf = undefined; } // never let a render hiccup block the digest email
-        if (await sendDigest(to, w.name, digest, pdf, cadence)) emailed++;
-      }
+      if (to && (await sendDigest(to, w.name, digest, pdf, cadence))) emailed++;
+    }
+
+    // push via WhatsApp (the PDF as a document) if configured + a number is on file
+    if (whatsappConfigured() && pdf) {
+      const wa = whatsAppRecipient(goals);
+      if (wa && (await sendWhatsAppReport(wa, w.name, digest, pdf))) whatsapped++;
     }
 
     await markDigestSeen(w.id, digest.items.map((i) => i.id), new Date(now));
   }
 
-  return NextResponse.json({ checked: workspaces.length, due, built, emailed, empty, emailConfigured: emailConfigured() });
+  return NextResponse.json({ checked: workspaces.length, due, built, emailed, whatsapped, empty, emailConfigured: emailConfigured(), whatsappConfigured: whatsappConfigured() });
 }
 
 export const POST = GET;

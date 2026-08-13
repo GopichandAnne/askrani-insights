@@ -1,8 +1,10 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ReportToolbar } from "@/components/ReportToolbar";
+import { DeliverySettings } from "@/components/DeliverySettings";
 import { buildWorkspaceReport } from "@/lib/report";
 import { emailConfigured } from "@/lib/notify";
+import { whatsappConfigured } from "@/lib/whatsapp";
 import { REPORT_ON_DEMAND_CREDITS, planOfOrg, cadenceForPlan } from "@/lib/credits";
 import { requireOrg } from "@/lib/api";
 
@@ -36,6 +38,10 @@ export default async function ReportsPage() {
   const auth = await requireOrg();
   const cadence = cadenceForPlan(auth ? await planOfOrg(auth.orgId) : "free");
 
+  const goals = ((state.workspace as { goals?: Record<string, unknown> }).goals ?? {}) as Record<string, unknown>;
+  const emailReady = emailConfigured();
+  const whatsappReady = whatsappConfigured();
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* header + actions */}
@@ -46,11 +52,19 @@ export default async function ReportsPage() {
             {state.workspace.name} · {r.cost.days}-day window · generated {generated}
           </p>
           <p className="mt-0.5 text-xs text-ink-faint">
-            📬 On your plan this report is emailed <b className="text-brand-deep">{cadence}</b>{cadence === "weekly" ? " — upgrade for a daily report, or send one now below" : ""}.
+            📬 On your plan this report is sent <b className="text-brand-deep">{cadence}</b> by email/WhatsApp{cadence === "weekly" ? " — upgrade for a daily report, or send one now below" : ""}.
           </p>
         </div>
-        <ReportToolbar canSend={emailConfigured()} sendCost={REPORT_ON_DEMAND_CREDITS} />
+        <ReportToolbar canSend={emailReady || whatsappReady} sendCost={REPORT_ON_DEMAND_CREDITS} />
       </div>
+
+      {/* where it's delivered — email + WhatsApp */}
+      <DeliverySettings
+        initialEmail={typeof goals.notifyEmail === "string" ? goals.notifyEmail : ""}
+        initialWhatsApp={typeof goals.notifyWhatsApp === "string" ? goals.notifyWhatsApp : ""}
+        emailReady={emailReady}
+        whatsappReady={whatsappReady}
+      />
 
       {/* snapshot */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
