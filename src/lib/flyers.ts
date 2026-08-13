@@ -99,9 +99,9 @@ const VISION_SCHEMA = {
             items: {
               type: "object", additionalProperties: false,
               properties: {
-                item: { type: "string", description: "the product on sale" },
-                price: { type: "string", description: "the sale price exactly as printed (e.g. '$0.99/lb', '2 for $5'), or '' if none" },
-                terms: { type: "string", description: "terms/validity if shown (e.g. 'thru Sun', 'limit 2'), else ''" },
+                item: { type: "string", description: "the offering on the sign — a product, dish, service, treatment, package or combo" },
+                price: { type: "string", description: "the price exactly as printed (e.g. '$0.99/lb', '2 for $5', '$45/session', 'from $120'), or '' if none" },
+                terms: { type: "string", description: "terms/validity if shown (e.g. 'thru Sun', 'limit 2', 'new clients'), else ''" },
               },
               required: ["item"],
             },
@@ -114,7 +114,7 @@ const VISION_SCHEMA = {
   required: ["images"],
 };
 const VISION_SYSTEM =
-  "You read retail SALE FLYERS / promo posters (grocery, restaurant, spa). For each image, list every product on sale with its price EXACTLY as printed and any terms. Read only what is visibly printed — never guess a price. If an image is a lifestyle/brand photo with no sale prices, return nothing for it.";
+  "You read a local business's PROMOTIONAL images across any industry — sale flyers, menu boards, service & treatment price lists, price signs. For each image, list every OFFERING (a product, dish, service, treatment, package or combo) with its price EXACTLY as printed and any terms/validity. Works the same for a grocery flyer, a restaurant menu special, a salon service list, a med-spa treatment menu, or a barber's price board. Read only what is visibly printed — never guess a price. If an image is a lifestyle/brand/logo photo with no offerings or prices, return nothing for it.";
 
 /** Competitors' Instagram + Facebook profiles, interleaved so both platforms are sampled. */
 export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompetitors = 8): Promise<FlyerProfile[]> {
