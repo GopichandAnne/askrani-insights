@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
-import { collectApifyPlatform, apifyConfigured } from "@/lib/providers/apify/platforms";
+import { collectApifyPlatform, apifyConfigured, collectProfileStats } from "@/lib/providers/apify/platforms";
 import { refundCredits, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
 
 /**
@@ -177,12 +177,15 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     return { flyers, costUsd: Number((0.007 * urls.length).toFixed(4)) };
   }
   const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 70000 });
-  // best-effort follower count off the scraped profile (fields vary by actor)
-  const followers = items.reduce((mx, it) => {
+  // dedicated profile-stats scrape for a reliable follower count (falls back to
+  // any follower field present on the post items).
+  const stats = (t.platform === "instagram" || t.platform === "facebook") ? await collectProfileStats(t.platform, t.url, { maxMs: 30000 }) : { followers: undefined, costUsd: 0 };
+  const followers = stats.followers ?? (items.reduce((mx, it) => {
     const r = ((it as any).raw ?? {}) as Record<string, unknown>;
-    const f = Number(r.followersCount ?? r.ownerFollowersCount ?? r.followers ?? r.followedByCount ?? r.followersCountNumber);
+    const f = Number(r.followersCount ?? r.ownerFollowersCount ?? r.followers ?? r.followedByCount);
     return Number.isFinite(f) && f > mx ? f : mx;
-  }, 0) || undefined;
+  }, 0) || undefined);
+  const statsCost = stats.costUsd ?? 0;
   const flyers: Flyer[] = [];
   let n = 0;
   for (const it of items) {
@@ -194,7 +197,7 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     flyers.push({ rival: t.rival, caption: String(it.text ?? "").slice(0, 200), postUrl: (it as any).sourceUrl, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: t.platform, postedAt: (it as any).publishedAt });
     n++;
   }
-  return { flyers, costUsd, followers };
+  return { flyers, costUsd: Number((costUsd + statsCost).toFixed(4)), followers };
 }
 
 /** Bank a dated follower point into goals.socialTimeline (one per rival per day). */

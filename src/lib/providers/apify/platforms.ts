@@ -292,6 +292,54 @@ export async function collectApifyPlatform(
 
 export const APIFY_PLATFORMS = Object.keys(CONFIG);
 
+// ── Profile stats (followers etc.) ──────────────────────────────────────────
+// A dedicated, lightweight profile scrape that returns account-level stats
+// (follower count, posts, verified) reliably — unlike post scrapers, where a
+// follower count is inconsistently present. Used to bank a follower time series.
+export interface ProfileStats { followers?: number; following?: number; posts?: number; verified?: boolean; costUsd: number }
+
+export async function collectProfileStats(
+  platform: string,
+  target: string,
+  opts: { maxMs?: number } = {},
+): Promise<ProfileStats> {
+  const token = process.env.APIFY_TOKEN;
+  const actor =
+    platform === "instagram" ? (process.env.APIFY_INSTAGRAM_PROFILE_ACTOR ?? "apify~instagram-profile-scraper")
+    : platform === "facebook" ? (process.env.APIFY_FACEBOOK_PAGE_ACTOR ?? "apify~facebook-pages-scraper")
+    : undefined;
+  if (!token || !actor) return { costUsd: 0 };
+  const input = platform === "instagram" ? { usernames: [handleOf(target)] } : { startUrls: [{ url: target }] };
+  const maxMs = opts.maxMs ?? 40000;
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+  try {
+    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+    });
+    if (!runRes.ok) return { costUsd: 0 };
+    const runId = ((await runRes.json()) as any).data?.id;
+    if (!runId) return { costUsd: 0 };
+    const deadline = Date.now() + maxMs;
+    let datasetId: string | undefined; let costUsd = 0;
+    while (Date.now() < deadline) {
+      const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
+      costUsd = st.data?.usageTotalUsd ?? costUsd;
+      const s = st.data?.status;
+      if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { costUsd };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!datasetId) return { costUsd };
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=1`).then((r) => r.json())) as any[];
+    const it = (raw ?? [])[0] ?? {};
+    if (platform === "instagram") {
+      return { followers: num(it.followersCount), following: num(it.followsCount), posts: num(it.postsCount ?? it.mediaCount), verified: !!it.verified, costUsd };
+    }
+    // facebook page: follower/like fields vary by actor
+    return { followers: num(it.followers ?? it.followersCount ?? it.likes ?? it.likesCount ?? it.pageLikes), verified: !!it.verified, costUsd };
+  } catch { return { costUsd: 0 }; }
+}
+
 // ── Hashtag discovery (the national industry corpus) ────────────────────────
 // Scrapes the TOP posts under a category hashtag so the best content + accounts
 // EMERGE from engagement (discovery-first), rather than a hand-curated account

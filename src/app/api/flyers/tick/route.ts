@@ -10,7 +10,7 @@ import type { WorkspaceRow } from "@/lib/workspace";
  * couple of profiles within a wall-clock budget, so every request is short.
  */
 export const dynamic = "force-dynamic";
-export const maxDuration = 200;
+export const maxDuration = 250;
 
 export async function POST(req: Request) {
   const auth = await requireOrg();
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
   if (!ws || ws.organization_id !== auth.orgId) return NextResponse.json({ error: "workspace not found" }, { status: 404 });
 
   try {
-    const result = await runFlyerBatch(ws as WorkspaceRow, { batchSize: 2, timeBudgetMs: 155000 });
+    const result = await runFlyerBatch(ws as WorkspaceRow, { batchSize: 2, timeBudgetMs: 200000 });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
