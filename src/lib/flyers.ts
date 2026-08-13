@@ -207,9 +207,12 @@ async function runPool<T>(tasks: (() => Promise<T>)[], concurrency: number): Pro
     while (i < tasks.length) { const idx = i++; try { await tasks[idx](); } catch { /* ignore */ } }
   }));
 }
-/** Dedicated all-channel follower snapshot: scrape each competitor's + the owner's
- *  IG/FB/TikTok/YouTube profile stats in parallel, banking a dated per-channel point. */
-async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: number, now: string, timeline: Record<string, TLPoint[]>): Promise<number> {
+/** Dedicated all-channel follower snapshot: fetch each competitor's + the owner's
+ *  IG/FB/TikTok/YouTube stats in parallel, then SELF-COMMIT the per-channel points
+ *  to goals.socialTimeline in its own update — so followers persist every scan even
+ *  if the heavier flyer image scrape later times out. Returns points banked. */
+async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: number): Promise<number> {
+  const now = new Date().toISOString();
   const ids = await workspaceBusinessIds(ws, svc as any);
   const bizIds = [...ids.competitorIds, ...(ws.target_business_id ? [ws.target_business_id] : [])];
   if (!bizIds.length) return 0;
@@ -218,16 +221,23 @@ async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: numbe
     svc.from("external_identity").select("business_id, url, platform").in("platform", ["instagram", "facebook", "tiktok", "youtube"]).in("business_id", bizIds),
   ]);
   const nameById = new Map<string, string>((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
-  let banked = 0;
+  const results: { name: string; channel: string; followers: number }[] = [];
   const tasks = (idents ?? []).map((r: any) => async () => {
     // YouTube subscribers come from the official Data API; everything else via the profile-stats scrape
     const followers = r.platform === "youtube"
       ? (await youtubeChannelStats(r.url)).subscribers
       : (await collectProfileStats(r.platform, r.url, { maxMs: 35000 })).followers;
-    if (followers != null) { bankChannelFollowers(timeline, nameById.get(r.business_id) ?? "?", r.platform, followers, now, retentionDays); banked++; }
+    if (followers != null) results.push({ name: nameById.get(r.business_id) ?? "?", channel: r.platform, followers });
   });
   await runPool(tasks, 5);
-  return banked;
+  if (!results.length) return 0;
+  // self-commit: read → bank → write ONLY socialTimeline, in its own short update
+  const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
+  const timeline = { ...((goals.socialTimeline as Record<string, TLPoint[]>) ?? {}) };
+  for (const r of results) bankChannelFollowers(timeline, r.name, r.channel, r.followers, now, retentionDays);
+  await svc.from("workspace").update({ goals: { ...goals, socialTimeline: timeline } }).eq("id", ws.id);
+  return results.length;
 }
 
 async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDeal[]> {
@@ -311,6 +321,11 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const deadline = Date.now() + (opts.timeBudgetMs ?? 95000);
   const slice = job.profiles.slice(job.cursor, job.cursor + batchSize);
 
+  const retentionDays = retentionDaysForPlan(await planOfOrg(job.orgId));
+  // capture followers FIRST (self-commits its own update) so they persist even if
+  // the heavier image scrape below times out
+  if (job.cursor === 0) { try { await captureFollowers(ws, svc, retentionDays); } catch { /* followers are best-effort */ } }
+
   const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
   let costUsd = job.costUsd;
   let done = 0;
@@ -326,7 +341,6 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
 
   // merge into rivals' vs owner's caches separately + advance the job
   const now = new Date().toISOString();
-  const retentionDays = retentionDaysForPlan(await planOfOrg(job.orgId));
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
   const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now, retentionDays);
@@ -338,9 +352,10 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const nextJob: FlyerJob = { ...job, cursor, flyersRead, dealsFound: mergedRival.length, costUsd: Number(costUsd.toFixed(4)), updatedAt: now, status: finished ? "done" : "running" };
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
-  const socialTimeline = { ...((goals.socialTimeline as Record<string, TLPoint[]>) ?? {}) };
-  if (job.cursor === 0) { try { await captureFollowers(ws, svc, retentionDays, now, socialTimeline); } catch { /* followers are best-effort */ } }
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob, socialTimeline } }).eq("id", ws.id);
+  // re-read goals just before writing so captureFollowers' socialTimeline isn't clobbered
+  const { data: freshRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const writeGoals = ((freshRow?.goals as Record<string, unknown>) ?? goals);
+  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob } }).eq("id", ws.id);
 
   // refund if the whole run turned up no flyer images at all
   if (finished && flyersRead === 0 && job.charged > 0) {
@@ -372,6 +387,8 @@ export async function refreshFlyers(
   const { data: gRow } = await svc.from("workspace").select("goals, organization_id").eq("id", ws.id).maybeSingle();
   const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
   const retentionDays = retentionDaysForPlan(await planOfOrg((gRow as any)?.organization_id));
+  // capture followers first (self-commits) so they persist regardless of the scrape
+  try { await captureFollowers(ws, svc, retentionDays); } catch { /* followers are best-effort */ }
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const cursor = Number((goals as any).flyerCursor ?? 0) || 0;
@@ -397,8 +414,9 @@ export async function refreshFlyers(
   const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
-  const socialTimeline = { ...((goals.socialTimeline as Record<string, TLPoint[]>) ?? {}) };
-  try { await captureFollowers(ws, svc, retentionDays, now, socialTimeline); } catch { /* followers are best-effort */ }
-  await svc.from("workspace").update({ goals: { ...goals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor, socialTimeline } }).eq("id", ws.id);
+  // re-read goals so captureFollowers' socialTimeline (committed above) isn't clobbered
+  const { data: freshRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const writeGoals = ((freshRow?.goals as Record<string, unknown>) ?? goals);
+  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor } }).eq("id", ws.id);
   return { activated: true, flyers: rivalFlyers.length + ownFlyers.length, deals: rivalFresh.length + ownFresh.length, costUsd: Number(costUsd.toFixed(4)) };
 }
