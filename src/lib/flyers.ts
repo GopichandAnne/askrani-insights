@@ -23,7 +23,21 @@ type Svc = ReturnType<typeof createServiceClient>;
 
 export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string }
 export interface FlyerReport { deals: FlyerDeal[]; flyersRead: number; at: string; empty?: boolean }
-export interface FlyerProfile { url: string; rival: string; platform: string; own?: boolean }
+export interface FlyerProfile { url: string; rival: string; platform: string; own?: boolean; placeId?: string }
+const googleConfigured = () => !!process.env.GOOGLE_MAPS_API_KEY;
+
+/** Public photo URLs for a Google place (menu boards, flyers, storefront) via the
+ *  Places Photo endpoint. Returns [] unless GOOGLE_MAPS_API_KEY is set. */
+async function fetchGooglePhotoUrls(placeId: string, per: number): Promise<string[]> {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return [];
+  try {
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, { headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": "photos" } });
+    if (!res.ok) return [];
+    const p = (await res.json()) as any;
+    return (p.photos ?? []).slice(0, per).map((ph: any) => `https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=1600&key=${key}`);
+  } catch { return []; }
+}
 export interface FlyerJob {
   status: "running" | "done" | "error";
   profiles: FlyerProfile[];
@@ -41,7 +55,9 @@ export interface FlyerJob {
 interface Flyer { rival: string; caption: string; postUrl?: string; storedUrl: string; base64: string; mediaType: string; source: string }
 
 export function flyersConfigured(): boolean {
-  return apifyConfigured() && isLlmConfigured();
+  // Need an AI key to read images, plus at least one image source (social via
+  // Apify, or Google Maps photos via the Maps key).
+  return (apifyConfigured() || googleConfigured()) && isLlmConfigured();
 }
 
 async function ensureBucket(svc: Svc) {
@@ -106,7 +122,7 @@ export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompet
   const compIds = ids.competitorIds.slice(0, maxCompetitors);
   if (!compIds.length) return [];
   const [{ data: biz }, { data: idents }] = await Promise.all([
-    svc.from("business").select("id, canonical_name").in("id", compIds),
+    svc.from("business").select("id, canonical_name, attributes").in("id", compIds),
     svc.from("external_identity").select("business_id, url, platform").in("platform", ["instagram", "facebook"]).in("business_id", compIds),
   ]);
   const nameById = new Map((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
@@ -115,6 +131,14 @@ export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompet
   const fbT = all.filter((t) => t.platform === "facebook");
   const ordered: FlyerProfile[] = [];
   for (let i = 0; i < Math.max(igT.length, fbT.length); i++) { if (igT[i]) ordered.push(igT[i]); if (fbT[i]) ordered.push(fbT[i]); }
+  // Google Maps photos — one profile per business that has a place_id (works even
+  // for rivals with no IG/FB, so coverage is identical across businesses).
+  if (googleConfigured()) {
+    for (const b of biz ?? []) {
+      const pid = (b as any).attributes?.place_id;
+      if (pid) ordered.push({ url: `https://www.google.com/maps/place/?q=place_id:${pid}`, rival: (b as any).canonical_name ?? "A rival", platform: "google", placeId: pid });
+    }
+  }
   return ordered;
 }
 
@@ -122,7 +146,10 @@ export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompet
  *  prices and compare them to rivals'. */
 export async function resolveOwnProfiles(ws: WorkspaceRow, svc: Svc): Promise<FlyerProfile[]> {
   if (!ws.target_business_id) return [];
-  const { data: idents } = await svc.from("external_identity").select("url, platform").in("platform", ["instagram", "facebook"]).eq("business_id", ws.target_business_id);
+  const [{ data: idents }, { data: b }] = await Promise.all([
+    svc.from("external_identity").select("url, platform").in("platform", ["instagram", "facebook"]).eq("business_id", ws.target_business_id),
+    svc.from("business").select("attributes").eq("id", ws.target_business_id).maybeSingle(),
+  ]);
   const ig = (idents ?? []).filter((i: any) => i.platform === "instagram");
   const fb = (idents ?? []).filter((i: any) => i.platform === "facebook");
   const out: FlyerProfile[] = [];
@@ -130,10 +157,25 @@ export async function resolveOwnProfiles(ws: WorkspaceRow, svc: Svc): Promise<Fl
     if (ig[i]) out.push({ url: (ig[i] as any).url, rival: ws.name, platform: "instagram", own: true });
     if (fb[i]) out.push({ url: (fb[i] as any).url, rival: ws.name, platform: "facebook", own: true });
   }
+  const pid = (b as any)?.attributes?.place_id;
+  if (googleConfigured() && pid) out.push({ url: `https://www.google.com/maps/place/?q=place_id:${pid}`, rival: ws.name, platform: "google", own: true, placeId: pid });
   return out;
 }
 
 async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, per: number): Promise<{ flyers: Flyer[]; costUsd: number }> {
+  // Google Maps photos path — menu boards / flyers posted on the business's
+  // Google profile. Same download + vision pipeline as social flyers.
+  if (t.platform === "google") {
+    if (!t.placeId) return { flyers: [], costUsd: 0 };
+    const urls = await fetchGooglePhotoUrls(t.placeId, per);
+    const flyers: Flyer[] = [];
+    for (const u of urls) {
+      const stored = await storeImage(svc, u, `${ws.id}/g_${keyOf(t.rival + u)}`);
+      if (!stored) continue;
+      flyers.push({ rival: t.rival, caption: "", postUrl: t.url, storedUrl: stored.publicUrl, base64: stored.base64, mediaType: stored.mediaType, source: "google" });
+    }
+    return { flyers, costUsd: Number((0.007 * urls.length).toFixed(4)) };
+  }
   const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 45000 });
   const flyers: Flyer[] = [];
   let n = 0;

@@ -86,7 +86,7 @@ export default async function OffersPage() {
         {rivalDeals.summary && <p className="mt-3 max-w-3xl text-sm text-ink-soft">{rivalDeals.summary}</p>}
         {canFlyer && (
           <div className="mt-3 rounded-2xl border border-brand/20 bg-brand-soft/40 p-3">
-            <p className="mb-1.5 text-sm font-medium text-brand-deep">🧾 Rivals print their sale prices inside <b>flyer images</b> on Instagram &amp; Facebook — Rani reads the prices right off them.</p>
+            <p className="mb-1.5 text-sm font-medium text-brand-deep">🧾 Rivals print their sale prices inside <b>flyer &amp; menu images</b> on Instagram, Facebook and Google Maps — Rani reads the prices right off them.</p>
             <FlyerReadButton workspaceId={ws.id} cost={flyerCost} />
           </div>
         )}
