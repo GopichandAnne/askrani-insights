@@ -32,6 +32,17 @@ export function retentionDaysForPlan(plan?: string): number {
   return PLAN_RETENTION_DAYS[plan ?? "free"] ?? 14;
 }
 
+/** How often the report/digest is pushed to the owner, by plan. Higher tiers get
+ *  a daily report; base tiers get it weekly. Used by the digest cron. */
+export function cadenceForPlan(plan?: string): "daily" | "weekly" {
+  return PLANS[plan ?? "free"]?.cadence === "daily" ? "daily" : "weekly";
+}
+
+/** Credits to send the full report on demand (off-cadence). The report is built
+ *  from cache (no collection cost), so this is priced as a small convenience — the
+ *  way a weekly-plan owner grabs today's report without waiting for Monday. */
+export const REPORT_ON_DEMAND_CREDITS = 5;
+
 /** Credits a run costs, from its real USD COGS. 0 for free runs. */
 export function creditsForCost(costUsd: number): number {
   if (!(costUsd > 0)) return 0;

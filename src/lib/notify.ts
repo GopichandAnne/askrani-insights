@@ -77,10 +77,11 @@ function itemRow(it: DigestItem): string {
   </td></tr>`;
 }
 
-export function renderDigestEmail(business: string, digest: Digest, opts?: { hasPdf?: boolean }): { subject: string; html: string } {
+export function renderDigestEmail(business: string, digest: Digest, opts?: { hasPdf?: boolean; period?: "daily" | "weekly" }): { subject: string; html: string } {
+  const cadenceWord = opts?.period === "daily" ? "daily" : "weekly";
   const subject = digest.alertCount > 0
     ? `${business}: ${digest.headline}`
-    : `${business} — your weekly market digest`;
+    : `${business} — your ${cadenceWord} market digest`;
   const rows = digest.items.map(itemRow).join("");
   const pdfNote = opts?.hasPdf
     ? `<div style="font-size:13px;color:#0f766e;background:#ecfdf5;border-radius:10px;padding:11px 14px;margin-top:16px">📄 <b>Your full market report is attached as a PDF</b> — sales, marketing moves, what's popular and what's changing in your market.</div>`
@@ -99,10 +100,10 @@ export function renderDigestEmail(business: string, digest: Digest, opts?: { has
   return { subject, html };
 }
 
-export async function sendDigest(to: string, business: string, digest: Digest, pdf?: Buffer): Promise<boolean> {
-  const { subject, html } = renderDigestEmail(business, digest, { hasPdf: !!pdf });
+export async function sendDigest(to: string, business: string, digest: Digest, pdf?: Buffer, period: "daily" | "weekly" = "weekly"): Promise<boolean> {
+  const { subject, html } = renderDigestEmail(business, digest, { hasPdf: !!pdf, period });
   const safe = business.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  const attachments = pdf ? [{ filename: `askrani-${safe}-weekly-report.pdf`, content: pdf.toString("base64") }] : undefined;
+  const attachments = pdf ? [{ filename: `askrani-${safe}-${period}-report.pdf`, content: pdf.toString("base64") }] : undefined;
   return sendEmail(to, subject, html, attachments);
 }
 

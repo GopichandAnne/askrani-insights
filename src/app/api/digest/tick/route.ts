@@ -3,18 +3,21 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, markDigestSeen } from "@/lib/digest";
 import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
 import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
+import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 
 /**
- * Weekly digest push. A cron calls this; for each workspace due for a digest
- * (per goals.lastDigestAt, weekly cadence), it builds the digest from the cached
+ * Digest push. The cron runs DAILY; for each workspace it fires only when due for
+ * that org's PLAN CADENCE (daily on Growth/Pro, weekly on Free/Starter — see
+ * cadenceForPlan) per goals.lastDigestAt. It builds the digest from the cached
  * pillars (no scrape, no cost), stores it on goals.digest for the in-app feed,
- * emails it to the owner if email is configured, and stamps the seen set so the
- * next digest only flags what's new. Auth mirrors the scheduler tick.
+ * emails it (+ the full PDF report) to the owner if email is configured, and
+ * stamps the seen set so the next digest only flags what's new.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const WEEK = 7 * 86_400_000;
+const DAY = 86_400_000;
+const WEEK = 7 * DAY;
 const SLACK = 60 * 60 * 1000;
 
 function authorized(req: Request): boolean {
@@ -46,7 +49,10 @@ export async function GET(req: Request) {
   for (const w of workspaces as any[]) {
     const goals = (w.goals as Record<string, any>) ?? {};
     const last = goals.lastDigestAt ? Date.parse(goals.lastDigestAt) : 0;
-    if (!force && last && now - last < WEEK - SLACK) continue;
+    // cadence is a plan lever: Growth/Pro get a daily report, Free/Starter weekly
+    const cadence = cadenceForPlan(w.organization_id ? await planOfOrg(w.organization_id) : "free");
+    const interval = cadence === "daily" ? DAY : WEEK;
+    if (!force && last && now - last < interval - SLACK) continue;
     due++;
 
     const digest = buildDigest({ name: w.name, vertical: w.vertical }, goals, (goals.digestSeen?.ids as string[]) ?? [], new Date(now));
@@ -61,9 +67,9 @@ export async function GET(req: Request) {
       const to = await digestRecipient(svc, w.organization_id, goals);
       if (to) {
         let pdf: Buffer | undefined;
-        try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, "weekly")); }
+        try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, cadence)); }
         catch { pdf = undefined; } // never let a render hiccup block the digest email
-        if (await sendDigest(to, w.name, digest, pdf)) emailed++;
+        if (await sendDigest(to, w.name, digest, pdf, cadence)) emailed++;
       }
     }
 

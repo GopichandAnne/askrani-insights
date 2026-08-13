@@ -11,7 +11,7 @@
     },
     {
       "path": "/api/digest/tick",
-      "schedule": "30 14 * * 1"
+      "schedule": "30 14 * * *"
     }
   ],
   "functions": {

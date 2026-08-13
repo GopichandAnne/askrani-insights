@@ -2,6 +2,9 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ReportToolbar } from "@/components/ReportToolbar";
 import { buildWorkspaceReport } from "@/lib/report";
+import { emailConfigured } from "@/lib/notify";
+import { REPORT_ON_DEMAND_CREDITS, planOfOrg, cadenceForPlan } from "@/lib/credits";
+import { requireOrg } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Report — Ask Rani Insights" };
@@ -30,6 +33,9 @@ export default async function ReportsPage() {
   const r = await buildWorkspaceReport(state.workspace);
   const generated = new Date(r.generatedAt).toLocaleString();
 
+  const auth = await requireOrg();
+  const cadence = cadenceForPlan(auth ? await planOfOrg(auth.orgId) : "free");
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* header + actions */}
@@ -39,8 +45,11 @@ export default async function ReportsPage() {
           <p className="mt-1 text-sm text-ink-soft">
             {state.workspace.name} · {r.cost.days}-day window · generated {generated}
           </p>
+          <p className="mt-0.5 text-xs text-ink-faint">
+            📬 On your plan this report is emailed <b className="text-brand-deep">{cadence}</b>{cadence === "weekly" ? " — upgrade for a daily report, or send one now below" : ""}.
+          </p>
         </div>
-        <ReportToolbar />
+        <ReportToolbar canSend={emailConfigured()} sendCost={REPORT_ON_DEMAND_CREDITS} />
       </div>
 
       {/* snapshot */}
