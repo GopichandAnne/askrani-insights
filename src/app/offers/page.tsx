@@ -15,6 +15,8 @@ export const dynamic = "force-dynamic";
 
 const SOURCE_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", google: "Google", website: "website" };
 const sourceLabel = (s?: string) => (s && SOURCE_LABEL[s]) || "online";
+const CHAN_LABEL: Record<string, string> = { instagram: "IG", facebook: "FB", tiktok: "TikTok", youtube: "YT" };
+const chanLabel = (c: string) => CHAN_LABEL[c] ?? c;
 const parseUsd = (s?: string) => { const m = String(s ?? "").match(/\$\s*(\d+(?:\.\d+)?)/) ?? String(s ?? "").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
 const DAY = 86400000;
 const dealDate = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => d.postedAt || d.seenAt || d.lastSeen || null;
@@ -264,21 +266,28 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
         </div>
       )}
 
-      {/* competitor social signals — followers + content performance over time */}
-      {social.rows.some((r) => r.engagement > 0 || r.followers != null) && (
+      {/* unified competitor signals — followers (per channel) + reviews + content performance */}
+      {social.rows.some((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews) && (
         <section className="card">
-          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📈</span>Competitor social signals</h2>
-          <p className="mb-3 text-xs text-ink-faint">Followers and content performance over the last {days} days — how their reach and engagement are moving.</p>
+          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📡</span>Competitor signals over time</h2>
+          <p className="mb-3 text-xs text-ink-faint">Followers per channel, reviews and content performance across the last {days} days — every signal on one timeline, so you see who&apos;s gaining ground.</p>
           <div className="grid gap-3 md:grid-cols-2">
-            {social.rows.filter((r) => r.engagement > 0 || r.followers != null).slice(0, 6).map((r, i) => (
+            {social.rows.filter((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews).slice(0, 8).map((r, i) => (
               <div key={i} className="rounded-2xl bg-white/55 p-3.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold">{r.rival}</span>
-                  {r.trendPct != null && <span className={`chip ${r.trendPct >= 0 ? "bg-trust-direct/15 text-trust-direct" : "bg-coral/15 text-coral-dark"}`}>{r.trendPct >= 0 ? "▲" : "▼"} {Math.abs(r.trendPct)}% engagement</span>}
+                  {r.trendPct != null && <span className={`chip ${r.trendPct >= 0 ? "bg-trust-direct/15 text-trust-direct" : "bg-coral/15 text-coral-dark"}`}>{r.trendPct >= 0 ? "▲" : "▼"} {Math.abs(r.trendPct)}% eng</span>}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
-                  {r.followers != null && <span>👥 {r.followers.toLocaleString()} followers{r.followersDelta ? <b className={r.followersDelta >= 0 ? "text-trust-direct" : "text-coral-dark"}> {r.followersDelta >= 0 ? "+" : ""}{r.followersDelta.toLocaleString()}</b> : null}</span>}
-                  <span>📝 {r.posts} posts</span>
+                {r.channels.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {r.channels.map((c) => (
+                      <span key={c.channel} className="chip bg-surface-sunken text-ink-soft">👥 {chanLabel(c.channel)} {c.followers.toLocaleString()}{c.delta ? <b className={c.delta >= 0 ? " text-trust-direct" : " text-coral-dark"}> {c.delta >= 0 ? "+" : ""}{c.delta.toLocaleString()}</b> : null}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
+                  {r.reviews && r.reviews.count > 0 && <span>⭐ {r.reviews.rating ?? "—"} · {r.reviews.count.toLocaleString()} reviews{r.reviews.countDelta ? <b className="text-trust-direct"> +{r.reviews.countDelta}</b> : null}</span>}
+                  {r.posts > 0 && <span>📝 {r.posts} posts</span>}
                   {r.topFormat && <span>🎬 {r.topFormat === "video" ? "reels/video work best" : "images work best"}</span>}
                 </div>
                 {r.topPost && (
@@ -290,7 +299,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-ink-faint">Follower history builds each time you run a scan — the trend sharpens over the weeks.</p>
+          <p className="mt-2 text-[11px] text-ink-faint">Follower &amp; review history builds each scan — deltas appear once there are two dated points.</p>
         </section>
       )}
 

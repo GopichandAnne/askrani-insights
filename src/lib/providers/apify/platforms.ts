@@ -307,9 +307,13 @@ export async function collectProfileStats(
   const actor =
     platform === "instagram" ? (process.env.APIFY_INSTAGRAM_PROFILE_ACTOR ?? "apify~instagram-profile-scraper")
     : platform === "facebook" ? (process.env.APIFY_FACEBOOK_PAGE_ACTOR ?? "apify~facebook-pages-scraper")
+    : platform === "tiktok" ? (process.env.APIFY_TIKTOK_PROFILE_ACTOR ?? "clockworks~tiktok-scraper")
+    : platform === "youtube" ? process.env.APIFY_YOUTUBE_CHANNEL_ACTOR   // no default — actor varies
     : undefined;
   if (!token || !actor) return { costUsd: 0 };
-  const input = platform === "instagram" ? { usernames: [handleOf(target)] } : { startUrls: [{ url: target }] };
+  const input = platform === "instagram" ? { usernames: [handleOf(target)] }
+    : platform === "tiktok" ? { profiles: [handleOf(target)], resultsPerPage: 1, shouldDownloadVideos: false, shouldDownloadCovers: false }
+    : { startUrls: [{ url: target }] };
   const maxMs = opts.maxMs ?? 40000;
   const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
   try {
@@ -332,11 +336,18 @@ export async function collectProfileStats(
     if (!datasetId) return { costUsd };
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=1`).then((r) => r.json())) as any[];
     const it = (raw ?? [])[0] ?? {};
-    if (platform === "instagram") {
-      return { followers: num(it.followersCount), following: num(it.followsCount), posts: num(it.postsCount ?? it.mediaCount), verified: !!it.verified, costUsd };
+    switch (platform) {
+      case "instagram":
+        return { followers: num(it.followersCount), following: num(it.followsCount), posts: num(it.postsCount ?? it.mediaCount), verified: !!it.verified, costUsd };
+      case "tiktok": {
+        const a = (it.authorMeta ?? {}) as any;
+        return { followers: num(a.fans ?? it.fans ?? it.followers ?? it.followersCount), following: num(a.following), posts: num(a.video ?? it.videoCount), verified: !!(a.verified ?? it.verified), costUsd };
+      }
+      case "youtube":
+        return { followers: num(it.subscriberCount ?? it.numberOfSubscribers ?? it.subscribers ?? it.channelTotalSubscribers), posts: num(it.videosCount ?? it.channelTotalVideos), verified: !!it.verified, costUsd };
+      default: // facebook page: follower/like fields vary by actor
+        return { followers: num(it.followers ?? it.followersCount ?? it.likes ?? it.likesCount ?? it.pageLikes), verified: !!it.verified, costUsd };
     }
-    // facebook page: follower/like fields vary by actor
-    return { followers: num(it.followers ?? it.followersCount ?? it.likes ?? it.likesCount ?? it.pageLikes), verified: !!it.verified, costUsd };
   } catch { return { costUsd: 0 }; }
 }
 
