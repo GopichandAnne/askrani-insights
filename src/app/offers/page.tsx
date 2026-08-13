@@ -14,24 +14,44 @@ export const dynamic = "force-dynamic";
 const SOURCE_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", google: "Google", website: "website" };
 const sourceLabel = (s?: string) => (s && SOURCE_LABEL[s]) || "online";
 const parseUsd = (s?: string) => { const m = String(s ?? "").match(/\$\s*(\d+(?:\.\d+)?)/) ?? String(s ?? "").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
+const DAY = 86400000;
+const dealDate = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => d.postedAt || d.seenAt || d.lastSeen || null;
+const agoLabel = (s?: string | null) => { if (!s) return ""; const t = new Date(s).getTime(); if (isNaN(t)) return ""; const d = Math.floor((Date.now() - t) / DAY); return d <= 0 ? "today" : d === 1 ? "1d ago" : `${d}d ago`; };
+const WINDOWS = [10, 30];
 
 interface RivalBundle { rival: string; promos: DealItem[]; priced: FlyerDeal[]; sources: Set<string> }
 
-export default async function OffersPage() {
+export default async function OffersPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Offers & deals" />;
   const ws = state.workspace;
+
+  const days = Math.min(Math.max(parseInt((await searchParams)?.days ?? "10", 10) || 10, 1), 30);
+  const cutoffMs = Date.now() - days * DAY;
+  const inWindow = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => { const s = dealDate(d); if (!s) return true; const t = new Date(s).getTime(); return isNaN(t) || t >= cutoffMs; };
 
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
   const [rivalDeals, myDeals, priceGaps] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws)]);
-  const flyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
+  const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
+
+  // price-drop detection over FULL history (a competitor lowered an item's price)
+  const priceHist = new Map<string, { price: number; seen: number }[]>();
+  for (const d of allFlyerDeals) { const n = parseUsd(d.price); if (n == null) continue; const k = `${d.rival}|${d.item}`.toLowerCase(); (priceHist.get(k) ?? priceHist.set(k, []).get(k)!).push({ price: n, seen: new Date(d.seenAt ?? d.postedAt ?? 0).getTime() }); }
+  const dropped = new Set<string>();
+  for (const [k, arr] of priceHist) { if (arr.length < 2) continue; arr.sort((a, b) => a.seen - b.seen); if (arr[arr.length - 1].price < Math.min(...arr.slice(0, -1).map((x) => x.price))) dropped.add(k); }
+  const isDropped = (d: FlyerDeal) => dropped.has(`${d.rival}|${d.item}`.toLowerCase());
+  const isNew = (d: { seenAt?: string }) => !!d.seenAt && Date.now() - new Date(d.seenAt).getTime() < 2 * DAY;
+
+  // apply the date window
+  const flyerDeals = allFlyerDeals.filter(inWindow);
+  const windowedPromos = rivalDeals.deals.filter(inWindow);
 
   // merge everything into ONE bundle per rival (promos + priced flyer items)
   const map = new Map<string, RivalBundle>();
   const bundle = (r: string) => { if (!map.has(r)) map.set(r, { rival: r, promos: [], priced: [], sources: new Set() }); return map.get(r)!; };
-  for (const d of rivalDeals.deals) { const b = bundle(d.rival); b.promos.push(d); if (d.source) b.sources.add(d.source); }
+  for (const d of windowedPromos) { const b = bundle(d.rival); b.promos.push(d); if (d.source) b.sources.add(d.source); }
   for (const d of flyerDeals) { const b = bundle(d.rival); b.priced.push(d); if (d.source) b.sources.add(d.source); }
   const rivals = [...map.values()].sort((a, b) => (b.priced.length + b.promos.length) - (a.priced.length + a.promos.length));
 
@@ -45,6 +65,7 @@ export default async function OffersPage() {
     .slice(0, 10);
 
   const itemsOnSale = flyerDeals.length;
+  const newCount = flyerDeals.filter(isNew).length;
   const hasAnything = rivals.length > 0;
   const canFlyer = flyersConfigured() && ids.competitorIds.length > 0;
   const flyerCost = quoteFlyerRead(Math.min(ids.competitorIds.length, FLYER_READ_COMPETITOR_CAP));
@@ -78,9 +99,18 @@ export default async function OffersPage() {
 
       {/* at-a-glance + actions */}
       <section className="card">
+        {/* date window — default last 10 days; dig back as far as history holds */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Showing</span>
+          {WINDOWS.map((w) => (
+            <a key={w} href={`?days=${w}`} className={`chip ${days === w ? "bg-brand-gradient text-white" : "bg-surface-sunken text-ink-soft hover:text-brand"}`}>last {w} days</a>
+          ))}
+          <span className="text-xs text-ink-faint">· history builds with every scan</span>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="chip bg-brand-soft font-semibold text-brand-deep">{rivals.length} {rivals.length === 1 ? "rival" : "rivals"} with offers</span>
           {itemsOnSale > 0 && <span className="chip bg-coral/15 font-semibold text-coral-dark">{itemsOnSale} items on sale</span>}
+          {newCount > 0 && <span className="chip bg-trust-direct/15 font-semibold text-trust-direct">🆕 {newCount} new</span>}
           {lowest[0] && <span className="chip bg-surface-sunken text-ink-soft">lowest spotted: <b className="ml-1 text-coral-dark">{lowest[0].d.price}</b> {lowest[0].d.item}</span>}
         </div>
         {rivalDeals.summary && <p className="mt-3 max-w-3xl text-sm text-ink-soft">{rivalDeals.summary}</p>}
@@ -96,7 +126,11 @@ export default async function OffersPage() {
             <ul className="space-y-1 text-sm text-brand-deep">{rivalDeals.moves.map((m, i) => <li key={i}>✦ {m}</li>)}</ul>
           </div>
         )}
-        {!hasAnything && (
+        {!hasAnything && (allFlyerDeals.length > 0 || rivalDeals.deals.length > 0) ? (
+          <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
+            <span className="font-semibold text-ink">Nothing in the last {days} days.</span> There&apos;s older history — <a href="?days=30" className="font-medium text-brand hover:underline">widen to 30 days</a>, or run a fresh scan above.
+          </p>
+        ) : !hasAnything && (
           <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
             <span className="font-semibold text-ink">No competitor offers detected yet.</span> Connect your competitors&apos; Instagram/Facebook pages under <span className="font-medium text-brand-deep">Channels</span> and use <b>Read their sale flyers</b> above — their sales show up here as they post them.
           </p>
@@ -165,15 +199,22 @@ export default async function OffersPage() {
                 </div>
                 {r.promos.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}</span>)}
+                    {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}{agoLabel(d.postedAt) ? <span className="ml-1 opacity-70">· {agoLabel(d.postedAt)}</span> : null}</span>)}
                   </div>
                 )}
                 {r.priced.length > 0 && (
                   <ul className="mt-3 divide-y divide-line/50">
                     {r.priced.slice(0, 8).map((d, i) => (
                       <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                        <span className="min-w-0 truncate text-ink">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
-                        {d.price && <span className="shrink-0 font-semibold text-coral-dark">{d.price}</span>}
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-ink">
+                          {isNew(d) && <span className="chip shrink-0 bg-trust-direct/15 px-1.5 py-0 text-[10px] font-bold text-trust-direct">NEW</span>}
+                          {isDropped(d) && <span className="chip shrink-0 bg-coral/15 px-1.5 py-0 text-[10px] font-bold text-coral-dark">⬇ DROP</span>}
+                          <span className="truncate">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {agoLabel(dealDate(d)) && <span className="text-[11px] text-ink-faint">{agoLabel(dealDate(d))}</span>}
+                          {d.price && <span className="font-semibold text-coral-dark">{d.price}</span>}
+                        </span>
                       </li>
                     ))}
                   </ul>

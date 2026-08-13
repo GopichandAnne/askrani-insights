@@ -19,7 +19,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 // Grocery/restaurant weekly specials often live on Google & the website, not only IG.
 const PROMO_SOURCES = ["instagram", "facebook", "tiktok", "google", "website"];
 
-export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string; source?: string }
+export interface DealItem { rival: string; deal: string; item?: string; when?: string; url?: string; source?: string; postedAt?: string }
 export interface DealsReport {
   summary: string;
   deals: DealItem[];
@@ -73,7 +73,7 @@ async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, 
 
   const { data: posts } = await db
     .from("content_item")
-    .select("text, url, platform, observed_at, business:business_id(canonical_name)")
+    .select("text, url, platform, observed_at, published_at, business:business_id(canonical_name)")
     .in("business_id", businessIds)
     .in("platform", PROMO_SOURCES)
     .order("observed_at", { ascending: false })
@@ -85,6 +85,7 @@ async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, 
       caption: String((p as any).text ?? "").replace(/\s+/g, " ").trim(),
       url: (p as any).url ?? undefined,
       source: (p as any).platform as string | undefined,
+      postedAt: ((p as any).published_at ?? (p as any).observed_at) as string | undefined,
     }))
     .filter((p) => p.caption.length > 8)
     .slice(0, 90);
@@ -107,7 +108,7 @@ async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, 
           const src = ranked[Number(d.index)];
           const deal = strip(d.deal);
           if (!src || !deal) return null;
-          return { rival: src.rival, deal, item: strip(d.item) || undefined, when: strip(d.when) || undefined, url: src.url, source: src.source } as DealItem;
+          return { rival: src.rival, deal, item: strip(d.item) || undefined, when: strip(d.when) || undefined, url: src.url, source: src.source, postedAt: src.postedAt } as DealItem;
         })
         .filter((d): d is DealItem => !!d)
         .slice(0, 14);
