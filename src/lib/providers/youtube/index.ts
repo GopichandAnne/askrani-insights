@@ -15,6 +15,41 @@ import {
 } from "../types";
 import { createHash } from "node:crypto";
 
+// ── Standalone helpers (no provider instance) for channel stats — used by the
+// social signals layer to bank YouTube subscribers on the follower timeline.
+const YT_KEY = () => process.env.YOUTUBE_API_KEY ?? "";
+function ytApi(path: string, params: Record<string, string>) {
+  const u = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  u.searchParams.set("key", YT_KEY());
+  return fetch(u);
+}
+async function ytResolveChannelId(ref: string): Promise<string | undefined> {
+  if (/^UC[\w-]{20,}$/.test(ref)) return ref;
+  const idMatch = ref.match(/channel\/(UC[\w-]+)/);
+  if (idMatch) return idMatch[1];
+  const handleMatch = ref.match(/@([A-Za-z0-9._-]+)/);
+  if (handleMatch) {
+    const res = await ytApi("channels", { part: "id", forHandle: `@${handleMatch[1]}` });
+    return ((await res.json()) as any).items?.[0]?.id;
+  }
+  const res = await ytApi("search", { part: "snippet", type: "channel", q: ref, maxResults: "1" });
+  return ((await res.json()) as any).items?.[0]?.snippet?.channelId;
+}
+const ytNum = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+
+/** Channel stats via the YouTube Data API (subscribers/videos/total views). */
+export async function youtubeChannelStats(ref: string): Promise<{ subscribers?: number; videos?: number; views?: number }> {
+  if (!YT_KEY() || !ref) return {};
+  try {
+    const id = await ytResolveChannelId(ref);
+    if (!id) return {};
+    const res = await ytApi("channels", { part: "statistics", id });
+    const st = ((await res.json()) as any).items?.[0]?.statistics ?? {};
+    return { subscribers: ytNum(st.subscriberCount), videos: ytNum(st.videoCount), views: ytNum(st.viewCount) };
+  } catch { return {}; }
+}
+
 /**
  * YouTube adapter — official Data API v3 (clean, free quota). Discovers channels
  * and collects a channel's recent uploads (title + description) as content the
@@ -94,10 +129,23 @@ export class YouTubeProvider implements PublicContentProvider {
             maxResults: String(input.resultsLimit ?? 12),
           });
           const pl = (await plRes.json()) as any;
+          // fetch per-video statistics (views/likes/comments) in one batched call
+          const vids: string[] = (pl.items ?? []).map((it: any) => it.snippet?.resourceId?.videoId).filter(Boolean);
+          const statsById = new Map<string, any>();
+          if (vids.length) {
+            const vRes = await this.api("videos", { part: "statistics", id: vids.slice(0, 50).join(",") });
+            const vData = (await vRes.json()) as any;
+            for (const v of vData.items ?? []) statsById.set(v.id, v.statistics ?? {});
+          }
           for (const it of pl.items ?? []) {
             const s = it.snippet ?? {};
             const videoId = s.resourceId?.videoId;
             const text = [s.title, s.description].filter(Boolean).join("\n");
+            const media: RawObservation["media"] = [];
+            if (s.thumbnails?.high?.url) media.push({ type: "image", url: s.thumbnails.high.url });
+            const st = statsById.get(videoId) ?? {};
+            const likes = ytNum(st.likeCount), comments = ytNum(st.commentCount), views = ytNum(st.viewCount);
+            if (likes != null || comments != null || views != null) media.push({ type: "metrics", likes, comments, views } as any);
             out.push({
               provider: this.name,
               provenance: "OFFICIAL_PUBLIC_API",
@@ -106,7 +154,7 @@ export class YouTubeProvider implements PublicContentProvider {
               externalRef: videoId,
               sourceUrl: videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined,
               text,
-              media: s.thumbnails?.high?.url ? [{ type: "image", url: s.thumbnails.high.url }] : [],
+              media,
               publishedAt: s.publishedAt,
               observedAt: now,
               contentHash: createHash("sha256").update(`${videoId}|${text}`).digest("hex"),

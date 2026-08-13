@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyPlatform, apifyConfigured, collectProfileStats } from "@/lib/providers/apify/platforms";
+import { youtubeChannelStats } from "@/lib/providers/youtube";
 import { refundCredits, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
 
 /**
@@ -219,8 +220,11 @@ async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: numbe
   const nameById = new Map<string, string>((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
   let banked = 0;
   const tasks = (idents ?? []).map((r: any) => async () => {
-    const st = await collectProfileStats(r.platform, r.url, { maxMs: 35000 });
-    if (st.followers != null) { bankChannelFollowers(timeline, nameById.get(r.business_id) ?? "?", r.platform, st.followers, now, retentionDays); banked++; }
+    // YouTube subscribers come from the official Data API; everything else via the profile-stats scrape
+    const followers = r.platform === "youtube"
+      ? (await youtubeChannelStats(r.url)).subscribers
+      : (await collectProfileStats(r.platform, r.url, { maxMs: 35000 })).followers;
+    if (followers != null) { bankChannelFollowers(timeline, nameById.get(r.business_id) ?? "?", r.platform, followers, now, retentionDays); banked++; }
   });
   await runPool(tasks, 5);
   return banked;
