@@ -4,7 +4,8 @@ import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
 import type { FlyerDeal } from "@/lib/flyers";
 import { flyersConfigured } from "@/lib/flyers";
-import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP } from "@/lib/credits";
+import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
+import { requireOrg } from "@/lib/api";
 import { FlyerReadButton } from "@/components/FlyerReadButton";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { MarketTabs } from "@/components/MarketTabs";
@@ -17,7 +18,6 @@ const parseUsd = (s?: string) => { const m = String(s ?? "").match(/\$\s*(\d+(?:
 const DAY = 86400000;
 const dealDate = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => d.postedAt || d.seenAt || d.lastSeen || null;
 const agoLabel = (s?: string | null) => { if (!s) return ""; const t = new Date(s).getTime(); if (isNaN(t)) return ""; const d = Math.floor((Date.now() - t) / DAY); return d <= 0 ? "today" : d === 1 ? "1d ago" : `${d}d ago`; };
-const WINDOWS = [10, 30];
 
 interface RivalBundle { rival: string; promos: DealItem[]; priced: FlyerDeal[]; sources: Set<string> }
 
@@ -26,7 +26,10 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Offers & deals" />;
   const ws = state.workspace;
 
-  const days = Math.min(Math.max(parseInt((await searchParams)?.days ?? "10", 10) || 10, 1), 30);
+  const auth = await requireOrg();
+  const retentionDays = retentionDaysForPlan(auth ? await planOfOrg(auth.orgId) : "free");
+  const windows = [...new Set([10, 30, 90, retentionDays])].filter((w) => w <= retentionDays).sort((a, b) => a - b);
+  const days = Math.min(Math.max(parseInt((await searchParams)?.days ?? "10", 10) || 10, 1), retentionDays);
   const cutoffMs = Date.now() - days * DAY;
   const inWindow = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => { const s = dealDate(d); if (!s) return true; const t = new Date(s).getTime(); return isNaN(t) || t >= cutoffMs; };
 
@@ -102,10 +105,10 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
         {/* date window — default last 10 days; dig back as far as history holds */}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Showing</span>
-          {WINDOWS.map((w) => (
+          {windows.map((w) => (
             <a key={w} href={`?days=${w}`} className={`chip ${days === w ? "bg-brand-gradient text-white" : "bg-surface-sunken text-ink-soft hover:text-brand"}`}>last {w} days</a>
           ))}
-          <span className="text-xs text-ink-faint">· history builds with every scan</span>
+          <span className="text-xs text-ink-faint">· your plan keeps {retentionDays} days of history</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="chip bg-brand-soft font-semibold text-brand-deep">{rivals.length} {rivals.length === 1 ? "rival" : "rivals"} with offers</span>
@@ -128,7 +131,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
         )}
         {!hasAnything && (allFlyerDeals.length > 0 || rivalDeals.deals.length > 0) ? (
           <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
-            <span className="font-semibold text-ink">Nothing in the last {days} days.</span> There&apos;s older history — <a href="?days=30" className="font-medium text-brand hover:underline">widen to 30 days</a>, or run a fresh scan above.
+            <span className="font-semibold text-ink">Nothing in the last {days} days.</span> There&apos;s older history — <a href={`?days=${retentionDays}`} className="font-medium text-brand hover:underline">widen to {retentionDays} days</a>, or run a fresh scan above.
           </p>
         ) : !hasAnything && (
           <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">

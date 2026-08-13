@@ -24,6 +24,14 @@ export const PLANS: Record<string, { label: string; priceUsd: number; monthlyCre
   pro: { label: "Pro", priceUsd: 349, monthlyCredits: 6000, businessCap: 100, cadence: "daily" },
 };
 
+/** How many days of competitor deal/price history each plan keeps — the deeper
+ *  the archive, the sharper the trend/price-change intelligence, so it's a plan
+ *  lever. Used to prune stored flyer history and bound the Offers date window. */
+export const PLAN_RETENTION_DAYS: Record<string, number> = { free: 14, starter: 30, growth: 90, pro: 180 };
+export function retentionDaysForPlan(plan?: string): number {
+  return PLAN_RETENTION_DAYS[plan ?? "free"] ?? 14;
+}
+
 /** Credits a run costs, from its real USD COGS. 0 for free runs. */
 export function creditsForCost(costUsd: number): number {
   if (!(costUsd > 0)) return 0;

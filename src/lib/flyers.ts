@@ -2,7 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyPlatform, apifyConfigured } from "@/lib/providers/apify/platforms";
-import { refundCredits } from "@/lib/credits";
+import { refundCredits, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
 
 /**
  * Flyer deal extraction — the grocery goldmine. Groceries/restaurants post their
@@ -217,12 +217,11 @@ async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDe
   return deals;
 }
 
-const RETENTION_DAYS = 30;   // how long history is kept
-const HISTORY_CAP = 300;     // safety bound on stored items
+const HISTORY_CAP = 500;     // safety bound on stored items
 /** Append-only, date-stamped merge: a deal keeps the `seenAt` from the FIRST time
  *  we caught it (so we can tell new vs ongoing), a changed price is a NEW dated
- *  entry, and items older than the retention window are pruned. */
-function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], now: string): FlyerDeal[] {
+ *  entry, and items older than the plan's retention window are pruned. */
+function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], now: string, retentionDays: number): FlyerDeal[] {
   const dkey = (d: FlyerDeal) => `${d.rival}|${d.item}|${d.price ?? ""}`.toLowerCase();
   const prevByKey = new Map(prev.map((d) => [dkey(d), d] as const));
   const freshKeys = new Set<string>();
@@ -233,7 +232,7 @@ function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], now: string): FlyerDe
     out.push({ ...d, seenAt: was?.seenAt ?? now, postedAt: d.postedAt ?? was?.postedAt, lastSeen: now } as FlyerDeal);
   }
   for (const d of prev) { if (!freshKeys.has(dkey(d))) out.push(d); }
-  const cutoff = Date.now() - RETENTION_DAYS * 86400000;
+  const cutoff = Date.now() - retentionDays * 86400000;
   return out
     .filter((d) => { const t = d.seenAt ? new Date(d.seenAt).getTime() : Date.now(); return t >= cutoff; })
     .sort((a, b) => new Date(b.seenAt ?? 0).getTime() - new Date(a.seenAt ?? 0).getTime())
@@ -288,10 +287,11 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
 
   // merge into rivals' vs owner's caches separately + advance the job
   const now = new Date().toISOString();
+  const retentionDays = retentionDaysForPlan(await planOfOrg(job.orgId));
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
-  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now);
-  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now);
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now, retentionDays);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now, retentionDays);
   const cursor = job.cursor + done;
   const flyersRead = job.flyersRead + ownFlyers.length + rivalFlyers.length;
   const finished = cursor >= job.total || done === 0;
@@ -328,8 +328,9 @@ export async function refreshFlyers(
   const [ownProfiles, rivalProfiles] = await Promise.all([resolveOwnProfiles(ws, svc), resolveFlyerProfiles(ws, svc, max)]);
   if (!rivalProfiles.length && !ownProfiles.length) return { activated: true, flyers: 0, deals: 0, costUsd: 0 };
 
-  const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const { data: gRow } = await svc.from("workspace").select("goals, organization_id").eq("id", ws.id).maybeSingle();
   const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
+  const retentionDays = retentionDaysForPlan(await planOfOrg((gRow as any)?.organization_id));
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const cursor = Number((goals as any).flyerCursor ?? 0) || 0;
@@ -350,8 +351,8 @@ export async function refreshFlyers(
   const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
   const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
   const now = new Date().toISOString();
-  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now);
-  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now);
+  const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now, retentionDays);
+  const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now, retentionDays);
   const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
