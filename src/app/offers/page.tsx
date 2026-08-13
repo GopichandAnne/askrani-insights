@@ -132,61 +132,48 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
 
       <MarketTabs />
 
-      {/* at-a-glance + actions */}
-      <section className="card">
-        {/* date window — default last 10 days; dig back as far as history holds */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Showing</span>
-          {windows.map((w) => (
-            <a key={w} href={`?days=${w}`} className={`chip ${days === w ? "bg-brand-gradient text-white" : "bg-surface-sunken text-ink-soft hover:text-brand"}`}>last {w} days</a>
-          ))}
-          <span className="text-xs text-ink-faint">· your plan keeps {retentionDays} days of history</span>
-        </div>
+      {/* ── HERO: the read + your move (the 3-second answer) ── */}
+      <section className="card relative overflow-hidden border-brand/15 bg-gradient-to-br from-brand-soft/40 to-transparent">
         <div className="flex flex-wrap items-center gap-2">
           <span className="chip bg-brand-soft font-semibold text-brand-deep">{rivals.length} {rivals.length === 1 ? "rival" : "rivals"} with offers</span>
           {itemsOnSale > 0 && <span className="chip bg-coral/15 font-semibold text-coral-dark">{itemsOnSale} items on sale</span>}
           {newCount > 0 && <span className="chip bg-trust-direct/15 font-semibold text-trust-direct">🆕 {newCount} new</span>}
-          {lowest[0] && <span className="chip bg-surface-sunken text-ink-soft">lowest spotted: <b className="ml-1 text-coral-dark">{lowest[0].d.price}</b> {lowest[0].d.item}</span>}
+          <span className="ml-auto text-xs text-ink-faint">last {days} days</span>
         </div>
-        {rivalDeals.summary && <p className="mt-3 max-w-3xl text-sm text-ink-soft">{rivalDeals.summary}</p>}
-        {canFlyer && (
-          <div className="mt-3 rounded-2xl border border-brand/20 bg-brand-soft/40 p-3">
-            <p className="mb-1.5 text-sm font-medium text-brand-deep">🧾 Rivals print their sale prices inside <b>flyer &amp; menu images</b> on Instagram, Facebook and Google Maps — Rani reads the prices right off them.</p>
-            <FlyerReadButton workspaceId={ws.id} cost={flyerCost} />
-          </div>
-        )}
+        {rivalDeals.summary && <p className="mt-3 max-w-3xl text-base font-medium leading-snug text-ink">{rivalDeals.summary}</p>}
         {rivalDeals.moves.length > 0 && (
-          <div className="mt-3 rounded-2xl bg-brand-soft/50 p-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-brand-deep">Your move</p>
-            <ul className="space-y-1 text-sm text-brand-deep">{rivalDeals.moves.map((m, i) => <li key={i}>✦ {m}</li>)}</ul>
+          <div className="mt-3 rounded-2xl bg-white/60 p-3.5 shadow-sm ring-1 ring-brand/10">
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-brand-deep">Your move</p>
+            <ul className="space-y-1.5 text-sm font-medium text-brand-deep">{rivalDeals.moves.map((m, i) => <li key={i} className="flex gap-1.5"><span className="text-brand">✦</span>{m}</li>)}</ul>
           </div>
         )}
         {!hasAnything && (allFlyerDeals.length > 0 || rivalDeals.deals.length > 0) ? (
           <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
-            <span className="font-semibold text-ink">Nothing in the last {days} days.</span> There&apos;s older history — <a href={`?days=${retentionDays}`} className="font-medium text-brand hover:underline">widen to {retentionDays} days</a>, or run a fresh scan above.
+            <span className="font-semibold text-ink">Nothing in the last {days} days.</span> There&apos;s older history — <a href={`?days=${retentionDays}`} className="font-medium text-brand hover:underline">widen to {retentionDays} days</a>, or run a fresh scan below.
           </p>
         ) : !hasAnything && (
           <p className="mt-3 rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">
-            <span className="font-semibold text-ink">No competitor offers detected yet.</span> Connect your competitors&apos; Instagram/Facebook pages under <span className="font-medium text-brand-deep">Channels</span> and use <b>Read their sale flyers</b> above — their sales show up here as they post them.
+            <span className="font-semibold text-ink">No competitor offers detected yet.</span> Connect your competitors&apos; Instagram/Facebook pages under <span className="font-medium text-brand-deep">Channels</span> and use <b>Read their sale flyers</b> below — their sales show up here as they post them.
           </p>
         )}
       </section>
 
-      {/* lowest prices — the aggressive prices to match */}
-      {lowest.length > 0 && (
-        <section className="card">
-          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-coral/15 text-coral-dark">🔻</span>Lowest prices your rivals are advertising</h2>
-          <p className="mb-3 text-xs text-ink-faint">The sharpest prices Rani found on their flyers — the ones to match or beat.</p>
-          <div className="grid gap-1.5 sm:grid-cols-2">
-            {lowest.map((x, i) => (
-              <div key={i} className="flex items-center justify-between gap-2 rounded-xl bg-white/55 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate text-ink">{x.d.item}<span className="ml-1 text-xs text-ink-faint">· {x.d.rival}</span></span>
-                <span className="shrink-0 font-bold text-coral-dark">{x.d.price}</span>
-              </div>
-            ))}
+      {/* ── toolbar: time window + refresh action (utility, recessed) ── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Showing</span>
+          {windows.map((w) => (
+            <a key={w} href={`?days=${w}`} className={`chip ${days === w ? "bg-brand-gradient text-white" : "bg-surface-sunken text-ink-soft hover:text-brand"}`}>last {w} days</a>
+          ))}
+          <span className="text-xs text-ink-faint">· plan keeps {retentionDays}d</span>
+        </div>
+        {canFlyer && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="hidden text-xs text-ink-faint sm:inline">🧾 Rani reads sale prices right off their flyer &amp; menu images</span>
+            <FlyerReadButton workspaceId={ws.id} cost={flyerCost} />
           </div>
-        </section>
-      )}
+        )}
+      </div>
 
       {/* You vs them — intelligent price-gap findings (only what matters) */}
       {priceGaps.gaps.length > 0 && (() => {
@@ -220,106 +207,6 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
           </section>
         );
       })()}
-
-      {/* one merged card per rival */}
-      {rivals.length > 0 && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {rivals.map((r, gi) => {
-            const link = r.priced.find((d) => d.postUrl || d.imageUrl)?.postUrl || r.priced.find((d) => d.imageUrl)?.imageUrl || r.promos.find((d) => d.url)?.url;
-            return (
-              <div key={gi} className="card">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold">{r.rival}</span>
-                  <span className="flex flex-wrap gap-1">{[...r.sources].map((s) => <span key={s} className="chip bg-surface-sunken text-ink-faint">{sourceLabel(s)}</span>)}</span>
-                </div>
-                {cadenceByRival.get(r.rival) && (
-                  <p className="mt-1 text-xs font-medium text-brand-deep">🗓️ Runs deals {cadenceByRival.get(r.rival)}</p>
-                )}
-                {r.promos.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}{agoLabel(d.postedAt) ? <span className="ml-1 opacity-70">· {agoLabel(d.postedAt)}</span> : null}</span>)}
-                  </div>
-                )}
-                {r.priced.length > 0 && (
-                  <ul className="mt-3 divide-y divide-line/50">
-                    {r.priced.slice(0, 8).map((d, i) => (
-                      <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                        <span className="flex min-w-0 items-center gap-1.5 truncate text-ink">
-                          {isNew(d) && <span className="chip shrink-0 bg-trust-direct/15 px-1.5 py-0 text-[10px] font-bold text-trust-direct">NEW</span>}
-                          {isDropped(d) && <span className="chip shrink-0 bg-coral/15 px-1.5 py-0 text-[10px] font-bold text-coral-dark">⬇ DROP</span>}
-                          <span className="truncate">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {agoLabel(dealDate(d)) && <span className="text-[11px] text-ink-faint">{agoLabel(dealDate(d))}</span>}
-                          {d.price && <span className="font-semibold text-coral-dark">{d.price}</span>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <div className="mt-2 flex items-center justify-between text-xs">
-                  <span className="text-ink-faint">{r.priced.length > 8 ? `+${r.priced.length - 8} more items` : `${r.priced.length + r.promos.length} offers`}</span>
-                  {link && <a href={link} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">see source ↗</a>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* unified competitor signals — followers (per channel) + reviews + content performance */}
-      {social.rows.some((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews) && (
-        <section className="card">
-          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📡</span>Competitor signals over time</h2>
-          <p className="mb-3 text-xs text-ink-faint">Followers per channel, reviews and content performance across the last {days} days — every signal on one timeline, so you see who&apos;s gaining ground.</p>
-          <div className="grid gap-3 md:grid-cols-2">
-            {social.rows.filter((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews).slice(0, 8).map((r, i) => (
-              <div key={i} className="rounded-2xl bg-white/55 p-3.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold">{r.rival}</span>
-                  {r.trendPct != null && <span className={`chip ${r.trendPct >= 0 ? "bg-trust-direct/15 text-trust-direct" : "bg-coral/15 text-coral-dark"}`}>{r.trendPct >= 0 ? "▲" : "▼"} {Math.abs(r.trendPct)}% eng</span>}
-                </div>
-                {r.channels.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {r.channels.map((c) => (
-                      <span key={c.channel} className="chip bg-surface-sunken text-ink-soft">👥 {chanLabel(c.channel)} {c.followers.toLocaleString()}{c.delta ? <b className={c.delta >= 0 ? " text-trust-direct" : " text-coral-dark"}> {c.delta >= 0 ? "+" : ""}{c.delta.toLocaleString()}</b> : null}</span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
-                  {r.reviews && r.reviews.count > 0 && <span>⭐ {r.reviews.rating ?? "—"} · {r.reviews.count.toLocaleString()} reviews{r.reviews.countDelta ? <b className="text-trust-direct"> +{r.reviews.countDelta}</b> : null}</span>}
-                  {r.posts > 0 && <span>📝 {r.posts} posts</span>}
-                  {r.topFormat && <span>🎬 {r.topFormat === "video" ? "reels/video work best" : "images work best"}</span>}
-                </div>
-                {r.topPost && (
-                  <div className="mt-2 rounded-xl bg-surface-sunken/60 p-2 text-xs">
-                    <span className="font-semibold text-brand-deep">Top post</span> <span className="text-ink-soft">{r.topPost.caption || "(no caption)"}</span>
-                    {r.topPost.url && <a href={r.topPost.url} target="_blank" rel="noreferrer" className="ml-1 font-medium text-brand hover:underline">↗</a>}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[11px] text-ink-faint">Follower &amp; review history builds each scan — deltas appear once there are two dated points.</p>
-        </section>
-      )}
-
-      {/* your offers */}
-      <section className="card">
-        <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🟢</span>Your current offers</h2>
-        {myDeals.deals.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">Rani didn&apos;t find an active offer you&apos;re promoting. {hasAnything ? "Your rivals have deals live above — post one to keep pace." : "Post a sale on your social/Google and Rani will track it here."}</p>
-        ) : (
-          <ul className="divide-y divide-line/50">
-            {myDeals.deals.slice(0, 12).map((d, i) => (
-              <li key={i} className="flex items-start justify-between gap-2 py-1.5 text-sm">
-                <span className="min-w-0 text-ink">{d.deal}{d.when && <span className="text-ink-faint"> · {d.when}</span>}<span className="ml-1 text-xs text-ink-faint">on {sourceLabel(d.source)}</span></span>
-                {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-medium text-brand hover:underline">see ↗</a>}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
       {/* menu / service price comparison — item-level, for bounded-menu verticals */}
       {(menuCompare.overview.length > 0 || menuCompare.matches.length > 0) && (() => {
@@ -368,13 +255,139 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
         );
       })()}
 
-      {/* price positioning (secondary) */}
-      {priceRows.length > 0 && (
+      {/* lowest prices — a quick hit-list of the sharpest prices to match */}
+      {lowest.length > 0 && (
         <section className="card">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">💸</span>Price positioning</h2>
-            <span className="text-xs text-ink-faint">from catalog prices</span>
+          <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-coral/15 text-coral-dark">🔻</span>Sharpest prices to match</h2>
+          <p className="mb-3 text-xs text-ink-faint">The lowest prices Rani spotted on rivals&apos; flyers — the ones to match or beat.</p>
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {lowest.map((x, i) => (
+              <div key={i} className="flex items-center justify-between gap-2 rounded-xl bg-white/55 px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-ink">{x.d.item}<span className="ml-1 text-xs text-ink-faint">· {x.d.rival}</span></span>
+                <span className="shrink-0 font-bold text-coral-dark">{x.d.price}</span>
+              </div>
+            ))}
           </div>
+        </section>
+      )}
+
+      {/* one merged card per rival — what each rival is actually running */}
+      {rivals.length > 0 && (
+        <div>
+          <h2 className="mb-2 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🏪</span>What each rival is running</h2>
+          <div className="grid gap-4 lg:grid-cols-2">
+          {rivals.map((r, gi) => {
+            const link = r.priced.find((d) => d.postUrl || d.imageUrl)?.postUrl || r.priced.find((d) => d.imageUrl)?.imageUrl || r.promos.find((d) => d.url)?.url;
+            return (
+              <div key={gi} className="card">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{r.rival}</span>
+                  <span className="flex flex-wrap gap-1">{[...r.sources].map((s) => <span key={s} className="chip bg-surface-sunken text-ink-faint">{sourceLabel(s)}</span>)}</span>
+                </div>
+                {cadenceByRival.get(r.rival) && (
+                  <p className="mt-1 text-xs font-medium text-brand-deep">🗓️ Runs deals {cadenceByRival.get(r.rival)}</p>
+                )}
+                {r.promos.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}{agoLabel(d.postedAt) ? <span className="ml-1 opacity-70">· {agoLabel(d.postedAt)}</span> : null}</span>)}
+                  </div>
+                )}
+                {r.priced.length > 0 && (
+                  <ul className="mt-3 divide-y divide-line/50">
+                    {r.priced.slice(0, 8).map((d, i) => (
+                      <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                        <span className="flex min-w-0 items-center gap-1.5 truncate text-ink">
+                          {isNew(d) && <span className="chip shrink-0 bg-trust-direct/15 px-1.5 py-0 text-[10px] font-bold text-trust-direct">NEW</span>}
+                          {isDropped(d) && <span className="chip shrink-0 bg-coral/15 px-1.5 py-0 text-[10px] font-bold text-coral-dark">⬇ DROP</span>}
+                          <span className="truncate">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          {agoLabel(dealDate(d)) && <span className="text-[11px] text-ink-faint">{agoLabel(dealDate(d))}</span>}
+                          {d.price && <span className="font-semibold text-coral-dark">{d.price}</span>}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-2 flex items-center justify-between text-xs">
+                  <span className="text-ink-faint">{r.priced.length > 8 ? `+${r.priced.length - 8} more items` : `${r.priced.length + r.promos.length} offers`}</span>
+                  {link && <a href={link} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">see source ↗</a>}
+                </div>
+              </div>
+            );
+          })}
+          </div>
+        </div>
+      )}
+
+      {/* your offers */}
+      <section className="card">
+        <h2 className="mb-1 flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🟢</span>Your current offers</h2>
+        {myDeals.deals.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-ink-soft">Rani didn&apos;t find an active offer you&apos;re promoting. {hasAnything ? "Your rivals have deals live above — post one to keep pace." : "Post a sale on your social/Google and Rani will track it here."}</p>
+        ) : (
+          <ul className="divide-y divide-line/50">
+            {myDeals.deals.slice(0, 12).map((d, i) => (
+              <li key={i} className="flex items-start justify-between gap-2 py-1.5 text-sm">
+                <span className="min-w-0 text-ink">{d.deal}{d.when && <span className="text-ink-faint"> · {d.when}</span>}<span className="ml-1 text-xs text-ink-faint">on {sourceLabel(d.source)}</span></span>
+                {d.url && <a href={d.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs font-medium text-brand hover:underline">see ↗</a>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ── secondary: how rivals are marketing (not an offer signal) — the fuller view lives on Competitors ── */}
+      {social.rows.some((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews) && (
+        <details className="card group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-surface-sunken text-ink-soft">📡</span>
+            How rivals are marketing
+            <span className="ml-1 text-xs font-normal text-ink-faint">followers · reviews · content — beyond offers</span>
+            <span className="ml-auto text-xs font-normal text-ink-faint transition-transform group-open:rotate-180">▾</span>
+          </summary>
+          <p className="mb-3 mt-2 text-xs text-ink-faint">A quick read on who&apos;s gaining ground over the last {days} days. The full per-rival view is on <a href="/competitors" className="font-medium text-brand hover:underline">Competitors</a>.</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            {social.rows.filter((r) => r.engagement > 0 || r.channels.length > 0 || r.reviews).slice(0, 8).map((r, i) => (
+              <div key={i} className="rounded-2xl bg-white/55 p-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold">{r.rival}</span>
+                  {r.trendPct != null && <span className={`chip ${r.trendPct >= 0 ? "bg-trust-direct/15 text-trust-direct" : "bg-coral/15 text-coral-dark"}`}>{r.trendPct >= 0 ? "▲" : "▼"} {Math.abs(r.trendPct)}% engagement</span>}
+                </div>
+                {r.channels.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {r.channels.map((c) => (
+                      <span key={c.channel} className="chip bg-surface-sunken text-ink-soft">👥 {chanLabel(c.channel)} {c.followers.toLocaleString()}{c.delta ? <b className={c.delta >= 0 ? " text-trust-direct" : " text-coral-dark"}> {c.delta >= 0 ? "+" : ""}{c.delta.toLocaleString()}</b> : null}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
+                  {r.reviews && r.reviews.count > 0 && <span>⭐ {r.reviews.rating ?? "—"} · {r.reviews.count.toLocaleString()} reviews{r.reviews.countDelta ? <b className="text-trust-direct"> +{r.reviews.countDelta}</b> : null}</span>}
+                  {r.posts > 0 && <span>📝 {r.posts} posts</span>}
+                  {r.topFormat && <span>🎬 {r.topFormat === "video" ? "reels/video work best" : "images work best"}</span>}
+                </div>
+                {r.topPost && (
+                  <div className="mt-2 rounded-xl bg-surface-sunken/60 p-2 text-xs">
+                    <span className="font-semibold text-brand-deep">Top post</span> <span className="text-ink-soft">{r.topPost.caption || "(no caption)"}</span>
+                    {r.topPost.url && <a href={r.topPost.url} target="_blank" rel="noreferrer" className="ml-1 font-medium text-brand hover:underline">↗</a>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-ink-faint">Follower &amp; review history builds each scan — deltas appear once there are two dated points.</p>
+        </details>
+      )}
+
+      {/* raw numbers — collapsed by default, for the owner who wants the underlying catalog spread */}
+      {priceRows.length > 0 && (
+        <details className="card group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
+            <span className="grid h-7 w-7 place-items-center rounded-lg bg-surface-sunken text-ink-soft">💸</span>
+            Price positioning
+            <span className="ml-1 text-xs font-normal text-ink-faint">the raw catalog spread</span>
+            <span className="ml-auto text-xs font-normal text-ink-faint transition-transform group-open:rotate-180">▾</span>
+          </summary>
           <table className="mt-3 w-full text-sm">
             <thead><tr className="border-b border-line text-left text-xs text-ink-faint"><th className="py-1.5 font-medium">Business</th><th className="py-1.5 text-right font-medium">Avg</th><th className="py-1.5 text-right font-medium">Range</th><th className="py-1.5 text-right font-medium">Items</th></tr></thead>
             <tbody>
@@ -388,7 +401,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
               ))}
             </tbody>
           </table>
-        </section>
+        </details>
       )}
     </div>
   );
