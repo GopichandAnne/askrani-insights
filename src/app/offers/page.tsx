@@ -18,6 +18,26 @@ const parseUsd = (s?: string) => { const m = String(s ?? "").match(/\$\s*(\d+(?:
 const DAY = 86400000;
 const dealDate = (d: { postedAt?: string; seenAt?: string; lastSeen?: string }) => d.postedAt || d.seenAt || d.lastSeen || null;
 const agoLabel = (s?: string | null) => { if (!s) return ""; const t = new Date(s).getTime(); if (isNaN(t)) return ""; const d = Math.floor((Date.now() - t) / DAY); return d <= 0 ? "today" : d === 1 ? "1d ago" : `${d}d ago`; };
+const WD = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** Heuristic cadence from a competitor's dated deal-days: a favoured weekday
+ *  and/or a rough interval. Needs ≥4 deal-days spanning ≥10 days to claim a pattern. */
+function detectCadence(times: number[]): string | null {
+  const days = [...new Set(times.filter((t) => !isNaN(t)).map((t) => Math.floor(t / DAY)))].sort((a, b) => a - b);
+  if (days.length < 4) return null;
+  const span = days[days.length - 1] - days[0];
+  if (span < 10) return null;
+  const dow = new Array(7).fill(0);
+  for (const d of days) dow[new Date(d * DAY).getUTCDay()]++;
+  const top = dow.indexOf(Math.max(...dow));
+  const parts: string[] = [];
+  if (dow[top] >= 3 && dow[top] / days.length >= 0.4) parts.push(`most ${WD[top]}s`);
+  const gaps: number[] = []; for (let i = 1; i < days.length; i++) gaps.push(days[i] - days[i - 1]);
+  const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  if (avgGap <= 9) parts.push("~weekly"); else if (avgGap <= 16) parts.push("~every 2 weeks");
+  const perWeek = days.length / (span / 7);
+  if (!parts.length && perWeek >= 2) parts.push(`~${Math.round(perWeek)} deals/week`);
+  return parts.length ? parts.join(" · ") : null;
+}
 
 interface RivalBundle { rival: string; promos: DealItem[]; priced: FlyerDeal[]; sources: Set<string> }
 
@@ -46,6 +66,14 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   for (const [k, arr] of priceHist) { if (arr.length < 2) continue; arr.sort((a, b) => a.seen - b.seen); if (arr[arr.length - 1].price < Math.min(...arr.slice(0, -1).map((x) => x.price))) dropped.add(k); }
   const isDropped = (d: FlyerDeal) => dropped.has(`${d.rival}|${d.item}`.toLowerCase());
   const isNew = (d: { seenAt?: string }) => !!d.seenAt && Date.now() - new Date(d.seenAt).getTime() < 2 * DAY;
+
+  // cadence — computed from FULL dated history (not the window), per competitor
+  const datesByRival = new Map<string, number[]>();
+  const addDate = (rival: string, s?: string) => { if (!s) return; const t = new Date(s).getTime(); if (!isNaN(t)) (datesByRival.get(rival) ?? datesByRival.set(rival, []).get(rival)!).push(t); };
+  for (const d of rivalDeals.deals) addDate(d.rival, d.postedAt);
+  for (const d of allFlyerDeals) addDate(d.rival, d.postedAt ?? d.seenAt);
+  const cadenceByRival = new Map<string, string>();
+  for (const [rival, times] of datesByRival) { const c = detectCadence(times); if (c) cadenceByRival.set(rival, c); }
 
   // apply the date window
   const flyerDeals = allFlyerDeals.filter(inWindow);
@@ -200,6 +228,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
                   <span className="font-semibold">{r.rival}</span>
                   <span className="flex flex-wrap gap-1">{[...r.sources].map((s) => <span key={s} className="chip bg-surface-sunken text-ink-faint">{sourceLabel(s)}</span>)}</span>
                 </div>
+                {cadenceByRival.get(r.rival) && (
+                  <p className="mt-1 text-xs font-medium text-brand-deep">🗓️ Runs deals {cadenceByRival.get(r.rival)}</p>
+                )}
                 {r.promos.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}{agoLabel(d.postedAt) ? <span className="ml-1 opacity-70">· {agoLabel(d.postedAt)}</span> : null}</span>)}
