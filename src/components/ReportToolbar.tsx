@@ -10,7 +10,6 @@ export function ReportToolbar() {
     { type: "offers", label: "Offers CSV" },
     { type: "reputation", label: "Reputation CSV" },
     { type: "events", label: "Events CSV" },
-    { type: "costs", label: "Costs CSV" },
   ];
   return (
     <div className="no-print flex flex-wrap items-center gap-2">

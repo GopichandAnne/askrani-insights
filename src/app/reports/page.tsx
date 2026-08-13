@@ -2,7 +2,6 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ReportToolbar } from "@/components/ReportToolbar";
 import { buildWorkspaceReport } from "@/lib/report";
-import { labelForProvider } from "@/lib/costs";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Report — Ask Rani Insights" };
@@ -60,54 +59,6 @@ export default async function ReportsPage() {
           </div>
         ))}
       </section>
-
-      {/* cost */}
-      <Card
-        title="What monitoring costs"
-        sub={`Real per-run cost recorded across every source over the last ${r.cost.days} days.`}
-      >
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg bg-surface-sunken p-3">
-            <div className="text-xl font-semibold">{usd(r.cost.projectedMonthlyUsd)}</div>
-            <div className="text-xs text-ink-faint">projected / month</div>
-          </div>
-          <div className="rounded-lg bg-surface-sunken p-3">
-            <div className="text-xl font-semibold">{usd(r.cost.perBusinessMonthlyUsd)}</div>
-            <div className="text-xs text-ink-faint">per business / month</div>
-          </div>
-          <div className="rounded-lg bg-surface-sunken p-3">
-            <div className="text-xl font-semibold">{usd(r.cost.totalUsd)}</div>
-            <div className="text-xs text-ink-faint">spent in window</div>
-          </div>
-        </div>
-        {r.cost.byProvider.length > 0 && (
-          <table className="mt-4 w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs text-ink-faint">
-                <th className="py-1.5 font-medium">Source</th>
-                <th className="py-1.5 text-right font-medium">Runs</th>
-                <th className="py-1.5 text-right font-medium">Items</th>
-                <th className="py-1.5 text-right font-medium">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.cost.byProvider.map((p) => (
-                <tr key={p.provider} className="border-b border-line/60">
-                  <td className="py-1.5">{labelForProvider(p.provider)}</td>
-                  <td className="py-1.5 text-right tabular-nums text-ink-soft">{p.runs}</td>
-                  <td className="py-1.5 text-right tabular-nums text-ink-soft">{p.items}</td>
-                  <td className="py-1.5 text-right tabular-nums font-medium">{usd(p.costUsd)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {r.cost.budgetUsedFraction != null && (
-          <p className="mt-3 text-xs text-ink-faint">
-            Projected spend is {Math.round(r.cost.budgetUsedFraction * 100)}% of this workspace&apos;s monthly budget.
-          </p>
-        )}
-      </Card>
 
       {/* pricing */}
       <Card title="Pricing comparison" sub="Distinct priced items per business — you vs. competitors.">

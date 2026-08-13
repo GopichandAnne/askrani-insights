@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getUser } from "@/lib/auth";
 import { requireOrg } from "@/lib/api";
-import { creditsSummary, CREDIT_COGS_CAP_USD, PLANS, getStripeCustomer } from "@/lib/credits";
+import { creditsSummary, PLANS, getStripeCustomer } from "@/lib/credits";
 import { isStripeConfigured, CATALOG } from "@/lib/stripe";
 import { BillingActions, type BuyItem } from "@/components/BillingActions";
 
@@ -105,14 +105,14 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               <li key={i} className="flex items-center justify-between gap-2 py-2">
                 <span className="min-w-0">
                   <span className="font-medium">{REASON_LABEL[e.reason] ?? e.reason}</span>
-                  <span className="ml-2 text-xs text-ink-faint">{new Date(e.ts).toLocaleString()}{e.costUsd ? ` · $${e.costUsd.toFixed(3)} cost` : ""}</span>
+                  <span className="ml-2 text-xs text-ink-faint">{new Date(e.ts).toLocaleString()}</span>
                 </span>
                 <span className={`shrink-0 font-semibold tabular-nums ${e.delta >= 0 ? "text-trust-direct" : "text-ink"}`}>{e.delta >= 0 ? "+" : ""}{e.delta}</span>
               </li>
             ))}
           </ul>
         )}
-        <p className="mt-3 text-[11px] text-ink-faint">1 credit covers up to ${CREDIT_COGS_CAP_USD.toFixed(2)} of data-collection cost. Exploring areas is free and never uses credits.</p>
+        <p className="mt-3 text-[11px] text-ink-faint">Deeper reads and flyer scans spend credits; exploring areas is free and never uses credits.</p>
       </section>
     </div>
   );

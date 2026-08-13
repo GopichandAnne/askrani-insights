@@ -1,6 +1,5 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { buildWorkspaceReport } from "@/lib/report";
-import { labelForProvider } from "@/lib/costs";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +12,9 @@ function toCsv(rows: (string | number | null)[][]): string {
   return rows.map((r) => r.map(cell).join(",")).join("\r\n");
 }
 
-const TYPES = new Set(["pricing", "offers", "reputation", "events", "costs"]);
+const TYPES = new Set(["pricing", "offers", "reputation", "events"]);
 
-/** GET /api/reports/export?type=pricing|offers|reputation|events|costs → CSV download. */
+/** GET /api/reports/export?type=pricing|offers|reputation|events → CSV download. */
 export async function GET(req: Request) {
   const state = await activeWorkspace();
   if (state.status !== "ok") {
@@ -48,20 +47,10 @@ export async function GET(req: Request) {
       ];
       break;
     case "events":
+    default:
       rows = [
         ["Date", "Business", "Type", "Significance", "Summary"],
         ...r.events.map((e) => [e.at ?? "", e.business, e.type, e.significance, e.summary]),
-      ];
-      break;
-    case "costs":
-    default:
-      rows = [
-        ["Source", "Runs", "Items", "Cost USD"],
-        ...r.cost.byProvider.map((p) => [labelForProvider(p.provider), p.runs, p.items, p.costUsd]),
-        [],
-        ["Total (window)", "", "", r.cost.totalUsd],
-        ["Projected / month", "", "", r.cost.projectedMonthlyUsd],
-        ["Per business / month", "", "", r.cost.perBusinessMonthlyUsd],
       ];
       break;
   }
