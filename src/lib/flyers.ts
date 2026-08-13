@@ -176,7 +176,7 @@ async function scrapeProfileFlyers(ws: WorkspaceRow, svc: Svc, t: FlyerProfile, 
     }
     return { flyers, costUsd: Number((0.007 * urls.length).toFixed(4)) };
   }
-  const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 45000 });
+  const { items, costUsd } = await collectApifyPlatform(t.platform, t.url, { maxMs: 70000 });
   const flyers: Flyer[] = [];
   let n = 0;
   for (const it of items) {
