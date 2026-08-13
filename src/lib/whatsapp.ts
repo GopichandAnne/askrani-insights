@@ -27,6 +27,22 @@ export function whatsAppRecipient(goals: Record<string, any>): string | null {
   return digits.length >= 8 ? digits : null;
 }
 
+/** Send a plain-text WhatsApp reply. Allowed free-form within the 24h window the
+ *  owner opens by messaging us — so no template needed for Q&A answers. */
+export async function sendWhatsAppText(to: string, body: string): Promise<boolean> {
+  if (!whatsappConfigured()) return false;
+  try {
+    const r = await fetch(`${GRAPH()}/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", to, type: "text", text: { body: body.slice(0, 4000), preview_url: false } }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Upload the PDF to the Cloud API media endpoint → media id (kept private, not a URL). */
 async function uploadMedia(pdf: Buffer, filename: string): Promise<string | null> {
   try {

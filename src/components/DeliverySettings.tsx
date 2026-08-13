@@ -52,6 +52,9 @@ export function DeliverySettings({
         Where your report is delivered
       </h2>
       <p className="mt-1 text-xs text-ink-faint">We send your report on your plan&apos;s cadence, and whenever you send one on demand.</p>
+      {whatsappReady && (
+        <p className="mt-1 text-xs text-brand-deep">💬 You can also just message that WhatsApp number to ask about your market — deals, prices, your rating vs rivals — answered from your own data.</p>
+      )}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="text-sm">
