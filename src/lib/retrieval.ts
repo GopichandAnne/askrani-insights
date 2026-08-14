@@ -62,14 +62,21 @@ export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, questi
     if (lines.length) blocks.push(`### Matching menu/price records\n${lines.join("\n")}`);
   }
 
-  // 2) COMPETITOR POSTS — keyword-matched if we have terms, else most recent
+  // 2) COMPETITOR POSTS — keyword-matched first; fall back to most recent when the
+  //    keywords don't literally appear (e.g. "what are competitors posting?")
   const postCols = "text, platform, url, observed_at, business_id";
-  const postBase = svc.from("content_item").select(postCols).in("business_id", compIds.length ? compIds : allIds);
-  const postsRes = kw.length
-    ? await postBase.or(kw.map((k) => `text.ilike.%${k}%`).join(",")).order("observed_at", { ascending: false }).limit(12)
-    : await postBase.in("platform", ["instagram", "facebook", "tiktok", "google"]).order("observed_at", { ascending: false }).limit(10);
+  const pool = compIds.length ? compIds : allIds;
+  let posts: any[] = [];
+  if (kw.length) {
+    const r = await svc.from("content_item").select(postCols).in("business_id", pool).or(kw.map((k) => `text.ilike.%${k}%`).join(",")).order("observed_at", { ascending: false }).limit(12);
+    posts = r.data ?? [];
+  }
+  if (!posts.length) {
+    const r = await svc.from("content_item").select(postCols).in("business_id", pool).in("platform", ["instagram", "facebook", "tiktok", "google"]).order("observed_at", { ascending: false }).limit(10);
+    posts = r.data ?? [];
+  }
   const plines: string[] = [];
-  for (const p of (postsRes.data ?? []) as any[]) {
+  for (const p of posts as any[]) {
     const t = String(p.text ?? "").replace(/\s+/g, " ").trim();
     if (t.length < 8) continue;
     const id = add({ label: `"${t.slice(0, 60)}${t.length > 60 ? "…" : ""}"`, business: nameOf(p.business_id), platform: p.platform, url: p.url ?? undefined });
