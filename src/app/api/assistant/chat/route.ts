@@ -27,11 +27,11 @@ export async function POST(req: Request) {
     : [];
 
   const supabase = await createClient();
-  const { answer, grounded } = await answerFromData(
+  const { answer, grounded, sources } = await answerFromData(
     { id: ws.id, name: ws.name, vertical: ws.vertical, target_business_id: ws.target_business_id },
     ((ws as { goals?: Record<string, unknown> }).goals as Record<string, any>) ?? {},
     message, history, supabase,
   );
 
-  return NextResponse.json({ answer, grounded });
+  return NextResponse.json({ answer, grounded, sources: sources ?? [] });
 }

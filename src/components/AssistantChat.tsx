@@ -9,7 +9,12 @@ import { useEffect, useRef, useState } from "react";
  * occasions, and can be full "what should I run?" moves.
  */
 
-interface Msg { role: "user" | "assistant"; text: string; grounded?: boolean }
+interface Source { label: string; business?: string; platform?: string; url?: string }
+interface Msg { role: "user" | "assistant"; text: string; grounded?: boolean; sources?: Source[] }
+
+const SOURCE_EMOJI: Record<string, string> = {
+  price: "💲", change: "📈", website: "🌐", google: "🔵", instagram: "📸", facebook: "👍", tiktok: "🎵", youtube: "▶️", doordash: "🛵", ubereats: "🛵",
+};
 
 const STARTERS = [
   "What should I run this month?",
@@ -42,7 +47,7 @@ export function AssistantChat({ businessName }: { businessName: string }) {
       });
       const d = await r.json().catch(() => ({}));
       const answer = r.ok && typeof d.answer === "string" ? d.answer : "I couldn't reach the assistant just now — please try again.";
-      setMsgs((m) => [...m, { role: "assistant", text: answer, grounded: !!d.grounded }]);
+      setMsgs((m) => [...m, { role: "assistant", text: answer, grounded: !!d.grounded, sources: Array.isArray(d.sources) ? d.sources : [] }]);
     } catch {
       setMsgs((m) => [...m, { role: "assistant", text: "I couldn't reach the assistant just now — please try again." }]);
     } finally {
@@ -75,6 +80,19 @@ export function AssistantChat({ businessName }: { businessName: string }) {
             {m.role === "assistant" && <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand-gradient text-xs text-white shadow-brand">✦</span>}
             <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm ${m.role === "user" ? "bg-brand-gradient text-white" : "bg-white/80 text-ink ring-1 ring-line/60"}`}>
               <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+              {m.role === "assistant" && m.sources && m.sources.length > 0 && (
+                <div className="mt-2 border-t border-line/50 pt-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">Sources</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {m.sources.map((s, j) => {
+                      const inner = <><span aria-hidden>{SOURCE_EMOJI[s.platform ?? ""] ?? "•"}</span> <span className="font-medium">{s.label}</span>{s.business ? <span className="text-ink-faint"> · {s.business}</span> : null}</>;
+                      return s.url
+                        ? <a key={j} href={s.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-surface-sunken px-2 py-1 text-[11px] text-ink-soft transition-colors hover:text-brand">{inner}</a>
+                        : <span key={j} className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-surface-sunken px-2 py-1 text-[11px] text-ink-soft">{inner}</span>;
+                    })}
+                  </div>
+                </div>
+              )}
               {m.role === "assistant" && m.grounded === false && (
                 <p className="mt-1 text-[11px] text-ink-faint">Not in your data yet — try a fresh scan.</p>
               )}

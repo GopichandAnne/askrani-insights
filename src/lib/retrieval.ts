@@ -16,20 +16,29 @@ const keywords = (q: string): string[] =>
 
 interface WsRef { id: string; target_business_id?: string | null }
 
-/** Retrieve a compact, ranked block of raw records relevant to the question. */
-export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, question: string): Promise<string> {
+/** A citable raw record the answer can reference (id like "L3"). */
+export interface RetrievedSource { id: string; label: string; business: string; platform?: string; url?: string }
+export interface LiveContext { text: string; sources: RetrievedSource[] }
+
+/** Retrieve a compact, ranked block of raw records relevant to the question, each
+ *  labelled [Ln] so the answer can cite the specific ones it used. */
+export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, question: string): Promise<LiveContext> {
   const kw = keywords(question);
+  const empty: LiveContext = { text: "", sources: [] };
 
   const { data: edges } = await svc.from("competitor_edge").select("competitor_id").eq("workspace_id", ws.id);
   const compIds = (edges ?? []).map((e: any) => e.competitor_id).filter(Boolean) as string[];
   const allIds = [ws.target_business_id, ...compIds].filter(Boolean) as string[];
-  if (!allIds.length) return "";
+  if (!allIds.length) return empty;
 
   const { data: bizRows } = await svc.from("business").select("id, canonical_name").in("id", allIds);
   const nameById = new Map((bizRows ?? []).map((b: any) => [b.id, b.canonical_name as string]));
   const nameOf = (id: string) => (id === ws.target_business_id ? "You" : nameById.get(id) ?? "A rival");
 
   const blocks: string[] = [];
+  const sources: RetrievedSource[] = [];
+  let n = 0;
+  const add = (s: Omit<RetrievedSource, "id">) => { const id = `L${++n}`; sources.push({ id, ...s }); return id; };
 
   // 1) OFFERS — precise menu/price rows matching the question keywords
   if (kw.length) {
@@ -45,14 +54,16 @@ export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, questi
       const key = `${o.business_id}|${label.toLowerCase()}`;
       if (seen.has(key)) continue; seen.add(key);
       const amt = Number(o.pricing?.amount);
-      lines.push(`- ${nameOf(o.business_id)}: ${label}${amt > 0 ? ` — $${amt}` : ""}`);
+      const shown = `${label}${amt > 0 ? ` — $${amt}` : ""}`;
+      const id = add({ label: shown, business: nameOf(o.business_id), platform: "price" });
+      lines.push(`[${id}] ${nameOf(o.business_id)}: ${shown}`);
       if (lines.length >= 16) break;
     }
     if (lines.length) blocks.push(`### Matching menu/price records\n${lines.join("\n")}`);
   }
 
   // 2) COMPETITOR POSTS — keyword-matched if we have terms, else most recent
-  const postCols = "text, platform, observed_at, business_id";
+  const postCols = "text, platform, url, observed_at, business_id";
   const postBase = svc.from("content_item").select(postCols).in("business_id", compIds.length ? compIds : allIds);
   const postsRes = kw.length
     ? await postBase.or(kw.map((k) => `text.ilike.%${k}%`).join(",")).order("observed_at", { ascending: false }).limit(12)
@@ -61,7 +72,8 @@ export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, questi
   for (const p of (postsRes.data ?? []) as any[]) {
     const t = String(p.text ?? "").replace(/\s+/g, " ").trim();
     if (t.length < 8) continue;
-    plines.push(`- ${nameOf(p.business_id)} (${p.platform}): "${t.slice(0, 150)}"`);
+    const id = add({ label: `"${t.slice(0, 60)}${t.length > 60 ? "…" : ""}"`, business: nameOf(p.business_id), platform: p.platform, url: p.url ?? undefined });
+    plines.push(`[${id}] ${nameOf(p.business_id)} (${p.platform}): "${t.slice(0, 150)}"`);
     if (plines.length >= 8) break;
   }
   if (plines.length) blocks.push(`### Recent competitor posts\n${plines.join("\n")}`);
@@ -74,10 +86,12 @@ export async function retrieveLiveContext(svc: SupabaseClient, ws: WsRef, questi
   for (const e of (events ?? []) as any[]) {
     const sum = String(e.summary ?? "").replace(/\s+/g, " ").trim();
     if (!sum) continue;
-    elines.push(`- ${e.business_id ? nameOf(e.business_id) + ": " : ""}${sum}`);
+    const biz = e.business_id ? nameOf(e.business_id) : "";
+    const id = add({ label: sum.slice(0, 60) + (sum.length > 60 ? "…" : ""), business: biz || "Market", platform: "change" });
+    elines.push(`[${id}] ${biz ? biz + ": " : ""}${sum}`);
     if (elines.length >= 6) break;
   }
   if (elines.length) blocks.push(`### Recent market changes\n${elines.join("\n")}`);
 
-  return blocks.join("\n\n");
+  return { text: blocks.join("\n\n"), sources };
 }

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
-import { retrieveLiveContext } from "@/lib/retrieval";
+import { retrieveLiveContext, type RetrievedSource } from "@/lib/retrieval";
 import { upcomingOccasions } from "@/lib/occasions";
 
 /**
@@ -12,7 +12,8 @@ import { upcomingOccasions } from "@/lib/occasions";
  * they're absent. No new scrape or cost beyond one small LLM call.
  */
 
-export interface AssistantAnswer { answer: string; grounded: boolean }
+export interface ChatSource { label: string; business?: string; platform?: string; url?: string }
+export interface AssistantAnswer { answer: string; grounded: boolean; sources?: ChatSource[] }
 export interface WaTurn { role: "user" | "assistant"; text: string }
 export interface BusinessCandidate { id: string; name: string; vertical?: string }
 
@@ -95,8 +96,9 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
 const SCHEMA = {
   type: "object", additionalProperties: false,
   properties: {
-    answer: { type: "string", description: "Concise WhatsApp answer, grounded strictly in DATA. Real names/numbers. No markdown headers." },
+    answer: { type: "string", description: "Concise answer, grounded strictly in DATA. Real names/numbers. No markdown headers." },
     grounded: { type: "boolean", description: "true only if DATA actually contained what was needed to answer; false if you had to say you don't have it." },
+    sourceIds: { type: "array", items: { type: "string" }, description: "The [Ln] labels of the LIVE RECORDS you used for SPECIFIC facts. Empty for general advice, moves, or summary-only answers." },
   },
   required: ["answer", "grounded"],
 };
@@ -110,8 +112,9 @@ const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `RULES:\n` +
   `1. Facts (prices, competitor names, ratings, dates, what rivals posted) come ONLY from SUMMARIES/LIVE RECORDS. NEVER invent or guess them. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
   `2. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete, specific moves. GROUND THE RATIONALE in real data — the audience signals (what customers praise or complain about, unmet local demand), the competitive gap (what rivals are or aren't doing), and your own price position — and time it to a relevant UPCOMING OCCASION when one genuinely fits. The creative idea is yours, but every claim about competitors/customers must trace to DATA. Set grounded=true when the move is built on real data.\n` +
-  `3. Be concise and specific for WhatsApp: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
-  `4. RECENT CONVERSATION (if given) is only for follow-up context, not facts.`;
+  `3. Be concise and specific: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
+  `4. CITATIONS: LIVE RECORDS are labelled [L1], [L2], … When you state a SPECIFIC fact from one (an exact price, a specific post, a specific change), cite it inline with its label, e.g. [L2], and list every label you cited in sourceIds. Do NOT cite for general advice, move/promo ideas, occasion timing, or anything from SUMMARIES — leave sourceIds empty then. Never cite more than 3.\n` +
+  `5. RECENT CONVERSATION (if given) is only for follow-up context, not facts.`;
 
 interface AnswerOpts { id?: string; target_business_id?: string | null }
 
@@ -131,10 +134,14 @@ export async function answerFromData(
   if (!isLlmConfigured()) return { answer: "The assistant isn't fully set up yet — please try again later.", grounded: false };
 
   const summaries = buildKnowledge(ws, goals);
-  let live = "";
-  if (svc && ws.id) { try { live = await retrieveLiveContext(svc, { id: ws.id, target_business_id: ws.target_business_id ?? null }, q); } catch { /* pillars still cover it */ } }
+  let liveText = "";
+  let liveSources: RetrievedSource[] = [];
+  if (svc && ws.id) {
+    try { const lc = await retrieveLiveContext(svc, { id: ws.id, target_business_id: ws.target_business_id ?? null }, q); liveText = lc.text; liveSources = lc.sources; }
+    catch { /* pillars still cover it */ }
+  }
 
-  if (!summaries.trim() && !live.trim()) {
+  if (!summaries.trim() && !liveText.trim()) {
     return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what to run next.`, grounded: false };
   }
 
@@ -148,17 +155,29 @@ export async function answerFromData(
 
   const dataText =
     (summaries.trim() ? `# SUMMARIES (our analysis)\n${summaries}\n\n` : "") +
-    (live.trim() ? `# LIVE RECORDS (raw collected rows — most precise; prefer for exact prices/posts/changes)\n${live}\n\n` : "") +
+    (liveText.trim() ? `# LIVE RECORDS (raw collected rows — most precise; prefer for exact prices/posts/changes; each labelled [Ln])\n${liveText}\n\n` : "") +
     (occasions ? `# UPCOMING OCCASIONS (timing ideas only — NOT facts about competitors)\n${occasions}\n\n` : "");
 
   try {
-    const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean }>({
+    const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean; sourceIds?: string[] }>({
       system: SYSTEM(ws),
       text: `DATA (real, recently collected for ${ws.name}):\n${dataText}${historyText}\nOWNER'S QUESTION: ${q}`,
       schema: SCHEMA, tier: "extract", maxTokens: 550,
     });
-    const answer = clean(data.answer);
-    return { answer: answer || "I couldn't put that together — try rephrasing?", grounded: !!data.grounded };
+    const raw = clean(data.answer);
+    if (!raw) return { answer: "I couldn't put that together — try rephrasing?", grounded: false };
+
+    // cited ids = from the structured field ∪ any [Ln] markers left in the text
+    const cited = new Set<string>((Array.isArray(data.sourceIds) ? data.sourceIds : []).map((s) => String(s).trim()));
+    for (const m of raw.matchAll(/\[[^\]]*?(L\d+)[^\]]*?\]/g)) cited.add(m[1]);
+    // strip citation brackets from the shown text so it reads clean
+    const answer = raw.replace(/\s*\[[^\]]*?L\d+[^\]]*?\]/g, "").replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+
+    const byId = new Map(liveSources.map((s) => [s.id, s]));
+    const sources: ChatSource[] = [...cited].map((id) => byId.get(id)).filter((s): s is RetrievedSource => !!s)
+      .slice(0, 3).map((s) => ({ label: s.label, business: s.business, platform: s.platform, url: s.url }));
+
+    return { answer: answer || raw, grounded: !!data.grounded, ...(sources.length ? { sources } : {}) };
   } catch {
     return { answer: "Something went wrong answering that — please try again in a moment.", grounded: false };
   }
