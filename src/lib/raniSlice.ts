@@ -54,9 +54,12 @@ function formatOps(o: RaniOps): string {
  *  Prefers a slice Rani has pushed onto goals.raniOps; else pulls the governed
  *  aggregate endpoint if configured; else empty. */
 export async function fetchRaniOps(ws: { name: string }, goals: Record<string, any>): Promise<{ text: string; ops: RaniOps | null }> {
-  let ops: RaniOps | null = (goals?.raniOps && typeof goals.raniOps === "object") ? (goals.raniOps as RaniOps) : null;
+  let ops: RaniOps | null = null;
 
-  if (!ops && raniConfigured()) {
+  // Prefer a LIVE pull when the endpoint is configured (always fresh); fall back to
+  // a slice Rani has pushed/seeded onto goals.raniOps (offline cache). This way a
+  // seed works today, and auto-upgrades to live pull the moment the env is set.
+  if (raniConfigured()) {
     try {
       const slug = clean(goals?.raniStore) || slugify(ws.name);
       const r = await fetch(`${process.env.RANI_OPS_URL}?store=${encodeURIComponent(slug)}`, {
@@ -66,6 +69,7 @@ export async function fetchRaniOps(ws: { name: string }, goals: Record<string, a
       if (r.ok) ops = (await r.json()) as RaniOps;
     } catch { ops = null; }
   }
+  if (!ops && goals?.raniOps && typeof goals.raniOps === "object") ops = goals.raniOps as RaniOps;
 
   if (!ops) return { text: "", ops: null };
   const text = formatOps(ops);
