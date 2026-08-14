@@ -15,7 +15,7 @@ export function emailConfigured(): boolean {
   return !!process.env.RESEND_API_KEY;
 }
 
-const FROM = () => process.env.DIGEST_FROM || "Ask Rani Insights <insights@askrani.ai>";
+const FROM = () => process.env.DIGEST_FROM || "Ask Rani <admin@askrani.ai>";
 const APP_URL = () => (process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai").replace(/\/$/, "");
 
 /** Best-effort recipient: goals.notifyEmail → org owner's auth email. */
