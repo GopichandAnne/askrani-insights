@@ -89,7 +89,7 @@ export function renderDigestEmail(business: string, digest: Digest, opts?: { has
   const html = `<!doctype html><html><body style="margin:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
     <div style="max-width:560px;margin:0 auto;padding:24px 20px">
       <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden">
-        <div style="background:#0f766e;padding:18px 24px"><img src="https://api.askrani.ai/storage/v1/object/public/branding/RaniLogo.png" alt="Ask Rani" height="36" style="height:36px;display:block;border:0"></div>
+        <div style="background:#fff;border-bottom:1px solid #eef0f2;padding:16px 24px"><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle"><img src="https://api.askrani.ai/storage/v1/object/public/branding/RaniLogo.png" alt="Ask Rani" width="55" height="80" style="height:80px;width:auto;display:block;border:0"></td><td style="vertical-align:middle;padding-left:14px;font-size:23px;font-weight:800;color:#0f766e;letter-spacing:.2px">Ask Rani</td></tr></table></div>
         <div style="padding:22px 24px">
           <h1 style="font-size:22px;color:#111827;margin:0 0 3px;font-weight:800">${escapeHtml(business)}</h1>
           <div style="font-size:15px;color:#374151">${escapeHtml(digest.headline)}</div>
