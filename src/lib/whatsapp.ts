@@ -20,6 +20,13 @@ export function whatsappConfigured(): boolean {
   return !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID);
 }
 
+/** The human-readable business number owners message to chat (display + wa.me link).
+ *  PHONE_ID is Meta's internal id, not dialable — this is the actual number. */
+export function whatsappBusinessNumber(): string | null {
+  const n = (process.env.WHATSAPP_BUSINESS_NUMBER || "").trim();
+  return n || null;
+}
+
 /** Recipient WhatsApp number (digits, international format) from goals.notifyWhatsApp. */
 export function whatsAppRecipient(goals: Record<string, any>): string | null {
   const raw = typeof goals?.notifyWhatsApp === "string" ? goals.notifyWhatsApp : "";

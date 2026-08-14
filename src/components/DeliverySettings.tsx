@@ -13,12 +13,15 @@ export function DeliverySettings({
   initialWhatsApp = "",
   emailReady = false,
   whatsappReady = false,
+  businessNumber = "",
 }: {
   initialEmail?: string;
   initialWhatsApp?: string;
   emailReady?: boolean;
   whatsappReady?: boolean;
+  businessNumber?: string;
 }) {
+  const waLink = businessNumber ? `https://wa.me/${businessNumber.replace(/\D/g, "")}?text=${encodeURIComponent("Hi Rani — ")}` : "";
   const [email, setEmail] = useState(initialEmail);
   const [whatsapp, setWhatsapp] = useState(initialWhatsApp);
   const [saving, setSaving] = useState(false);
@@ -52,8 +55,20 @@ export function DeliverySettings({
         Where your report is delivered
       </h2>
       <p className="mt-1 text-xs text-ink-faint">We send your report on your plan&apos;s cadence, and whenever you send one on demand.</p>
+
       {whatsappReady && (
-        <p className="mt-1 text-xs text-brand-deep">💬 You can also just message that WhatsApp number to ask about your market — deals, prices, your rating vs rivals — answered from your own data.</p>
+        <div className="mt-3 rounded-2xl border border-brand/20 bg-brand-soft/40 p-3">
+          <p className="text-sm font-medium text-brand-deep">💬 Chat with Rani on WhatsApp</p>
+          <p className="mt-0.5 text-xs text-ink-soft">
+            Message us{businessNumber ? <> at <b className="text-ink">{businessNumber}</b></> : ""} to ask about your market — deals, prices, your rating vs rivals — answered from your own data.
+            <b className="text-ink"> Text from the number you save below so we recognize you.</b>
+          </p>
+          {waLink && (
+            <a href={waLink} target="_blank" rel="noreferrer" className="mt-2 inline-block rounded-full bg-[#25D366] px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+              Open WhatsApp chat →
+            </a>
+          )}
+        </div>
       )}
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">

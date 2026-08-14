@@ -41,16 +41,27 @@ function validSignature(raw: string, header: string | null): boolean {
 
 interface Inbound { from: string; text: string }
 
+type Ws = { name: string; vertical?: string; goals?: Record<string, any> };
+
+/** Recognize the owner by the number they saved. Exact digits first; then an
+ *  UNAMBIGUOUS suffix match on the last 9 digits, so a number saved without the
+ *  country code (or with different formatting) still links. Ambiguous → no match. */
+async function resolveWorkspace(svc: ReturnType<typeof createServiceClient>, from: string): Promise<Ws | undefined> {
+  const cols = "id, name, vertical, goals";
+  const exact = await svc.from("workspace").select(cols).eq("goals->>notifyWhatsApp", from).limit(1);
+  if (exact.data?.[0]) return exact.data[0] as Ws;
+  const tail = from.slice(-9);
+  if (tail.length >= 9) {
+    const near = await svc.from("workspace").select(cols).ilike("goals->>notifyWhatsApp", `%${tail}`).limit(2);
+    if (near.data?.length === 1) return near.data[0] as Ws; // only accept when unique
+  }
+  return undefined;
+}
+
 async function handle(m: Inbound) {
   if (!whatsappConfigured()) return;
   const svc = createServiceClient();
-  // link the sender to a workspace by the number they saved for delivery
-  const { data } = await svc
-    .from("workspace")
-    .select("id, name, vertical, goals")
-    .eq("goals->>notifyWhatsApp", m.from)
-    .limit(1);
-  const ws = data?.[0] as { name: string; vertical?: string; goals?: Record<string, any> } | undefined;
+  const ws = await resolveWorkspace(svc, m.from);
   if (!ws) {
     await sendWhatsAppText(m.from, "Hi! This number isn't linked to a business on Ask Rani Insights yet. Add it under Reports → “Where your report is delivered”, then message me to ask about your market.");
     return;

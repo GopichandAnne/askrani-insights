@@ -4,7 +4,7 @@ import { ReportToolbar } from "@/components/ReportToolbar";
 import { DeliverySettings } from "@/components/DeliverySettings";
 import { buildWorkspaceReport } from "@/lib/report";
 import { emailConfigured } from "@/lib/notify";
-import { whatsappConfigured } from "@/lib/whatsapp";
+import { whatsappConfigured, whatsappBusinessNumber } from "@/lib/whatsapp";
 import { REPORT_ON_DEMAND_CREDITS, planOfOrg, cadenceForPlan } from "@/lib/credits";
 import { requireOrg } from "@/lib/api";
 
@@ -64,6 +64,7 @@ export default async function ReportsPage() {
         initialWhatsApp={typeof goals.notifyWhatsApp === "string" ? goals.notifyWhatsApp : ""}
         emailReady={emailReady}
         whatsappReady={whatsappReady}
+        businessNumber={whatsappBusinessNumber() ?? ""}
       />
 
       {/* snapshot */}
