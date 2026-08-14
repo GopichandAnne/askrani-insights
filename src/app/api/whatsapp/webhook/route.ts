@@ -2,7 +2,8 @@ import { after } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp";
-import { answerFromData } from "@/lib/assistant";
+import { answerFromData, routeToBusiness } from "@/lib/assistant";
+import { readWaSession, writeWaSession, type WaSession } from "@/lib/wasession";
 
 /**
  * Inbound WhatsApp — the two-way assistant. Meta calls this webhook when the owner
@@ -41,33 +42,73 @@ function validSignature(raw: string, header: string | null): boolean {
 
 interface Inbound { from: string; text: string }
 
-type Ws = { name: string; vertical?: string; goals?: Record<string, any> };
+type Ws = { id: string; name: string; vertical?: string; organization_id: string; goals?: Record<string, any> };
 
-/** Recognize the owner by the number they saved. Exact digits first; then an
- *  UNAMBIGUOUS suffix match on the last 9 digits, so a number saved without the
- *  country code (or with different formatting) still links. Ambiguous → no match. */
-async function resolveWorkspace(svc: ReturnType<typeof createServiceClient>, from: string): Promise<Ws | undefined> {
-  const cols = "id, name, vertical, goals";
-  const exact = await svc.from("workspace").select(cols).eq("goals->>notifyWhatsApp", from).limit(1);
-  if (exact.data?.[0]) return exact.data[0] as Ws;
-  const tail = from.slice(-9);
-  if (tail.length >= 9) {
-    const near = await svc.from("workspace").select(cols).ilike("goals->>notifyWhatsApp", `%${tail}`).limit(2);
-    if (near.data?.length === 1) return near.data[0] as Ws; // only accept when unique
+/** All workspaces that saved this number. Exact digits first; then a suffix match
+ *  on the last 9 digits, so a number saved without the country code / with other
+ *  formatting still links. Constrained to one org (a number belongs to one owner). */
+async function candidatesFor(svc: ReturnType<typeof createServiceClient>, from: string): Promise<Ws[]> {
+  const cols = "id, name, vertical, organization_id, goals";
+  let rows = (await svc.from("workspace").select(cols).eq("goals->>notifyWhatsApp", from).limit(10)).data ?? [];
+  if (!rows.length) {
+    const tail = from.slice(-9);
+    if (tail.length >= 9) rows = (await svc.from("workspace").select(cols).ilike("goals->>notifyWhatsApp", `%${tail}`).limit(10)).data ?? [];
   }
-  return undefined;
+  const list = rows as Ws[];
+  if (list.length <= 1) return list;
+  const org = list[0].organization_id; // keep a single owner's businesses
+  return list.filter((w) => w.organization_id === org);
 }
+
+const isSelectionLike = (t: string) => { const w = t.trim().split(/\s+/); return /^#?\d{1,2}$/.test(t.trim()) || w.length <= 3; };
 
 async function handle(m: Inbound) {
   if (!whatsappConfigured()) return;
   const svc = createServiceClient();
-  const ws = await resolveWorkspace(svc, m.from);
-  if (!ws) {
+  const candidates = await candidatesFor(svc, m.from);
+  if (!candidates.length) {
     await sendWhatsAppText(m.from, "Hi! This number isn't linked to a business on Ask Rani Insights yet. Add it under Reports → “Where your report is delivered”, then message me to ask about your market.");
     return;
   }
-  const { answer } = await answerFromData({ name: ws.name, vertical: ws.vertical }, (ws.goals as Record<string, any>) ?? {}, m.text);
-  await sendWhatsAppText(m.from, answer);
+  const orgId = candidates[0].organization_id;
+  const session: WaSession = (await readWaSession(svc, orgId, m.from)) ?? { history: [], at: new Date().toISOString() };
+
+  // ── choose the active business ────────────────────────────────────────────
+  let active: Ws | undefined;
+  let question = m.text;
+
+  if (candidates.length === 1) {
+    active = candidates[0];
+  } else {
+    // route the message to a business (handles "1", a name, "how's my deli?", switches)
+    const idx = await routeToBusiness(candidates.map((c) => ({ id: c.id, name: c.name, vertical: c.vertical })), m.text);
+    if (idx != null) {
+      active = candidates[idx];
+      // if this was the reply to a "which business?" prompt, answer their ORIGINAL question
+      if (session.pending?.question && isSelectionLike(m.text)) question = session.pending.question;
+    } else {
+      active = candidates.find((c) => c.id === session.workspaceId); // generic follow-up → stay on the active one
+    }
+    if (!active) {
+      // still ambiguous → ask, remembering what they wanted
+      const list = candidates.map((c, i) => `${i + 1}) ${c.name}`).join("\n");
+      session.pending = { candidateIds: candidates.map((c) => c.id), question: m.text };
+      await writeWaSession(svc, orgId, m.from, session);
+      await sendWhatsAppText(m.from, `You watch a few businesses — which one is this about? Reply with a number:\n${list}`);
+      return;
+    }
+  }
+
+  // ── answer, grounded, with recent context ─────────────────────────────────
+  const switched = candidates.length > 1 && session.workspaceId && session.workspaceId !== active.id;
+  const { answer } = await answerFromData({ name: active.name, vertical: active.vertical }, (active.goals as Record<string, any>) ?? {}, question, session.history);
+  const reply = candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${answer}` : answer;
+
+  session.workspaceId = active.id;
+  session.pending = undefined;
+  session.history = [...session.history, { role: "user", text: question }, { role: "assistant", text: answer }];
+  await writeWaSession(svc, orgId, m.from, session);
+  await sendWhatsAppText(m.from, reply);
 }
 
 // POST — inbound messages (and status callbacks, which we ignore).

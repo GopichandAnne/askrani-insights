@@ -10,6 +10,8 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
  */
 
 export interface AssistantAnswer { answer: string; grounded: boolean }
+export interface WaTurn { role: "user" | "assistant"; text: string }
+export interface BusinessCandidate { id: string; name: string; vertical?: string }
 
 const clean = (v: unknown) => String(v ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
 const arr = (v: unknown): any[] => (Array.isArray(v) ? v : []);
@@ -102,10 +104,12 @@ const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `1. Use ONLY facts present in DATA. NEVER invent or guess prices, competitor names, ratings, dates, or numbers. Do not use outside knowledge.\n` +
   `2. If DATA doesn't contain what's needed, set grounded=false and say plainly you don't have that yet — then point them to what you CAN answer (competitor deals & prices, you-vs-rivals on price, your rating vs the market, what's trending nearby) or suggest running a fresh scan.\n` +
   `3. Be concise and specific for WhatsApp: 1–5 short sentences or a tight bullet list. Use their real competitor names and exact numbers from DATA. No markdown headers, no preamble, no fluff.\n` +
-  `4. Only report what DATA shows — never claim to perform actions.`;
+  `4. RECENT CONVERSATION (if given) is only for understanding follow-ups like "and their prices?" — it is NOT a source of facts. Facts come only from DATA.\n` +
+  `5. Only report what DATA shows — never claim to perform actions.`;
 
-/** Answer an owner's question grounded strictly in their collected data. */
-export async function answerFromData(ws: { name: string; vertical?: string }, goals: Record<string, any>, question: string): Promise<AssistantAnswer> {
+/** Answer an owner's question grounded strictly in their collected data. `history`
+ *  gives the recent thread so follow-ups ("and their prices?") stay in context. */
+export async function answerFromData(ws: { name: string; vertical?: string }, goals: Record<string, any>, question: string, history: WaTurn[] = []): Promise<AssistantAnswer> {
   const q = clean(question);
   if (!q) return { answer: "Ask me anything about your market — competitor deals, prices, your rating vs rivals, or what's trending nearby.", grounded: false };
   if (!isLlmConfigured()) return { answer: "The assistant isn't fully set up yet — please try again later.", grounded: false };
@@ -115,15 +119,61 @@ export async function answerFromData(ws: { name: string; vertical?: string }, go
     return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what's trending nearby.`, grounded: false };
   }
 
+  const convo = history.slice(-6).filter((t) => clean(t.text));
+  const historyText = convo.length
+    ? `\nRECENT CONVERSATION (context only, NOT data):\n${convo.map((t) => `${t.role === "user" ? "Owner" : "You"}: ${clean(t.text).slice(0, 300)}`).join("\n")}\n`
+    : "";
+
   try {
     const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean }>({
       system: SYSTEM(ws),
-      text: `DATA (real, recently collected for ${ws.name}):\n${knowledge}\n\nOWNER'S QUESTION: ${q}`,
+      text: `DATA (real, recently collected for ${ws.name}):\n${knowledge}\n${historyText}\nOWNER'S QUESTION: ${q}`,
       schema: SCHEMA, tier: "extract", maxTokens: 500,
     });
     const answer = clean(data.answer);
     return { answer: answer || "I couldn't put that together — try rephrasing?", grounded: !!data.grounded };
   } catch {
     return { answer: "Something went wrong answering that — please try again in a moment.", grounded: false };
+  }
+}
+
+const ROUTE_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: { index: { type: ["integer", "null"], description: "0-based index of the business the message is about, or null if it doesn't clearly indicate one." } },
+  required: ["index"],
+};
+
+const tokenize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((t) => t.length >= 3);
+
+/** Which of the owner's businesses is this message about? Heuristics first (a bare
+ *  "1"/"2", or a distinctive name word), then a cheap LLM router. Returns null when
+ *  unclear — e.g. a generic follow-up — so the caller keeps the active business. */
+export async function routeToBusiness(candidates: BusinessCandidate[], message: string): Promise<number | null> {
+  const msg = clean(message);
+  if (candidates.length <= 1) return candidates.length ? 0 : null;
+
+  // bare numeric selection ("2", "#2")
+  const num = msg.match(/^\s*#?\s*(\d{1,2})\s*$/);
+  if (num) { const i = Number(num[1]) - 1; if (i >= 0 && i < candidates.length) return i; }
+
+  // distinctive-name-word match (a word owned by exactly one candidate)
+  const owners = new Map<string, Set<number>>();
+  candidates.forEach((c, i) => new Set(tokenize(c.name)).forEach((t) => (owners.get(t) ?? owners.set(t, new Set()).get(t)!).add(i)));
+  const low = ` ${msg.toLowerCase()} `;
+  const hits = candidates.map((c, i) => (tokenize(c.name).some((t) => owners.get(t)?.size === 1 && low.includes(` ${t} `)) ? i : -1)).filter((i) => i >= 0);
+  if (hits.length === 1) return hits[0];
+
+  if (!isLlmConfigured()) return null;
+  try {
+    const list = candidates.map((c, i) => `${i}) ${c.name}${c.vertical ? ` (${c.vertical})` : ""}`).join("\n");
+    const { data } = await getLlm().callStructured<{ index: number | null }>({
+      system: "You route an owner's WhatsApp message to which of their businesses it's about. Return the 0-based index, or null if the message doesn't clearly indicate one (a greeting, or a general follow-up that could apply to any). Prefer null over guessing.",
+      text: `BUSINESSES:\n${list}\n\nMESSAGE: ${msg}\n\nWhich business is this message about?`,
+      schema: ROUTE_SCHEMA, tier: "classify", maxTokens: 40,
+    });
+    const idx = data.index;
+    return typeof idx === "number" && idx >= 0 && idx < candidates.length ? idx : null;
+  } catch {
+    return null;
   }
 }
