@@ -31,13 +31,14 @@ const ICONS = {
   channels: <svg {...I}><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="12" cy="12" r="3.4" /><circle cx="17" cy="7" r="1.2" fill="currentColor" stroke="none" /></svg>,
   recommendations: <svg {...I}><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg>,
   report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
+  assistant: <svg {...I}><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" /><path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" /></svg>,
   add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
   more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
 };
 const SHORT: Record<string, string> = {
   "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
-  "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin",
+  "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin", "/assistant": "Ask",
 };
 
 function useCommandKey(setOpen: (f: (o: boolean) => boolean) => void) {
