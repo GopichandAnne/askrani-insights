@@ -1,4 +1,7 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { retrieveLiveContext } from "@/lib/retrieval";
+import { upcomingOccasions } from "@/lib/occasions";
 
 /**
  * The grounded Q&A brain behind the WhatsApp assistant (and reusable for an in-app
@@ -99,36 +102,60 @@ const SCHEMA = {
 };
 
 const SYSTEM = (ws: { name: string; vertical?: string }) =>
-  `You are Rani, the market-intelligence assistant for "${ws.name}"${ws.vertical ? ` (a ${ws.vertical})` : ""}. You answer the OWNER's questions about their local market using ONLY the DATA provided — real competitor and market information recently collected for them.\n` +
+  `You are Rani, the market-intelligence assistant AND local-marketing advisor for "${ws.name}"${ws.vertical ? ` (a ${ws.vertical})` : ""}. You help the OWNER using ONLY the DATA provided — real competitor/market info recently collected for them, plus a calendar of upcoming occasions.\n` +
+  `The DATA has up to three parts:\n` +
+  `• SUMMARIES — our analysis of their market.\n` +
+  `• LIVE RECORDS — raw collected rows (exact prices, specific posts, recent changes). This is the MOST precise source; prefer it for specifics.\n` +
+  `• UPCOMING OCCASIONS — calendar dates, for TIMING ideas ONLY. Never treat them as facts about competitors.\n` +
   `RULES:\n` +
-  `1. Use ONLY facts present in DATA. NEVER invent or guess prices, competitor names, ratings, dates, or numbers. Do not use outside knowledge.\n` +
-  `2. If DATA doesn't contain what's needed, set grounded=false and say plainly you don't have that yet — then point them to what you CAN answer (competitor deals & prices, you-vs-rivals on price, your rating vs the market, what's trending nearby) or suggest running a fresh scan.\n` +
-  `3. Be concise and specific for WhatsApp: 1–5 short sentences or a tight bullet list. Use their real competitor names and exact numbers from DATA. No markdown headers, no preamble, no fluff.\n` +
-  `4. RECENT CONVERSATION (if given) is only for understanding follow-ups like "and their prices?" — it is NOT a source of facts. Facts come only from DATA.\n` +
-  `5. Only report what DATA shows — never claim to perform actions.`;
+  `1. Facts (prices, competitor names, ratings, dates, what rivals posted) come ONLY from SUMMARIES/LIVE RECORDS. NEVER invent or guess them. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
+  `2. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete, specific moves. GROUND THE RATIONALE in real data — the audience signals (what customers praise or complain about, unmet local demand), the competitive gap (what rivals are or aren't doing), and your own price position — and time it to a relevant UPCOMING OCCASION when one genuinely fits. The creative idea is yours, but every claim about competitors/customers must trace to DATA. Set grounded=true when the move is built on real data.\n` +
+  `3. Be concise and specific for WhatsApp: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
+  `4. RECENT CONVERSATION (if given) is only for follow-up context, not facts.`;
 
-/** Answer an owner's question grounded strictly in their collected data. `history`
- *  gives the recent thread so follow-ups ("and their prices?") stay in context. */
-export async function answerFromData(ws: { name: string; vertical?: string }, goals: Record<string, any>, question: string, history: WaTurn[] = []): Promise<AssistantAnswer> {
+interface AnswerOpts { id?: string; target_business_id?: string | null }
+
+/** Answer an owner's question grounded strictly in their data. Fuses three layers:
+ *  cached SUMMARIES + live retrieved RECORDS (when a db client + ws.id are given) +
+ *  upcoming OCCASIONS for timely, advisor-style moves. `history` keeps follow-ups in
+ *  context. Nothing outside this data may be asserted as fact. */
+export async function answerFromData(
+  ws: { name: string; vertical?: string } & AnswerOpts,
+  goals: Record<string, any>,
+  question: string,
+  history: WaTurn[] = [],
+  svc?: SupabaseClient,
+): Promise<AssistantAnswer> {
   const q = clean(question);
-  if (!q) return { answer: "Ask me anything about your market — competitor deals, prices, your rating vs rivals, or what's trending nearby.", grounded: false };
+  if (!q) return { answer: "Ask me anything about your market — competitor deals, prices, your rating vs rivals, what's trending nearby, or 'what should I run this month?'.", grounded: false };
   if (!isLlmConfigured()) return { answer: "The assistant isn't fully set up yet — please try again later.", grounded: false };
 
-  const knowledge = buildKnowledge(ws, goals);
-  if (!knowledge.trim()) {
-    return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what's trending nearby.`, grounded: false };
+  const summaries = buildKnowledge(ws, goals);
+  let live = "";
+  if (svc && ws.id) { try { live = await retrieveLiveContext(svc, { id: ws.id, target_business_id: ws.target_business_id ?? null }, q); } catch { /* pillars still cover it */ } }
+
+  if (!summaries.trim() && !live.trim()) {
+    return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what to run next.`, grounded: false };
   }
+
+  let occasions = "";
+  try { const occ = upcomingOccasions(ws.vertical); if (occ.length) occasions = occ.map((o) => `- ${o.name} (in ${o.inDays} day${o.inDays === 1 ? "" : "s"}, ${o.whenISO}): ${o.note}`).join("\n"); } catch { /* timing is optional */ }
 
   const convo = history.slice(-6).filter((t) => clean(t.text));
   const historyText = convo.length
     ? `\nRECENT CONVERSATION (context only, NOT data):\n${convo.map((t) => `${t.role === "user" ? "Owner" : "You"}: ${clean(t.text).slice(0, 300)}`).join("\n")}\n`
     : "";
 
+  const dataText =
+    (summaries.trim() ? `# SUMMARIES (our analysis)\n${summaries}\n\n` : "") +
+    (live.trim() ? `# LIVE RECORDS (raw collected rows — most precise; prefer for exact prices/posts/changes)\n${live}\n\n` : "") +
+    (occasions ? `# UPCOMING OCCASIONS (timing ideas only — NOT facts about competitors)\n${occasions}\n\n` : "");
+
   try {
     const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean }>({
       system: SYSTEM(ws),
-      text: `DATA (real, recently collected for ${ws.name}):\n${knowledge}\n${historyText}\nOWNER'S QUESTION: ${q}`,
-      schema: SCHEMA, tier: "extract", maxTokens: 500,
+      text: `DATA (real, recently collected for ${ws.name}):\n${dataText}${historyText}\nOWNER'S QUESTION: ${q}`,
+      schema: SCHEMA, tier: "extract", maxTokens: 550,
     });
     const answer = clean(data.answer);
     return { answer: answer || "I couldn't put that together — try rephrasing?", grounded: !!data.grounded };

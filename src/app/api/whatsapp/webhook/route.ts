@@ -42,13 +42,13 @@ function validSignature(raw: string, header: string | null): boolean {
 
 interface Inbound { from: string; text: string }
 
-type Ws = { id: string; name: string; vertical?: string; organization_id: string; goals?: Record<string, any> };
+type Ws = { id: string; name: string; vertical?: string; organization_id: string; target_business_id?: string | null; goals?: Record<string, any> };
 
 /** All workspaces that saved this number. Exact digits first; then a suffix match
  *  on the last 9 digits, so a number saved without the country code / with other
  *  formatting still links. Constrained to one org (a number belongs to one owner). */
 async function candidatesFor(svc: ReturnType<typeof createServiceClient>, from: string): Promise<Ws[]> {
-  const cols = "id, name, vertical, organization_id, goals";
+  const cols = "id, name, vertical, organization_id, target_business_id, goals";
   let rows = (await svc.from("workspace").select(cols).eq("goals->>notifyWhatsApp", from).limit(10)).data ?? [];
   if (!rows.length) {
     const tail = from.slice(-9);
@@ -101,7 +101,10 @@ async function handle(m: Inbound) {
 
   // ── answer, grounded, with recent context ─────────────────────────────────
   const switched = candidates.length > 1 && session.workspaceId && session.workspaceId !== active.id;
-  const { answer } = await answerFromData({ name: active.name, vertical: active.vertical }, (active.goals as Record<string, any>) ?? {}, question, session.history);
+  const { answer } = await answerFromData(
+    { id: active.id, name: active.name, vertical: active.vertical, target_business_id: active.target_business_id },
+    (active.goals as Record<string, any>) ?? {}, question, session.history, svc,
+  );
   const reply = candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${answer}` : answer;
 
   session.workspaceId = active.id;
