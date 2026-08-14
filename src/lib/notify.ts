@@ -86,15 +86,19 @@ export function renderDigestEmail(business: string, digest: Digest, opts?: { has
   const pdfNote = opts?.hasPdf
     ? `<div style="font-size:13px;color:#0f766e;background:#ecfdf5;border-radius:10px;padding:11px 14px;margin-top:16px">📄 <b>Your full market report is attached as a PDF</b> — sales, marketing moves, what's popular and what's changing in your market.</div>`
     : "";
-  const html = `<!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
     <div style="max-width:560px;margin:0 auto;padding:24px 20px">
-      <div style="font-size:13px;font-weight:700;color:#0d9488;letter-spacing:.04em">ASK RANI INSIGHTS</div>
-      <h1 style="font-size:22px;color:#111827;margin:6px 0 2px">${escapeHtml(business)}</h1>
-      <div style="font-size:15px;color:#374151">${escapeHtml(digest.headline)}</div>
-      <table role="presentation" width="100%" style="border-collapse:collapse;margin-top:10px">${rows}</table>
-      ${pdfNote}
-      <div style="margin-top:22px"><a href="${APP_URL()}" style="display:inline-block;background:#0d9488;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 20px;border-radius:999px">Open your dashboard</a></div>
-      <div style="font-size:12px;color:#9ca3af;margin-top:20px">You're getting this because you watch ${escapeHtml(business)} on Ask Rani Insights.</div>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden">
+        <div style="background:#0f766e;padding:18px 24px"><img src="https://api.askrani.ai/storage/v1/object/public/branding/RaniLogo.png" alt="Ask Rani" height="36" style="height:36px;display:block;border:0"></div>
+        <div style="padding:22px 24px">
+          <h1 style="font-size:22px;color:#111827;margin:0 0 3px;font-weight:800">${escapeHtml(business)}</h1>
+          <div style="font-size:15px;color:#374151">${escapeHtml(digest.headline)}</div>
+          <table role="presentation" width="100%" style="border-collapse:collapse;margin-top:6px">${rows}</table>
+          ${pdfNote}
+          <div style="margin-top:22px"><a href="${APP_URL()}" style="display:inline-block;background:#0d9488;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;border-radius:999px">Open your dashboard</a></div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:16px;text-align:center">You're getting this because you watch ${escapeHtml(business)} on Ask Rani Insights &middot; <a href="https://askrani.ai" style="color:#9ca3af">askrani.ai</a></div>
     </div>
   </body></html>`;
   return { subject, html };
