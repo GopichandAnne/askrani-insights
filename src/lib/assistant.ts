@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { retrieveLiveContext, type RetrievedSource } from "@/lib/retrieval";
 import { upcomingOccasions } from "@/lib/occasions";
+import { fetchRaniOps } from "@/lib/raniSlice";
 
 /**
  * The grounded Q&A brain behind the WhatsApp assistant (and reusable for an in-app
@@ -105,13 +106,14 @@ const SCHEMA = {
 
 const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `You are Rani, the market-intelligence assistant AND local-marketing advisor for "${ws.name}"${ws.vertical ? ` (a ${ws.vertical})` : ""}. You help the OWNER using ONLY the DATA provided — real competitor/market info recently collected for them, plus a calendar of upcoming occasions.\n` +
-  `The DATA has up to three parts:\n` +
-  `• SUMMARIES — our analysis of their market.\n` +
-  `• LIVE RECORDS — raw collected rows (exact prices, specific posts, recent changes). This is the MOST precise source; prefer it for specifics.\n` +
+  `The DATA has up to four parts:\n` +
+  `• SUMMARIES — our analysis of their market (the OUTSIDE view).\n` +
+  `• LIVE RECORDS — raw collected market rows (exact prices, specific posts, recent changes). MOST precise; prefer it for specifics.\n` +
+  `• YOUR OPERATIONS — the business's OWN store data from Rani (real best-sellers, promos they're running, reachable loyalty customers, and their promote-and-earn advocates). These are first-party facts about THEIR business — the INSIDE view.\n` +
   `• UPCOMING OCCASIONS — calendar dates, for TIMING ideas ONLY. Never treat them as facts about competitors.\n` +
   `RULES:\n` +
-  `1. Facts (prices, competitor names, ratings, dates, what rivals posted) come ONLY from SUMMARIES/LIVE RECORDS. NEVER invent or guess them. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
-  `2. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete, specific moves. GROUND THE RATIONALE in real data — the audience signals (what customers praise or complain about, unmet local demand), the competitive gap (what rivals are or aren't doing), and your own price position — and time it to a relevant UPCOMING OCCASION when one genuinely fits. The creative idea is yours, but every claim about competitors/customers must trace to DATA. Set grounded=true when the move is built on real data.\n` +
+  `1. Facts come ONLY from SUMMARIES/LIVE RECORDS (market) and YOUR OPERATIONS (their own store). NEVER invent or guess prices, names, ratings, dates, or sales numbers. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
+  `2. COMBINE INSIDE + OUTSIDE. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete moves. Ground the rationale in real data — cross-reference YOUR OPERATIONS with the market: e.g., don't cut price on a best-seller even if a rival is cheaper; if a rival is winning something your OWN customers keep asking for, that's a strong signal; and if they have promote-and-earn advocates or a loyalty list, prefer ACTIVATING those (a zero-cost channel their own customers power) over matching rivals' paid ads. Time it to a relevant UPCOMING OCCASION when one fits. The creative idea is yours, but every fact must trace to DATA. Set grounded=true when built on real data.\n` +
   `3. Be concise and specific: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
   `4. CITATIONS: LIVE RECORDS are labelled [L1], [L2], … When you state a SPECIFIC fact from one (an exact price, a specific post, a specific change), cite it inline with its label, e.g. [L2], and list every label you cited in sourceIds. Do NOT cite for general advice, move/promo ideas, occasion timing, or anything from SUMMARIES — leave sourceIds empty then. Never cite more than 3.\n` +
   `5. RECENT CONVERSATION (if given) is only for follow-up context, not facts.`;
@@ -141,7 +143,11 @@ export async function answerFromData(
     catch { /* pillars still cover it */ }
   }
 
-  if (!summaries.trim() && !liveText.trim()) {
+  // INSIDE view — the business's own Rani operations (best-sellers, promos, loyalty, promote-and-earn)
+  let opsText = "";
+  try { opsText = (await fetchRaniOps(ws, goals)).text; } catch { /* umbrella not wired — market-only */ }
+
+  if (!summaries.trim() && !liveText.trim() && !opsText.trim()) {
     return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what to run next.`, grounded: false };
   }
 
@@ -154,8 +160,9 @@ export async function answerFromData(
     : "";
 
   const dataText =
-    (summaries.trim() ? `# SUMMARIES (our analysis)\n${summaries}\n\n` : "") +
-    (liveText.trim() ? `# LIVE RECORDS (raw collected rows — most precise; prefer for exact prices/posts/changes; each labelled [Ln])\n${liveText}\n\n` : "") +
+    (summaries.trim() ? `# SUMMARIES (our analysis — the OUTSIDE/market view)\n${summaries}\n\n` : "") +
+    (liveText.trim() ? `# LIVE RECORDS (raw market rows — most precise; prefer for exact prices/posts/changes; each labelled [Ln])\n${liveText}\n\n` : "") +
+    (opsText.trim() ? `# YOUR OPERATIONS (from Rani — the business's OWN store: real best-sellers, promos, loyalty reach & promote-and-earn advocates)\n${opsText}\n\n` : "") +
     (occasions ? `# UPCOMING OCCASIONS (timing ideas only — NOT facts about competitors)\n${occasions}\n\n` : "");
 
   try {
