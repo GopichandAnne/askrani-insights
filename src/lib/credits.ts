@@ -1,4 +1,17 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { sharedWalletConfigured, resolveRaniStore, walletBalance, walletDebit, walletGrant } from "@/lib/raniWallet";
+
+/**
+ * When an org is LINKED to a Rani store (a workspace carries goals.raniStore) and
+ * the shared-wallet env is set, credit reads/writes route to the ONE Rani wallet
+ * its chatbot also uses — closing the umbrella loop. Otherwise everything below
+ * runs on the local per-org ledger, so standalone Insights accounts are unchanged.
+ * The link must be EXPLICIT (never a guessed slug) because this moves money.
+ */
+async function linkedStore(orgId: string): Promise<string | null> {
+  if (!sharedWalletConfigured()) return null;
+  try { return await resolveRaniStore(createServiceClient(), orgId); } catch { return null; }
+}
 
 /**
  * Credits — Phase 1 (record-only, no gating).
@@ -80,8 +93,13 @@ async function writeBilling(svc: Svc, orgId: string, settings: Record<string, un
 
 export function balanceOf(b: Billing): number { return b.planCredits + b.topupCredits; }
 
-/** Current org credit balance. */
+/** Current org credit balance. Shared Rani wallet when linked, else local ledger. */
 export async function getBalance(orgId: string): Promise<number> {
+  const store = await linkedStore(orgId);
+  if (store) {
+    const w = await walletBalance(store);
+    if (w) return w.balance; // else fall through to local (transient wallet error)
+  }
   const svc = createServiceClient();
   const { billing } = await readBilling(svc, orgId);
   return balanceOf(billing);
@@ -93,6 +111,9 @@ export async function hasCredits(orgId: string, min = 1): Promise<boolean> {
 
 /** Grant the one-time trial credits on first org bootstrap (idempotent). */
 export async function grantTrialIfNeeded(orgId: string): Promise<void> {
+  // Linked orgs get their trial on the Rani store wallet (provisioned there on
+  // store creation), so there's no separate Insights trial to grant.
+  if (await linkedStore(orgId)) return;
   try {
     const svc = createServiceClient();
     const { settings, billing } = await readBilling(svc, orgId);
@@ -108,6 +129,8 @@ export async function grantTrialIfNeeded(orgId: string): Promise<void> {
 export async function spendForCost(orgId: string, costUsd: number, ref: Record<string, unknown>): Promise<void> {
   const credits = creditsForCost(costUsd);
   if (credits <= 0) return;
+  const store = await linkedStore(orgId);
+  if (store) { await walletDebit(store, credits, "collection", { enforce: false, costUsd, ref }); return; }
   try {
     const svc = createServiceClient();
     const { settings, billing } = await readBilling(svc, orgId);
@@ -168,6 +191,12 @@ export function quoteFlyerRead(competitorCount = 0): number {
  *  first then top-up. Returns false without charging if the balance is short. */
 export async function spendCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<boolean> {
   if (!(credits > 0)) return true;
+  const store = await linkedStore(orgId);
+  if (store) {
+    const r = await walletDebit(store, credits, reason, { enforce: true, ref });
+    // Fail CLOSED on a transport error: never grant a paid action without charging.
+    return r ? r.ok : false;
+  }
   const svc = createServiceClient();
   const { settings, billing } = await readBilling(svc, orgId);
   if (balanceOf(billing) < credits) return false;
@@ -185,6 +214,8 @@ export async function spendCredits(orgId: string, credits: number, reason: strin
 /** Credit back a prior charge (deep-read → Monitor promotion within the window). */
 export async function refundCredits(orgId: string, credits: number, reason: string, ref?: Record<string, unknown>): Promise<void> {
   if (!(credits > 0)) return;
+  const store = await linkedStore(orgId);
+  if (store) { await walletGrant(store, credits, reason, ref); return; }
   const svc = createServiceClient();
   const { settings, billing } = await readBilling(svc, orgId);
   billing.topupCredits += credits;                    // refunds land in the persistent bucket
@@ -199,6 +230,17 @@ export interface CreditsSummary {
   recent: LedgerEntry[];
 }
 export async function creditsSummary(orgId: string): Promise<CreditsSummary> {
+  const store = await linkedStore(orgId);
+  if (store) {
+    const w = await walletBalance(store);
+    if (w) {
+      return {
+        balance: w.balance, plan: w.plan, status: w.status, planCredits: w.planCredits,
+        topupCredits: w.topupCredits, totalSpent: w.totalSpent, totalCostUsd: w.totalCostUsd,
+        trialGranted: w.trialGranted, recent: [], // shared-wallet ledger detail exposed later
+      };
+    }
+  }
   const svc = createServiceClient();
   const { billing } = await readBilling(svc, orgId);
   return {
@@ -216,6 +258,8 @@ export async function creditsSummary(orgId: string): Promise<CreditsSummary> {
 
 /** Read the org's plan (from billing; used by the scheduler for cadence). */
 export async function planOfOrg(orgId: string): Promise<string> {
+  const store = await linkedStore(orgId);
+  if (store) { const w = await walletBalance(store); if (w) return w.plan; }
   const svc = createServiceClient();
   const { billing } = await readBilling(svc, orgId);
   return billing.plan ?? "free";
