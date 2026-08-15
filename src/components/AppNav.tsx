@@ -98,8 +98,10 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
       {/* ── Desktop icon rail ───────────────────────────────────────── */}
       <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-20 p-2 lg:flex">
         <div className="glass flex h-full w-full flex-col items-center rounded-3xl py-3">
-          <Link href="/" aria-label="Ask Rani Insights home" className="mb-2"><RaniMark size={32} /></Link>
-          <nav className="flex w-full flex-1 flex-col items-center gap-1 px-1.5">
+          <Link href="/" aria-label="Ask Rani Insights home" className="mb-2 shrink-0"><RaniMark size={32} /></Link>
+          {/* min-h-0 + overflow lets the item list SCROLL on short viewports instead
+              of clipping the bottom tabs (and the pinned Sign-out below) off-screen. */}
+          <nav className="flex w-full min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {items.map((n) => (
               <Link
                 key={n.href}
@@ -114,7 +116,7 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
             ))}
           </nav>
           {email && (
-            <form action="/auth/signout" method="post" className="mt-1 w-full px-1.5">
+            <form action="/auth/signout" method="post" className="mt-1 w-full shrink-0 px-1.5">
               <button type="submit" title={`Sign out (${email})`} className="flex w-full flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium text-ink-faint transition-colors hover:bg-trust-low/10 hover:text-trust-low">
                 <svg {...I}><path d="M15 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3" /><path d="M10 17l-5-5 5-5" /><path d="M5 12h11" /></svg>
                 <span>Sign out</span>

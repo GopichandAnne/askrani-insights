@@ -91,7 +91,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="min-h-screen">
             <AppNav
               items={nav}
-              email={user.email ?? undefined}
+              email={user.email ?? (user.phone ? `+${user.phone}` : "Account")}
               admin={admin}
               workspaces={workspaces.map((w) => ({ id: w.id, name: w.name, vertical: w.vertical }))}
               activeWorkspaceId={activeId}
