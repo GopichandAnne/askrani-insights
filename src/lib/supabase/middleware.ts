@@ -38,6 +38,28 @@ export async function updateSession(request: NextRequest) {
   });
 
   // Touch the user so the session refreshes and cookies rotate.
-  await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // First-run profile gate: a signed-in user who hasn't finished their profile is
+  // routed to /welcome to give name + business — which also bootstraps their org
+  // and trial credits (phone sign-in otherwise skips that). Exempt the auth/api
+  // surfaces, /welcome itself, and the public Explore front door. Skipped entirely
+  // on the embedded (SSO) surface, whose users are provisioned differently.
+  if (user && !embedded) {
+    const complete = (user.user_metadata as Record<string, unknown> | null)?.profile_complete === true;
+    const p = request.nextUrl.pathname;
+    const exempt =
+      p.startsWith("/welcome") || p.startsWith("/login") || p.startsWith("/auth") ||
+      p.startsWith("/api") || p.startsWith("/explore");
+    if (!complete && !exempt) {
+      const to = request.nextUrl.clone();
+      to.pathname = "/welcome";
+      to.search = "";
+      const redirect = NextResponse.redirect(to);
+      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+      return redirect;
+    }
+  }
+
   return response;
 }

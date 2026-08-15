@@ -75,11 +75,11 @@ export function LoginClient() {
     try {
       const { error } = await supabase.auth.verifyOtp({ phone: pendingPhone, token: code.trim(), type: "sms" });
       if (error) throw error;
-      // registration: attach the email so they can also sign in with it later (sends a branded confirm)
-      if (tab === "register" && f.email.trim()) {
-        try { await supabase.auth.updateUser({ email: f.email.trim() }); } catch { /* non-fatal */ }
-      }
-      router.push("/onboarding");
+      // Route to /welcome to finish first-run setup (bootstrap org + trial credits,
+      // confirm name/business, link the phone). Registered users land there with
+      // their details pre-filled; the page forwards them on once profile_complete
+      // is set, and the middleware gate catches any first-time sign-in too.
+      router.push("/welcome");
       router.refresh();
     } catch (e) {
       setMsg({ text: (e as Error)?.message || "That code didn't work — check it and try again." });
