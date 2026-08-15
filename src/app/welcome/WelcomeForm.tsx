@@ -19,12 +19,20 @@ export function WelcomeForm({
   const [f, setF] = useState({ name: prefill.name, business: prefill.business, email: prefill.email });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState(""); // non-blocking heads-up (e.g. email already in use)
+  const [ready, setReady] = useState(false); // profile saved; button now just navigates on
 
   const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
   const inputCls = "w-full rounded-xl border border-line bg-white/80 px-3.5 py-3 text-sm outline-none focus:border-brand";
 
+  function goOn() {
+    router.push("/onboarding");
+    router.refresh();
+  }
+
   async function submit() {
     if (busy) return;
+    if (ready) { goOn(); return; } // already saved — this click just proceeds
     if (!f.name.trim() || !f.business.trim()) { setErr("Please add your name and your business/organization name."); return; }
     setBusy(true); setErr("");
     try {
@@ -33,12 +41,17 @@ export function WelcomeForm({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ full_name: f.name.trim(), business_name: f.business.trim(), email: f.email.trim() }),
       });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j.error || "Couldn't save your details — please try again.");
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Couldn't save your details — please try again.");
+      // Profile saved. If the email couldn't be linked (already tied to another
+      // account), tell them plainly and let them continue on the next click —
+      // don't silently swallow it.
+      if (j.emailLinked === false && f.email.trim()) {
+        setReady(true);
+        setNotice(`Your workspace is ready. Heads-up: ${f.email.trim()} is already linked to another account, so we couldn't add it as an email login — you'll keep signing in with your phone. It's still saved for report delivery. Tap Continue to go on.`);
+        return;
       }
-      router.push("/onboarding");
-      router.refresh();
+      goOn();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -80,10 +93,16 @@ export function WelcomeForm({
               </div>
             )}
 
+            {notice && (
+              <p className="rounded-xl border border-brand/25 bg-brand-soft/60 p-2.5 text-sm text-ink-soft">{notice}</p>
+            )}
+
             <button onClick={submit} disabled={busy} className="btn btn-primary w-full py-3 disabled:opacity-60">
               {busy ? "Setting up…" : "Continue →"}
             </button>
-            <p className="text-center text-[11px] text-ink-faint">We use your business name for your workspace, and your number so Rani recognizes you on WhatsApp.</p>
+            {!ready && (
+              <p className="text-center text-[11px] text-ink-faint">We use your business name for your workspace, and your number so Rani recognizes you on WhatsApp.</p>
+            )}
 
             {err && (
               <p className="rounded-xl border border-trust-low/30 bg-trust-low/5 p-2.5 text-sm text-trust-low">{err}</p>
