@@ -32,18 +32,27 @@ export async function POST(req: Request) {
   const user = await getUser();
   const phone = user?.phone ? `+${user.phone}` : "";
 
-  // 1) persist to the auth user — identity everywhere (incl. the WhatsApp assistant)
+  // 1) persist name/business to the auth user — this flips profile_complete, which
+  //    releases the first-run gate, so it MUST be its own call. Do it first.
   const supabase = await createClient();
   const meta = { full_name, business_name, profile_complete: true };
   try {
-    if (email && email !== (user?.email ?? "").toLowerCase()) {
-      // setting a new email sends a branded confirmation; lets them also sign in by email
-      await supabase.auth.updateUser({ email, data: meta });
-    } else {
-      await supabase.auth.updateUser({ data: meta });
-    }
+    await supabase.auth.updateUser({ data: meta });
   } catch {
     // metadata is best-effort — never fail the whole bootstrap on it
+  }
+
+  // 2) OPTIONALLY link the email as a second sign-in identity — separate call,
+  //    because it fails when the address already belongs to another account
+  //    (e.g. a shared team mailbox). That must NOT block the gate above. The
+  //    email is still stored on the owner profile below for digests regardless.
+  let emailLinked = true;
+  if (email && email !== (user?.email ?? "").toLowerCase()) {
+    try {
+      await supabase.auth.updateUser({ email }); // sends a branded confirmation
+    } catch {
+      emailLinked = false;
+    }
   }
 
   // 2) name the org from the business + stash owner contact for delivery + WhatsApp match
@@ -70,5 +79,5 @@ export async function POST(req: Request) {
   }
 
   void logEvent("profile_completed", { hasPhone: !!phone }, { orgId: auth.orgId, path: "/welcome" });
-  return NextResponse.json({ ok: true, orgId: auth.orgId });
+  return NextResponse.json({ ok: true, orgId: auth.orgId, emailLinked });
 }
