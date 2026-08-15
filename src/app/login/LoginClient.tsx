@@ -1,25 +1,99 @@
 "use client";
 
-import { useActionState } from "react";
-import { signIn, signUp, sendMagicLink, type AuthState } from "./actions";
+import { useState, type ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { RaniMark } from "@/components/RaniSpinner";
 
-const initial: AuthState = {};
+/**
+ * Passwordless auth — phone (SMS OTP via Twilio) or email (magic link). Registration
+ * collects name, email, phone and business/org name; the phone becomes the account's
+ * identity AND (elsewhere) the WhatsApp assistant's, so owners are recognized when
+ * they message Rani. Sign-in accepts either phone or email — whichever's quicker.
+ */
+
+const normPhone = (s: string) => {
+  const digits = s.replace(/\D/g, "");
+  return digits ? `+${digits}` : "";
+};
+
+type Tab = "signin" | "register";
+type Method = "phone" | "email";
 
 export function LoginClient() {
-  const [signInState, signInAction, signingIn] = useActionState(signIn, initial);
-  const [signUpState, signUpAction, signingUp] = useActionState(signUp, initial);
-  const [magicState, magicAction, sendingMagic] = useActionState(sendMagicLink, initial);
-  const state =
-    signInState.error || signInState.notice ? signInState :
-    magicState.error || magicState.notice ? magicState :
-    signUpState;
+  const supabase = createClient();
+  const router = useRouter();
+
+  const [tab, setTab] = useState<Tab>("signin");
+  const [method, setMethod] = useState<Method>("phone");
+  const [step, setStep] = useState<"form" | "code">("form");
+  const [f, setF] = useState({ name: "", business: "", email: "", phone: "" });
+  const [code, setCode] = useState("");
+  const [pendingPhone, setPendingPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok?: boolean; text: string } | null>(null);
+
+  const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const switchTab = (t: Tab) => { setTab(t); setStep("form"); setMsg(null); if (t === "register") setMethod("phone"); };
+
+  async function submit() {
+    if (busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const useEmail = method === "email" && tab === "signin";
+      if (useEmail) {
+        const email = f.email.trim();
+        if (!email) { setMsg({ text: "Enter your email." }); return; }
+        const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback?next=/`, shouldCreateUser: false } });
+        if (error) throw error;
+        setMsg({ ok: true, text: `Check your inbox — we emailed a sign-in link to ${email}.` });
+        return;
+      }
+      // phone SMS OTP (both sign-in and register)
+      const phone = normPhone(f.phone);
+      if (phone.length < 9) { setMsg({ text: "Enter your phone number with country code, e.g. +1 512 555 0142." }); return; }
+      if (tab === "register" && (!f.name.trim() || !f.email.trim())) { setMsg({ text: "Please add your name and email too." }); return; }
+      const data = tab === "register"
+        ? { full_name: f.name.trim(), business_name: f.business.trim(), signup_email: f.email.trim() }
+        : undefined;
+      const { error } = await supabase.auth.signInWithOtp({ phone, options: { channel: "sms", shouldCreateUser: tab === "register", data } });
+      if (error) throw error;
+      setPendingPhone(phone);
+      setStep("code");
+      setMsg({ ok: true, text: `We texted a 6-digit code to ${phone}.` });
+    } catch (e) {
+      setMsg({ text: (e as Error)?.message || "Couldn't send — please try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    if (busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const { error } = await supabase.auth.verifyOtp({ phone: pendingPhone, token: code.trim(), type: "sms" });
+      if (error) throw error;
+      // registration: attach the email so they can also sign in with it later (sends a branded confirm)
+      if (tab === "register" && f.email.trim()) {
+        try { await supabase.auth.updateUser({ email: f.email.trim() }); } catch { /* non-fatal */ }
+      }
+      router.push("/onboarding");
+      router.refresh();
+    } catch (e) {
+      setMsg({ text: (e as Error)?.message || "That code didn't work — check it and try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputCls = "w-full rounded-xl border border-line bg-white/80 px-3.5 py-3 text-sm outline-none focus:border-brand";
 
   return (
     <div className="flex min-h-[calc(100vh-8rem)] items-center justify-center px-6 py-10">
       <div className="w-full max-w-md animate-fade-up">
         <div className="glass-strong overflow-hidden rounded-3xl shadow-glass">
-          {/* branded header */}
           <div className="relative overflow-hidden bg-brand-hero px-8 py-9 text-center text-white">
             <div className="pointer-events-none absolute -right-8 -top-10 h-32 w-32 rounded-full bg-white/15 blur-2xl" aria-hidden />
             <div className="relative flex flex-col items-center gap-3">
@@ -32,48 +106,59 @@ export function LoginClient() {
           </div>
 
           <div className="p-7">
-            <h1 className="text-xl font-bold">Welcome</h1>
-            <p className="mt-1 text-sm text-ink-soft">Sign in to save your workspace and keep your market intelligence.</p>
-
-            <form className="mt-5 space-y-3">
-              <input name="email" type="email" required placeholder="you@business.com" className="field" />
-              <input name="password" type="password" required placeholder="Password" className="field" />
-              <div className="flex gap-2 pt-1">
-                <button formAction={signInAction} disabled={signingIn || signingUp || sendingMagic} className="btn btn-primary flex-1 py-3 disabled:opacity-60">
-                  {signingIn ? "Signing in…" : "Sign in"}
+            {/* tabs */}
+            <div className="mb-5 flex rounded-2xl bg-surface-sunken p-1 text-sm font-semibold">
+              {(["signin", "register"] as Tab[]).map((t) => (
+                <button key={t} onClick={() => switchTab(t)} className={`flex-1 rounded-xl py-2 transition-colors ${tab === t ? "bg-white text-brand-deep shadow-sm" : "text-ink-soft"}`}>
+                  {t === "signin" ? "Sign in" : "Create account"}
                 </button>
-                <button formAction={signUpAction} disabled={signingIn || signingUp || sendingMagic} className="btn btn-secondary flex-1 py-3 disabled:opacity-60">
-                  {signingUp ? "Creating…" : "Create account"}
+              ))}
+            </div>
+
+            {step === "code" ? (
+              <div className="space-y-3">
+                <p className="text-sm text-ink-soft">Enter the 6-digit code we sent to <b className="text-ink">{pendingPhone}</b>.</p>
+                <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="••••••" className={`${inputCls} text-center text-xl tracking-[0.4em]`} />
+                <button onClick={verify} disabled={busy || code.length < 4} className="btn btn-primary w-full py-3 disabled:opacity-60">{busy ? "Verifying…" : "Verify & continue"}</button>
+                <button onClick={() => { setStep("form"); setCode(""); setMsg(null); }} className="w-full text-center text-xs text-ink-faint hover:text-brand">← use a different number</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {tab === "register" && (
+                  <>
+                    <input value={f.name} onChange={set("name")} placeholder="Your name" className={inputCls} />
+                    <input value={f.business} onChange={set("business")} placeholder="Business / organization name" className={inputCls} />
+                    <input value={f.email} onChange={set("email")} type="email" placeholder="you@business.com" className={inputCls} />
+                  </>
+                )}
+
+                {tab === "signin" && (
+                  <div className="flex rounded-xl bg-surface-sunken p-1 text-xs font-semibold">
+                    {(["phone", "email"] as Method[]).map((m) => (
+                      <button key={m} onClick={() => { setMethod(m); setMsg(null); }} className={`flex-1 rounded-lg py-1.5 transition-colors ${method === m ? "bg-white text-brand-deep shadow-sm" : "text-ink-soft"}`}>
+                        {m === "phone" ? "📱 Phone" : "✉️ Email"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {(tab === "register" || method === "phone")
+                  ? <input value={f.phone} onChange={set("phone")} type="tel" placeholder="Phone — e.g. +1 512 555 0142" className={inputCls} />
+                  : <input value={f.email} onChange={set("email")} type="email" placeholder="you@business.com" className={inputCls} />}
+
+                <button onClick={submit} disabled={busy} className="btn btn-primary w-full py-3 disabled:opacity-60">
+                  {busy ? "Sending…" : tab === "register" ? "Create account" : method === "phone" ? "Text me a code" : "Email me a sign-in link"}
                 </button>
+                <p className="text-center text-[11px] text-ink-faint">No passwords — {tab === "register" ? "we'll text a code to confirm your number" : method === "phone" ? "we'll text you a one-time code" : "we'll email you a one-time link"}.</p>
               </div>
-
-              {/* passwordless option — formNoValidate skips the required password field */}
-              <div className="flex items-center gap-3 pt-1">
-                <span className="h-px flex-1 bg-line" />
-                <span className="text-xs text-ink-faint">or</span>
-                <span className="h-px flex-1 bg-line" />
-              </div>
-              <button
-                formAction={magicAction}
-                formNoValidate
-                disabled={signingIn || signingUp || sendingMagic}
-                className="btn btn-secondary w-full py-3 disabled:opacity-60"
-              >
-                {sendingMagic ? "Sending…" : "✉️ Email me a sign-in link (no password)"}
-              </button>
-            </form>
-
-            {state.error && (
-              <p className="mt-3 rounded-xl border border-trust-low/30 bg-trust-low/5 p-2.5 text-sm text-trust-low">{state.error}</p>
             )}
-            {state.notice && (
-              <p className="mt-3 rounded-xl border border-trust-direct/30 bg-trust-direct/5 p-2.5 text-sm text-trust-direct">{state.notice}</p>
+
+            {msg && (
+              <p className={`mt-3 rounded-xl border p-2.5 text-sm ${msg.ok ? "border-trust-direct/30 bg-trust-direct/5 text-trust-direct" : "border-trust-low/30 bg-trust-low/5 text-trust-low"}`}>{msg.text}</p>
             )}
           </div>
         </div>
-        <p className="mt-4 text-center text-xs text-ink-faint">
-          Public market analysis needs no account — sign in only to save it.
-        </p>
+        <p className="mt-4 text-center text-xs text-ink-faint">Public market analysis needs no account — sign in only to save it.</p>
       </div>
     </div>
   );
