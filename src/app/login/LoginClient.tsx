@@ -17,6 +17,9 @@ const normPhone = (s: string) => {
   return digits ? `+${digits}` : "";
 };
 
+// Base URL of the Ask Rani (Rani) app for the unified "Sign in with Ask Rani" SSO.
+const RANI_APP = (process.env.NEXT_PUBLIC_RANI_APP_URL || "https://app.askrani.ai").replace(/\/$/, "");
+
 type Tab = "signin" | "register";
 type Method = "phone" | "email";
 
@@ -106,6 +109,17 @@ export function LoginClient() {
           </div>
 
           <div className="p-7">
+            {/* Unified sign-in: one Ask Rani account across Rani + Insights. */}
+            <a
+              href={`${RANI_APP}/api/insights/sso/start?return=/`}
+              className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-line bg-white/80 py-3 text-sm font-semibold text-brand-deep transition-all hover:shadow-glow"
+            >
+              <RaniMark size={18} /> Continue with Ask Rani
+            </a>
+            <div className="mb-4 flex items-center gap-3 text-xs text-ink-faint">
+              <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
+            </div>
+
             {/* tabs */}
             <div className="mb-5 flex rounded-2xl bg-surface-sunken p-1 text-sm font-semibold">
               {(["signin", "register"] as Tab[]).map((t) => (

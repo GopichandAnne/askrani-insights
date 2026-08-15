@@ -70,7 +70,11 @@ export async function GET(req: Request) {
     // Ensure the tenant exists (idempotent) so they land straight in the app.
     await ensureOrgForUser(data.user.id, claims.email);
 
-    return NextResponse.redirect(new URL("/", url.origin));
+    // Honor a same-origin return path (from the direct "Sign in with Ask Rani"
+    // flow); default to the app home. Reject anything not a local path.
+    const ret = url.searchParams.get("return");
+    const dest = ret && ret.startsWith("/") && !ret.startsWith("//") ? ret : "/";
+    return NextResponse.redirect(new URL(dest, url.origin));
   } catch (e) {
     console.error("[sso] error", (e as Error).message);
     return NextResponse.redirect(new URL("/login?sso=error", url.origin));
