@@ -9,7 +9,12 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  // Use the DIRECT *.supabase.co host (SUPABASE_INTERNAL_URL) for this server-side
+  // auth call, NOT the custom domain: from Vercel the Cloudflare custom-domain hop
+  // adds ~1.5s to getUser() (measured), which was the entire per-navigation cost.
+  // Falls back to the public URL when unset. The browser still uses the custom
+  // domain; only this server→Supabase call is rerouted.
+  const url = process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) return response;
 
