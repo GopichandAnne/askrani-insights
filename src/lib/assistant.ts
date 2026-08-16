@@ -14,7 +14,14 @@ import { fetchRaniOps } from "@/lib/raniSlice";
  */
 
 export interface ChatSource { label: string; business?: string; platform?: string; url?: string }
-export interface AssistantAnswer { answer: string; grounded: boolean; sources?: ChatSource[] }
+/** A change the copilot can perform when the owner asks (executed by the caller,
+ *  not here — this brain only DECIDES). Same "Ask" feature, now able to act. */
+export type AssistantAction =
+  | { kind: "set_notify_email"; email: string }
+  | { kind: "set_notify_whatsapp"; phone: string }
+  | { kind: "link_rani_store"; slug: string }
+  | { kind: "remove_competitor"; name: string };
+export interface AssistantAnswer { answer: string; grounded: boolean; sources?: ChatSource[]; action?: AssistantAction }
 export interface WaTurn { role: "user" | "assistant"; text: string }
 export interface BusinessCandidate { id: string; name: string; vertical?: string }
 
@@ -100,6 +107,18 @@ const SCHEMA = {
     answer: { type: "string", description: "Concise answer, grounded strictly in DATA. Real names/numbers. No markdown headers." },
     grounded: { type: "boolean", description: "true only if DATA actually contained what was needed to answer; false if you had to say you don't have it." },
     sourceIds: { type: "array", items: { type: "string" }, description: "The [Ln] labels of the LIVE RECORDS you used for SPECIFIC facts. Empty for general advice, moves, or summary-only answers." },
+    action: {
+      type: "object", additionalProperties: false,
+      description: "Set ONLY when the owner explicitly asks to change a setting or remove a competitor. Otherwise omit it entirely (or kind='none').",
+      properties: {
+        kind: { type: "string", enum: ["none", "set_notify_email", "set_notify_whatsapp", "link_rani_store", "remove_competitor"] },
+        email: { type: "string" },
+        phone: { type: "string" },
+        slug: { type: "string", description: "The Ask Rani store slug/name to link." },
+        name: { type: "string", description: "The competitor name to remove." },
+      },
+      required: ["kind"],
+    },
   },
   required: ["answer", "grounded"],
 };
@@ -116,7 +135,21 @@ const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `2. COMBINE INSIDE + OUTSIDE. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete moves. Ground the rationale in real data — cross-reference YOUR OPERATIONS with the market: e.g., don't cut price on a best-seller even if a rival is cheaper; if a rival is winning something your OWN customers keep asking for, that's a strong signal; and if they have promote-and-earn advocates or a loyalty list, prefer ACTIVATING those (a zero-cost channel their own customers power) over matching rivals' paid ads. Time it to a relevant UPCOMING OCCASION when one fits. The creative idea is yours, but every fact must trace to DATA. Set grounded=true when built on real data.\n` +
   `3. Be concise and specific: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
   `4. CITATIONS: LIVE RECORDS are labelled [L1], [L2], … When you state a SPECIFIC fact from one (an exact price, a specific post, a specific change), cite it inline with its label, e.g. [L2], and list every label you cited in sourceIds. Do NOT cite for general advice, move/promo ideas, occasion timing, or anything from SUMMARIES — leave sourceIds empty then. Never cite more than 3.\n` +
-  `5. RECENT CONVERSATION (if given) is only for follow-up context, not facts.`;
+  `5. RECENT CONVERSATION (if given) is only for follow-up context, not facts.\n` +
+  `6. ACTIONS — you can make a few changes for the owner. ONLY when they explicitly ask, set "action": to send their reports to an email → kind="set_notify_email", email=<address>; to send reports to a WhatsApp number → kind="set_notify_whatsapp", phone=<number>; to connect their Ask Rani store so their own store data + shared credits link up → kind="link_rani_store", slug=<store name/slug they gave>; to stop watching a competitor → kind="remove_competitor", name=<competitor>. When you set an action, write a short answer CONFIRMING it's done (e.g. "Done — reports will go to …") and set grounded=true. For everything else omit action (or kind="none"). NEVER invent an action they didn't ask for.`;
+
+/** Defensively turn the model's raw action object into a typed, validated action
+ *  (or null). We never trust the model to produce a well-formed side effect. */
+function validateAction(a?: Record<string, string> | null): AssistantAction | null {
+  if (!a || typeof a !== "object") return null;
+  const kind = String(a.kind ?? "").trim();
+  const s = (v?: string) => String(v ?? "").trim();
+  if (kind === "set_notify_email") { const email = s(a.email).toLowerCase(); return email.includes("@") ? { kind, email } : null; }
+  if (kind === "set_notify_whatsapp") { const d = s(a.phone).replace(/\D/g, ""); return d.length >= 8 ? { kind, phone: `+${d}` } : null; }
+  if (kind === "link_rani_store") { const slug = s(a.slug); return slug ? { kind, slug } : null; }
+  if (kind === "remove_competitor") { const name = s(a.name); return name ? { kind, name } : null; }
+  return null;
+}
 
 interface AnswerOpts { id?: string; target_business_id?: string | null }
 
@@ -166,7 +199,7 @@ export async function answerFromData(
     (occasions ? `# UPCOMING OCCASIONS (timing ideas only — NOT facts about competitors)\n${occasions}\n\n` : "");
 
   try {
-    const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean; sourceIds?: string[] }>({
+    const { data } = await getLlm().callStructured<{ answer: string; grounded: boolean; sourceIds?: string[]; action?: Record<string, string> }>({
       system: SYSTEM(ws),
       text: `DATA (real, recently collected for ${ws.name}):\n${dataText}${historyText}\nOWNER'S QUESTION: ${q}`,
       schema: SCHEMA, tier: "extract", maxTokens: 550,
@@ -184,7 +217,7 @@ export async function answerFromData(
     const sources: ChatSource[] = [...cited].map((id) => byId.get(id)).filter((s): s is RetrievedSource => !!s)
       .slice(0, 3).map((s) => ({ label: s.label, business: s.business, platform: s.platform, url: s.url }));
 
-    return { answer: answer || raw, grounded: !!data.grounded, ...(sources.length ? { sources } : {}) };
+    return { answer: answer || raw, grounded: !!data.grounded, ...(sources.length ? { sources } : {}), ...(validateAction(data.action) ? { action: validateAction(data.action)! } : {}) };
   } catch {
     return { answer: "Something went wrong answering that — please try again in a moment.", grounded: false };
   }

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { activeWorkspace } from "@/lib/workspace";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { answerFromData, type WaTurn } from "@/lib/assistant";
+import { applyAssistantAction } from "@/lib/assistantActions";
 
 /**
  * POST /api/assistant/chat — the in-app chat, powered by the same advisor brain as
@@ -27,11 +28,22 @@ export async function POST(req: Request) {
     : [];
 
   const supabase = await createClient();
-  const { answer, grounded, sources } = await answerFromData(
+  const { answer, grounded, sources, action } = await answerFromData(
     { id: ws.id, name: ws.name, vertical: ws.vertical, target_business_id: ws.target_business_id },
     ((ws as { goals?: Record<string, unknown> }).goals as Record<string, any>) ?? {},
     message, history, supabase,
   );
 
-  return NextResponse.json({ answer, grounded, sources: sources ?? [] });
+  // If the copilot decided on a config change, execute it against THIS workspace
+  // (activeWorkspace already scoped ws to the signed-in user). On failure, the
+  // model's confirming answer would be wrong — replace it with the reason.
+  let finalAnswer = answer;
+  let changed = false;
+  if (action) {
+    const res = await applyAssistantAction(createServiceClient(), { id: ws.id }, action);
+    changed = res.ok;
+    if (!res.ok) finalAnswer = res.note ? `I couldn't do that — ${res.note}` : "I couldn't make that change — please try again.";
+  }
+
+  return NextResponse.json({ answer: finalAnswer, grounded, sources: sources ?? [], changed });
 }
