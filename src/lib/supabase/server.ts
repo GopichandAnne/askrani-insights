@@ -2,6 +2,15 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 /**
+ * URL for SERVER-side Supabase calls. Prefer SUPABASE_INTERNAL_URL (the direct
+ * *.supabase.co host) so server queries skip the custom-domain Cloudflare hop
+ * (~40ms/call × several calls per navigation). The browser still uses the custom
+ * domain (NEXT_PUBLIC_SUPABASE_URL). Falls back to the public URL when unset, so
+ * this is a no-op until the env is added.
+ */
+const serverUrl = () => process.env.SUPABASE_INTERNAL_URL || process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
+/**
  * Server Supabase client (anon key + user session via cookies, RLS-enforced).
  * Use in server components / route handlers acting on behalf of a signed-in user.
  */
@@ -13,7 +22,7 @@ export type RlsClient = Awaited<ReturnType<typeof createClient>>;
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serverUrl(),
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
@@ -44,7 +53,7 @@ export async function createClient() {
 export function createServiceClient() {
   const { createClient: createRaw } = require("@supabase/supabase-js");
   return createRaw(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    serverUrl(),
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false, autoRefreshToken: false } },
   );

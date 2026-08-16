@@ -25,17 +25,49 @@ export function isServiceConfigured(): boolean {
   return isSupabaseConfigured() && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  user_metadata: Record<string, unknown>;
+  app_metadata: Record<string, unknown>;
+}
+
 /** Current auth user, or null. Safe to call when Supabase is unconfigured.
- *  Wrapped in React cache() so the layout, activeWorkspace() and the page all
- *  share ONE auth validation per request instead of each doing its own network
- *  round-trip to the Supabase auth server (the main navigation-latency cause). */
-export const getUser = cache(async () => {
+ *
+ *  Fast path: getClaims() verifies the JWT LOCALLY via the project's JWKS (the
+ *  project uses asymmetric ES256 signing keys) — no round-trip to the auth server,
+ *  which was the main per-navigation latency. The middleware still validates +
+ *  refreshes the session over the network once per request, so this stays secure.
+ *  Falls back to the network getUser() if a local verification isn't available.
+ *
+ *  Wrapped in React cache() so the layout, activeWorkspace() and the page share
+ *  ONE resolution per request. */
+export const getUser = cache(async (): Promise<AuthUser | null> => {
   if (!isSupabaseConfigured()) return null;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user;
+  try {
+    const { data, error } = await supabase.auth.getClaims();
+    const c = data?.claims as Record<string, any> | undefined;
+    if (!error && c?.sub) {
+      return {
+        id: String(c.sub),
+        email: (c.email ?? null) as string | null,
+        phone: (c.phone ?? null) as string | null,
+        user_metadata: (c.user_metadata ?? {}) as Record<string, unknown>,
+        app_metadata: (c.app_metadata ?? {}) as Record<string, unknown>,
+      };
+    }
+  } catch { /* fall through to the network check */ }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email ?? null,
+    phone: user.phone ?? null,
+    user_metadata: (user.user_metadata ?? {}) as Record<string, unknown>,
+    app_metadata: (user.app_metadata ?? {}) as Record<string, unknown>,
+  };
 });
 
 /** Require a signed-in user; redirect to /login otherwise. */
