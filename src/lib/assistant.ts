@@ -180,9 +180,11 @@ export async function answerFromData(
   let opsText = "";
   try { opsText = (await fetchRaniOps(ws, goals)).text; } catch { /* umbrella not wired — market-only */ }
 
-  if (!summaries.trim() && !liveText.trim() && !opsText.trim()) {
-    return { answer: `I don't have any market data collected for ${ws.name} yet. Once a scan runs, ask me about competitor deals, prices, your rating, or what to run next.`, grounded: false };
-  }
+  // NOTE: we no longer short-circuit when there's no market data — the copilot must
+  // still handle CONFIG requests ("email my reports to…", "connect my Rani store…")
+  // for a brand-new workspace. The friendly "nothing collected yet" nudge is applied
+  // AFTER the brain runs, only when the message wasn't a config action (see below).
+  const noData = !summaries.trim() && !liveText.trim() && !opsText.trim();
 
   let occasions = "";
   try { const occ = upcomingOccasions(ws.vertical); if (occ.length) occasions = occ.map((o) => `- ${o.name} (in ${o.inDays} day${o.inDays === 1 ? "" : "s"}, ${o.whenISO}): ${o.note}`).join("\n"); } catch { /* timing is optional */ }
@@ -204,8 +206,16 @@ export async function answerFromData(
       text: `DATA (real, recently collected for ${ws.name}):\n${dataText}${historyText}\nOWNER'S QUESTION: ${q}`,
       schema: SCHEMA, tier: "extract", maxTokens: 550,
     });
+    const action = validateAction(data.action);
+
+    // Brand-new workspace with nothing collected yet: if this wasn't a config
+    // action, give the friendly nudge (config actions still go through below).
+    if (noData && !action) {
+      return { answer: `I don't have any market data collected for ${ws.name} yet — once a scan runs, ask me about competitor deals, prices, your rating, or what to run next. (I can still change your settings whenever you ask.)`, grounded: false };
+    }
+
     const raw = clean(data.answer);
-    if (!raw) return { answer: "I couldn't put that together — try rephrasing?", grounded: false };
+    if (!raw) return { answer: "I couldn't put that together — try rephrasing?", grounded: false, ...(action ? { action } : {}) };
 
     // cited ids = from the structured field ∪ any [Ln] markers left in the text
     const cited = new Set<string>((Array.isArray(data.sourceIds) ? data.sourceIds : []).map((s) => String(s).trim()));
@@ -217,7 +227,7 @@ export async function answerFromData(
     const sources: ChatSource[] = [...cited].map((id) => byId.get(id)).filter((s): s is RetrievedSource => !!s)
       .slice(0, 3).map((s) => ({ label: s.label, business: s.business, platform: s.platform, url: s.url }));
 
-    return { answer: answer || raw, grounded: !!data.grounded, ...(sources.length ? { sources } : {}), ...(validateAction(data.action) ? { action: validateAction(data.action)! } : {}) };
+    return { answer: answer || raw, grounded: !!data.grounded, ...(sources.length ? { sources } : {}), ...(action ? { action } : {}) };
   } catch {
     return { answer: "Something went wrong answering that — please try again in a moment.", grounded: false };
   }
