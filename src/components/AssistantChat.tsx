@@ -12,6 +12,14 @@ import { useEffect, useRef, useState } from "react";
 interface Source { label: string; business?: string; platform?: string; url?: string }
 interface Msg { role: "user" | "assistant"; text: string; grounded?: boolean; sources?: Source[] }
 
+// Browser Web Speech API (zero-cost STT) — lets owners narrate instead of type.
+type SpeechRec = {
+  lang: string; interimResults: boolean;
+  onresult: (e: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => void;
+  onerror: () => void; onend: () => void; start: () => void;
+};
+type SpeechWindow = Window & { webkitSpeechRecognition?: new () => SpeechRec; SpeechRecognition?: new () => SpeechRec };
+
 const SOURCE_EMOJI: Record<string, string> = {
   price: "💲", change: "📈", website: "🌐", google: "🔵", instagram: "📸", facebook: "👍", tiktok: "🎵", youtube: "▶️", doordash: "🛵", ubereats: "🛵",
 };
@@ -27,6 +35,7 @@ export function AssistantChat({ businessName }: { businessName: string }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -54,6 +63,23 @@ export function AssistantChat({ businessName }: { businessName: string }) {
       setBusy(false);
       setTimeout(() => taRef.current?.focus(), 20);
     }
+  }
+
+  function startVoice() {
+    const w = window as SpeechWindow;
+    const SR = w.webkitSpeechRecognition || w.SpeechRecognition;
+    if (!SR) {
+      setMsgs((m) => [...m, { role: "assistant", text: "Voice input isn't supported in this browser — try Chrome, or just type." }]);
+      return;
+    }
+    const rec = new SR();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = false;
+    setListening(true);
+    rec.onresult = (e) => { const said = e.results[0]?.[0]?.transcript ?? ""; setInput((p) => (p ? `${p} ${said}` : said)); };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    rec.start();
   }
 
   return (
@@ -112,20 +138,30 @@ export function AssistantChat({ businessName }: { businessName: string }) {
       {/* composer */}
       <div className="border-t border-line/60 bg-white/50 p-3">
         <div className="flex items-end gap-2">
+          <button
+            type="button"
+            onClick={startVoice}
+            disabled={busy}
+            aria-label="Speak your question"
+            title="Speak instead of typing"
+            className={`grid h-[42px] w-[42px] shrink-0 place-items-center rounded-2xl border transition-colors disabled:opacity-50 ${listening ? "border-brand bg-brand-soft text-brand" : "border-line bg-white/80 text-ink-soft hover:text-brand"}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /></svg>
+          </button>
           <textarea
             ref={taRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
             rows={1}
-            placeholder={`Ask about ${businessName} or “what should I run this month?”`}
+            placeholder={listening ? "Listening…" : `Ask about ${businessName} or “what should I run this month?”`}
             className="max-h-32 min-h-[42px] w-full resize-none rounded-2xl border border-line bg-white/80 px-3.5 py-2.5 text-sm outline-none focus:border-brand"
           />
           <button onClick={() => send(input)} disabled={busy || !input.trim()} className="btn btn-primary shrink-0 px-4 py-2.5 disabled:opacity-50" aria-label="Send">
             Send
           </button>
         </div>
-        <p className="mt-1.5 px-1 text-[11px] text-ink-faint">Grounded in your collected data · Enter to send, Shift+Enter for a new line</p>
+        <p className="mt-1.5 px-1 text-[11px] text-ink-faint">Grounded in your collected data · tap the mic to speak · Enter to send</p>
       </div>
     </div>
   );
