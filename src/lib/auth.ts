@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { grantTrialIfNeeded } from "@/lib/credits";
@@ -24,15 +25,18 @@ export function isServiceConfigured(): boolean {
   return isSupabaseConfigured() && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 }
 
-/** Current auth user, or null. Safe to call when Supabase is unconfigured. */
-export async function getUser() {
+/** Current auth user, or null. Safe to call when Supabase is unconfigured.
+ *  Wrapped in React cache() so the layout, activeWorkspace() and the page all
+ *  share ONE auth validation per request instead of each doing its own network
+ *  round-trip to the Supabase auth server (the main navigation-latency cause). */
+export const getUser = cache(async () => {
   if (!isSupabaseConfigured()) return null;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   return user;
-}
+});
 
 /** Require a signed-in user; redirect to /login otherwise. */
 export async function requireUser() {

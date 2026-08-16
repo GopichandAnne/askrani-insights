@@ -11,7 +11,7 @@ import { EphemeralBanner } from "@/components/EphemeralBanner";
 import { CollectionBanner } from "@/components/CollectionBanner";
 import { Analytics } from "@/components/Analytics";
 import { ConsentBanner } from "@/components/ConsentBanner";
-import { creditsSummary } from "@/lib/credits";
+import { navBalance } from "@/lib/credits";
 
 export const metadata: Metadata = {
   title: "Ask Rani Insights — local market intelligence",
@@ -68,7 +68,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // remaining monitoring credits (shown in the nav)
   let credits: number | null = null;
   if (user) {
-    try { credits = (await creditsSummary(await ensureOrgForUser(user.id, user.email))).balance; } catch { /* non-fatal */ }
+    try { credits = await navBalance(await ensureOrgForUser(user.id, user.email)); } catch { /* non-fatal */ }
   }
 
   return (

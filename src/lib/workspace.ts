@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { getUser, isSupabaseConfigured } from "@/lib/auth";
@@ -31,7 +32,7 @@ export type ScreenState =
  * back to the most recently created. RLS guarantees the cookie can only ever
  * resolve to a workspace the user is a member of.
  */
-export async function activeWorkspace(): Promise<ScreenState> {
+export const activeWorkspace = cache(async (): Promise<ScreenState> => {
   if (!isSupabaseConfigured()) return { status: "unconfigured" };
   const user = await getUser();
   if (!user) return { status: "signedout" };
@@ -57,7 +58,7 @@ export async function activeWorkspace(): Promise<ScreenState> {
 
   if (!data) return { status: "empty" };
   return { status: "ok", workspace: data as WorkspaceRow };
-}
+});
 
 /** All workspaces (businesses) the signed-in user can view, newest first. */
 export async function listWorkspaces(): Promise<WorkspaceRow[]> {

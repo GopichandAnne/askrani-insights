@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sharedWalletConfigured, resolveRaniStore, walletBalance, walletDebit, walletGrant } from "@/lib/raniWallet";
 
@@ -107,6 +108,21 @@ export async function getBalance(orgId: string): Promise<number> {
 /** Does the org have at least `min` credits? (Phase 2 gating.) */
 export async function hasCredits(orgId: string, min = 1): Promise<boolean> {
   try { return (await getBalance(orgId)) >= min; } catch { return true; /* fail-open on infra error */ }
+}
+
+/**
+ * Balance for the NAV credits pill only — cached ~30s per org so navigating
+ * between menus never blocks on the balance lookup (which, for an umbrella-linked
+ * org, is a cross-project HTTP call to the Rani wallet). A 30s-stale pill is fine;
+ * the billing page still calls the live creditsSummary. This keeps every click
+ * fast without changing any number's correctness (spends still record exactly).
+ */
+export function navBalance(orgId: string): Promise<number> {
+  return unstable_cache(
+    () => getBalance(orgId).catch(() => 0),
+    ["nav-credits-balance", orgId],
+    { revalidate: 30 },
+  )();
 }
 
 /** Grant the one-time trial credits on first org bootstrap (idempotent). */
