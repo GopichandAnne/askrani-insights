@@ -51,7 +51,7 @@ export async function requireUser() {
  * org_membership have no authenticated INSERT policy by design, so tenant
  * bootstrap is a trusted server operation keyed off the verified auth user.
  */
-export async function ensureOrgForUser(userId: string, email?: string | null): Promise<string> {
+export const ensureOrgForUser = cache(async (userId: string, email?: string | null): Promise<string> => {
   const svc = createServiceClient();
 
   const { data: existing } = await svc
@@ -85,4 +85,4 @@ export async function ensureOrgForUser(userId: string, email?: string | null): P
   // First org for this user == a new signup (first authenticated action).
   void logEvent("signup", {}, { orgId: org.id as string });
   return org.id as string;
-}
+});

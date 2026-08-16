@@ -11,7 +11,7 @@ import { sharedWalletConfigured, resolveRaniStore, walletBalance, walletDebit, w
  */
 async function linkedStore(orgId: string): Promise<string | null> {
   if (!sharedWalletConfigured()) return null;
-  try { return await resolveRaniStore(createServiceClient(), orgId); } catch { return null; }
+  try { return await resolveRaniStore(orgId); } catch { return null; }
 }
 
 /**

@@ -1,6 +1,21 @@
+import { cache } from "react";
 import { after } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { WorkspaceRow } from "@/lib/workspace";
+
+// deno-lint-ignore no-explicit-any
+type Goals = Record<string, any>;
+
+/**
+ * Read workspace.goals ONCE per request. A single page renders several briefings
+ * (Winning = winning + demand + menu + deals …) and each used to re-SELECT the
+ * same goals row — 5 identical DB round-trips. cache() collapses them to one.
+ */
+const readGoals = cache(async (wsId: string): Promise<Goals> => {
+  const rls = await createClient();
+  const { data } = await rls.from("workspace").select("goals").eq("id", wsId).maybeSingle();
+  return ((data?.goals as Goals | null) ?? {});
+});
 
 /**
  * Serve-stale, revalidate-in-background cache for a per-workspace AI report stored
@@ -34,9 +49,10 @@ export async function staleCached<T extends Dated>(
   const isValid = opts.isValid ?? (() => true);
   const onRead = opts.onRead ?? ((c: T) => c);
 
-  const rls = await createClient();
-  const { data } = await rls.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = ((data?.goals as AnyRec | null) ?? {})[key] as T | undefined;
+  // activeWorkspace already loaded goals into ws — reuse it (zero extra query).
+  // Fall back to a request-cached read only if goals wasn't hydrated.
+  const goals: Goals = (ws.goals as Goals) ?? (await readGoals(ws.id));
+  const cached = goals[key] as T | undefined;
   const freshEnough = !!cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000;
 
   async function save(val: T) {

@@ -1,4 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { cache } from "react";
+import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * Shared-wallet client — the Insights side of "one account, one wallet".
@@ -30,9 +31,12 @@ export interface WalletSummary {
 }
 
 /** The Rani store slug this org is explicitly linked to, or null. First workspace
- *  under the org that carries goals.raniStore wins. Null ⇒ not umbrella-linked. */
-export async function resolveRaniStore(svc: SupabaseClient, orgId: string): Promise<string | null> {
+ *  under the org that carries goals.raniStore wins. Null ⇒ not umbrella-linked.
+ *  Request-cached by orgId — the layout's credits + org paths both resolve this,
+ *  so cache() collapses them to one query per navigation. */
+export const resolveRaniStore = cache(async (orgId: string): Promise<string | null> => {
   try {
+    const svc = createServiceClient();
     const { data } = await svc.from("workspace").select("goals").eq("organization_id", orgId);
     for (const w of data ?? []) {
       const slug = String((w as { goals?: Record<string, unknown> })?.goals?.raniStore ?? "").trim().toLowerCase();
@@ -40,7 +44,7 @@ export async function resolveRaniStore(svc: SupabaseClient, orgId: string): Prom
     }
   } catch { /* fall through */ }
   return null;
-}
+});
 
 async function call(store: string, action: string, extra: Record<string, unknown> = {}): Promise<any | null> {
   if (!sharedWalletConfigured()) return null;
