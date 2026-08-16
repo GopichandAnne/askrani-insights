@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -185,18 +186,12 @@ export async function generateIndustryBest(ws: WorkspaceRow, _db?: RlsClient): P
   }
 }
 
-/** Cached national best-content read (regenerated when older than maxAgeHours). */
-export async function getOrMakeIndustryBest(ws: WorkspaceRow, maxAgeHours = 24): Promise<IndustryBest> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { industryBest?: IndustryBest } | null)?.industryBest;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateIndustryBest(ws);
-  // don't overwrite a good cache with an empty (not-activated) read
-  if (fresh.empty && cached && !cached.empty) return cached;
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), industryBest: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached national best-content read — served instantly, regenerated in the
+ *  background when stale. Never overwrites a good cache with an empty (not-yet-
+ *  activated) read. */
+export function getOrMakeIndustryBest(ws: WorkspaceRow, maxAgeHours = 24): Promise<IndustryBest> {
+  return staleCached(ws, "industryBest", maxAgeHours, () => generateIndustryBest(ws), {
+    isValid: (c) => !c.failed,
+    keep: (fresh, cached) => !!fresh.empty && !!cached && !cached.empty,
+  });
 }

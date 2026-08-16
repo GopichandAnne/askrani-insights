@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -84,15 +85,6 @@ export async function generateNewsDigest(ws: WorkspaceRow, db?: RlsClient): Prom
 }
 
 /** Cached digest (regenerated when older than maxAgeHours). */
-export async function getOrMakeNewsDigest(ws: WorkspaceRow, maxAgeHours = 12): Promise<NewsDigest> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as any)?.newsDigest as NewsDigest | undefined;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateNewsDigest(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as any) ?? {}), newsDigest: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeNewsDigest(ws: WorkspaceRow, maxAgeHours = 12): Promise<NewsDigest> {
+  return staleCached(ws, "newsDigest", maxAgeHours, () => generateNewsDigest(ws), { isValid: (c) => !c.failed });
 }

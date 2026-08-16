@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -123,23 +124,12 @@ export async function generateBriefing(ws: WorkspaceRow, db?: RlsClient): Promis
   }
 }
 
-/** Cached briefing, regenerated when older than maxAgeHours. */
-export async function getOrMakeBriefing(ws: WorkspaceRow, maxAgeHours = 12): Promise<Briefing> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as any)?.briefing as Briefing | undefined;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.summary) {
-    // sanitize on read so any previously-cached artifact is cleaned in place
-    return { ...cached, headline: strip(cached.headline), summary: strip(cached.summary) };
-  }
-  const fresh = await generateBriefing(ws);
-  // persist with the service client (workspace.goals isn't member-writable via RLS).
-  // Cache lives under goals.briefing (workspace has no dedicated settings column).
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc
-    .from("workspace")
-    .update({ goals: { ...((cur?.goals as any) ?? {}), briefing: fresh } })
-    .eq("id", ws.id);
-  return fresh;
+/** Cached briefing — served instantly, regenerated in the background when stale.
+ *  Sanitises headline/summary on read so any previously-cached artifact is cleaned
+ *  in place. */
+export function getOrMakeBriefing(ws: WorkspaceRow, maxAgeHours = 12): Promise<Briefing> {
+  return staleCached(ws, "briefing", maxAgeHours, () => generateBriefing(ws), {
+    isValid: (c) => !!c.summary,
+    onRead: (c) => ({ ...c, headline: strip(c.headline), summary: strip(c.summary) }),
+  });
 }

@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -174,16 +175,8 @@ export function demandIsGood(d: DemandReport): boolean {
   return !!(d.demands.length || d.empty);
 }
 
-/** Cached unmet-demand read (regenerated when older than maxAgeHours). */
-export async function getOrMakeDemand(ws: WorkspaceRow, maxAgeHours = 12): Promise<DemandReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { demand?: DemandReport } | null)?.demand;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateDemand(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), demand: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached unmet-demand read — served instantly, regenerated in the background when
+ *  stale (never blocks the render on the AI read). */
+export function getOrMakeDemand(ws: WorkspaceRow, maxAgeHours = 12): Promise<DemandReport> {
+  return staleCached(ws, "demand", maxAgeHours, () => generateDemand(ws), { isValid: (c) => !c.failed });
 }

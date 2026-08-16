@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -218,15 +219,6 @@ export function winningIsGood(w: WinningReport): boolean {
 }
 
 /** Cached winning report (regenerated when older than maxAgeHours). */
-export async function getOrMakeWinning(ws: WorkspaceRow, maxAgeHours = 12): Promise<WinningReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { winning?: WinningReport } | null)?.winning;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateWinning(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), winning: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeWinning(ws: WorkspaceRow, maxAgeHours = 12): Promise<WinningReport> {
+  return staleCached(ws, "winning", maxAgeHours, () => generateWinning(ws), { isValid: (c) => !c.failed });
 }

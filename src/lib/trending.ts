@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -171,15 +172,6 @@ export async function generateLocalTrends(ws: WorkspaceRow, days = 60, db?: RlsC
 }
 
 /** Cached local trends (regenerated when older than maxAgeHours). */
-export async function getOrMakeLocalTrends(ws: WorkspaceRow, maxAgeHours = 12): Promise<LocalTrends> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { localTrends?: LocalTrends } | null)?.localTrends;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000) return cached;
-
-  const fresh = await generateLocalTrends(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), localTrends: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeLocalTrends(ws: WorkspaceRow, maxAgeHours = 12): Promise<LocalTrends> {
+  return staleCached(ws, "localTrends", maxAgeHours, () => generateLocalTrends(ws));
 }

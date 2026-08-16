@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
@@ -153,15 +154,6 @@ export function socialPulseIsGood(p: SocialPulse): boolean {
   return !!(p.breakouts.length || p.risingFormats.length || p.newCollabs.length || p.summary || p.empty);
 }
 
-export async function getOrMakeSocialPulse(ws: WorkspaceRow, maxAgeHours = 12): Promise<SocialPulse> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { socialPulse?: SocialPulse } | null)?.socialPulse;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateSocialPulse(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as any) ?? {}), socialPulse: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeSocialPulse(ws: WorkspaceRow, maxAgeHours = 12): Promise<SocialPulse> {
+  return staleCached(ws, "socialPulse", maxAgeHours, () => generateSocialPulse(ws), { isValid: (c) => !c.failed });
 }

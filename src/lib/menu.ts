@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -224,17 +225,8 @@ async function deterministicMenuLens(ws: WorkspaceRow, db: RlsClient, at: string
 }
 
 /** Cached menu lens (regenerated when older than maxAgeHours). */
-export async function getOrMakeMenuLens(ws: WorkspaceRow, maxAgeHours = 12): Promise<MenuLens> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { menu?: MenuLens } | null)?.menu;
-  // Serve cache only if fresh AND not a degraded (LLM-errored) lens — a degraded
-  // one is regenerated so it upgrades back to the intelligent match once the API's up.
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await buildMenuLens(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), menu: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeMenuLens(ws: WorkspaceRow, maxAgeHours = 12): Promise<MenuLens> {
+  // A degraded (LLM-errored) lens isn't valid, so it regenerates and upgrades back
+  // to the intelligent match once the API's up.
+  return staleCached(ws, "menu", maxAgeHours, () => buildMenuLens(ws), { isValid: (c) => !c.failed });
 }

@@ -1,6 +1,7 @@
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { staleCached } from "@/lib/staleCache";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
@@ -321,18 +322,11 @@ export function youIsGood(y: YouReport): boolean {
   return !!(y.synthesis.summary && (y.synthesis.loves.length || y.synthesis.gripes.length || y.reviewsAnalyzed === 0));
 }
 
-/** Cached You report, regenerated when older than maxAgeHours. */
-export async function getOrMakeYou(ws: WorkspaceRow, maxAgeHours = 12): Promise<YouReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as any)?.you as YouReport | undefined;
-  // Serve cache only if it's fresh AND the AI read didn't fail — a failed read is
-  // regenerated on the next view so it self-heals once the API is back / funded.
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && cached.synthesis && !cached.synthesis.failed) return cached;
-
-  const fresh = await generateYou(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as any) ?? {}), you: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached You report — served instantly, regenerated in the background when stale
+ *  (never blocks a page render on the AI read). A failed read self-heals on the
+ *  next view since it isn't treated as valid. */
+export function getOrMakeYou(ws: WorkspaceRow, maxAgeHours = 12): Promise<YouReport> {
+  return staleCached(ws, "you", maxAgeHours, () => generateYou(ws), {
+    isValid: (c) => !!c.synthesis && !c.synthesis.failed,
+  });
 }

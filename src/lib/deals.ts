@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -138,30 +139,12 @@ export function dealsIsGood(d: DealsReport): boolean {
   return !!(d.deals.length || d.empty);
 }
 
-/** Cached deals report (regenerated when older than maxAgeHours). */
-export async function getOrMakeDeals(ws: WorkspaceRow, maxAgeHours = 12): Promise<DealsReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { deals?: DealsReport } | null)?.deals;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateDeals(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), deals: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached deals report — served instantly, regenerated in the background when stale. */
+export function getOrMakeDeals(ws: WorkspaceRow, maxAgeHours = 12): Promise<DealsReport> {
+  return staleCached(ws, "deals", maxAgeHours, () => generateDeals(ws), { isValid: (c) => !c.failed });
 }
 
-/** Cached OWN-offers report (goals.myDeals), regenerated when older than maxAgeHours. */
-export async function getOrMakeMyDeals(ws: WorkspaceRow, maxAgeHours = 12): Promise<DealsReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { myDeals?: DealsReport } | null)?.myDeals;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateMyDeals(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), myDeals: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached OWN-offers report (goals.myDeals) — served instantly, refreshed in bg. */
+export function getOrMakeMyDeals(ws: WorkspaceRow, maxAgeHours = 12): Promise<DealsReport> {
+  return staleCached(ws, "myDeals", maxAgeHours, () => generateMyDeals(ws), { isValid: (c) => !c.failed });
 }

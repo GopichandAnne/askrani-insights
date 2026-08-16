@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -211,16 +212,8 @@ export function contentIsGood(c: ContentReport): boolean {
   return !!(c.swipe.length || c.collabs.length || c.empty);
 }
 
-/** Cached content report (regenerated when older than maxAgeHours). */
-export async function getOrMakeContent(ws: WorkspaceRow, maxAgeHours = 12): Promise<ContentReport> {
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { content?: ContentReport } | null)?.content;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateContent(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), content: fresh } }).eq("id", ws.id);
-  return fresh;
+/** Cached content report — served instantly, regenerated in the background when
+ *  stale (never blocks the render on the AI read). */
+export function getOrMakeContent(ws: WorkspaceRow, maxAgeHours = 12): Promise<ContentReport> {
+  return staleCached(ws, "content", maxAgeHours, () => generateContent(ws), { isValid: (c) => !c.failed });
 }

@@ -1,3 +1,4 @@
+import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -118,16 +119,7 @@ export async function generateMenuCompare(ws: WorkspaceRow): Promise<MenuCompare
   return emptyReport(at, true);
 }
 
-export async function getOrMakeMenuCompare(ws: WorkspaceRow, maxAgeHours = 24): Promise<MenuCompareReport> {
-  if (!menuCompareApplies(ws.vertical)) return emptyReport(new Date().toISOString());
-  const supabase = await createClient();
-  const { data } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  const cached = (data?.goals as { menuCompare?: MenuCompareReport } | null)?.menuCompare;
-  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeHours * 3600_000 && !cached.failed) return cached;
-
-  const fresh = await generateMenuCompare(ws);
-  const svc = createServiceClient();
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), menuCompare: fresh } }).eq("id", ws.id);
-  return fresh;
+export function getOrMakeMenuCompare(ws: WorkspaceRow, maxAgeHours = 24): Promise<MenuCompareReport> {
+  if (!menuCompareApplies(ws.vertical)) return Promise.resolve(emptyReport(new Date().toISOString()));
+  return staleCached(ws, "menuCompare", maxAgeHours, () => generateMenuCompare(ws), { isValid: (c) => !c.failed });
 }
