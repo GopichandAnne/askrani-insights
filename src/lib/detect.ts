@@ -22,6 +22,16 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 export type DetectKind = "local" | "online";
 
+/** A confirm-me draft of the store's customer-service knowledge, synthesized from
+ *  the business's own public footprint (website + reviews) plus typical patterns
+ *  for its kind. The owner tweaks it in one message — never types it from blank. */
+export interface DraftKnowledge {
+  departments?: string[];              // sections a customer navigates (aisles / menu / service groups)
+  services?: string[];                 // deli, hot food, catering, pickup, delivery, appointments, …
+  faqs?: { q: string; a: string }[];   // the questions this kind of place gets, with short suggested answers
+  highlights?: string[];               // what this place is known for (from reviews / editorial)
+}
+
 export interface DetectedBusiness {
   name: string;
   /** Google primaryType (e.g. "hardware_store", "indian_restaurant") — the single
@@ -42,6 +52,8 @@ export interface DetectedBusiness {
   summary?: string;
   /** Online only — main products/services/features detected on the homepage. */
   offerings?: string[];
+  /** Local only — a draft knowledge base the owner confirms (Lever A). */
+  knowledge?: DraftKnowledge;
   placeId?: string;
 }
 
@@ -64,6 +76,7 @@ interface PlaceDetails {
   types?: string[];
   regularOpeningHours?: { weekdayDescriptions?: string[] };
   editorialSummary?: { text?: string };
+  reviews?: { text?: { text?: string }; originalText?: { text?: string }; rating?: number }[];
   location?: { latitude: number; longitude: number };
 }
 
@@ -75,7 +88,7 @@ async function placeDetails(placeId: string, key: string): Promise<PlaceDetails 
       headers: {
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask":
-          "id,displayName,formattedAddress,location,rating,userRatingCount,websiteUri,nationalPhoneNumber,internationalPhoneNumber,primaryType,types,regularOpeningHours.weekdayDescriptions,editorialSummary",
+          "id,displayName,formattedAddress,location,rating,userRatingCount,websiteUri,nationalPhoneNumber,internationalPhoneNumber,primaryType,types,regularOpeningHours.weekdayDescriptions,editorialSummary,reviews",
       },
       signal: ctrl.signal,
     });
@@ -85,6 +98,126 @@ async function placeDetails(placeId: string, key: string): Promise<PlaceDetails 
     return null;
   } finally {
     clearTimeout(t);
+  }
+}
+
+/* ── Lever A: draft the store's knowledge from its public footprint ─────────── */
+
+// Typical patterns per vertical — HINTS the LLM grounds against when the website
+// and reviews are thin, plus the site paths worth reading for each. Vertical-
+// agnostic otherwise: for anything outside these three the LLM infers from the
+// Google category + website text alone.
+const VERTICAL_KB: Record<string, { departments: string[]; services: string[]; faqTopics: string[]; paths: string[] }> = {
+  grocery: {
+    departments: ["Produce", "Frozen foods", "Dairy & eggs", "Spices & lentils", "Snacks", "Beverages", "Bakery", "Meat & seafood", "Household"],
+    services: ["Deli / hot food counter", "Catering", "Pickup", "Delivery", "Special orders"],
+    faqTopics: ["fresh produce availability", "halal/meat counter", "hot or prepared food", "catering", "delivery & pickup", "hours & parking"],
+    paths: ["/departments", "/services", "/about"],
+  },
+  restaurant: {
+    departments: ["Appetizers", "Mains", "Breads", "Desserts", "Beverages"],
+    services: ["Dine-in", "Takeout", "Delivery", "Catering", "Reservations"],
+    faqTopics: ["menu & dietary options (veg/vegan/halal/spice level)", "reservations", "catering", "delivery & takeout", "hours & parking"],
+    paths: ["/menu", "/catering", "/about"],
+  },
+  salon: {
+    departments: ["Hair", "Skin & facials", "Nails", "Waxing & threading", "Massage"],
+    services: ["Walk-ins", "Appointments", "Bridal & events", "Memberships & packages"],
+    faqTopics: ["services & pricing", "walk-in vs appointment", "bridal & events", "hours & parking"],
+    paths: ["/services", "/pricing", "/about"],
+  },
+};
+
+async function fetchPageText(url: string): Promise<string> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  try {
+    const res = await fetch(url, {
+      headers: { "user-agent": "AskRani-Setup/1.0 (+https://askrani.ai)", accept: "text/html" },
+      signal: ctrl.signal,
+      redirect: "follow",
+    });
+    if (!res.ok) return "";
+    return htmlToText((await res.text()).slice(0, 300_000)).text;
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const KNOWLEDGE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    departments: { type: "array", items: { type: "string" }, maxItems: 12, description: "The main sections/aisles a customer navigates here (grocery aisles, menu sections, or service groups). Short labels." },
+    services: { type: "array", items: { type: "string" }, maxItems: 10, description: "Services this place offers a customer — e.g. deli/hot food, catering, pickup, delivery, appointments, special orders. [] if none apparent." },
+    faqs: {
+      type: "array", maxItems: 6,
+      items: { type: "object", additionalProperties: false, properties: { q: { type: "string" }, a: { type: "string" } }, required: ["q", "a"] },
+      description: "The 4-6 questions a customer of THIS kind of business most often asks, each with a short, safe suggested answer the owner can edit. Ground answers in the website/reviews where possible; keep them 1 sentence.",
+    },
+    highlights: { type: "array", items: { type: "string" }, maxItems: 6, description: "What this specific place is known for, drawn from its reviews/editorial summary. [] if unclear." },
+  },
+  required: ["departments", "services", "faqs", "highlights"],
+};
+
+/** Synthesize a confirm-me knowledge draft from the business's public footprint.
+ *  Cheap + un-metered (a light site read + one classify-tier call). Fail-soft. */
+async function draftKnowledge(
+  d: DetectedBusiness,
+  reviewSnippets: string[],
+): Promise<DraftKnowledge | undefined> {
+  if (!isLlmConfigured()) return undefined;
+
+  const kb = d.vertical ? VERTICAL_KB[d.vertical] : undefined;
+
+  // Light website read — homepage + a couple of vertical-relevant pages, in
+  // parallel with short timeouts. Best-effort; missing pages just return "".
+  let siteText = "";
+  if (d.website) {
+    const base = normalizeUrl(d.website);
+    if (base) {
+      const origin = (() => { try { return new URL(base).origin; } catch { return base; } })();
+      const paths = kb?.paths ?? ["/about", "/services"];
+      const urls = [base, ...paths.map((p) => `${origin}${p}`)].slice(0, 4);
+      const texts = await Promise.all(urls.map(fetchPageText));
+      siteText = texts.filter(Boolean).join("\n\n").slice(0, 6000);
+    }
+  }
+
+  // Nothing but a bare listing and no vertical pattern? Skip — don't invent.
+  if (!siteText && reviewSnippets.length === 0 && !kb) return undefined;
+
+  const hints = kb
+    ? `Typical for this kind of business (use only to fill gaps, don't force): departments ~ ${kb.departments.join(", ")}; services ~ ${kb.services.join(", ")}; common questions ~ ${kb.faqTopics.join("; ")}.`
+    : "No preset pattern for this category — infer entirely from the category, website, and reviews.";
+  const reviewsBlock = reviewSnippets.length ? `\n\nRECENT REVIEW SNIPPETS (what customers mention):\n- ${reviewSnippets.slice(0, 6).join("\n- ")}` : "";
+  const siteBlock = siteText ? `\n\nWEBSITE TEXT:\n${siteText}` : "";
+
+  const system =
+    "You prepare a DRAFT customer-service knowledge base for a local business's AI assistant. The owner will confirm and edit it, so a sensible, specific draft beats a blank. Ground departments, services, and FAQ answers in the website and reviews provided; use typical patterns for this kind of business only to fill obvious gaps. Never invent specific prices, brands, or claims not supported by the input. Keep everything short.";
+  const text = `BUSINESS: ${d.name}\nGOOGLE CATEGORY: ${d.category ?? "unknown"}\nVERTICAL: ${d.vertical ?? "unknown"}${d.summary ? `\nEDITORIAL: ${d.summary}` : ""}\n${hints}${reviewsBlock}${siteBlock}`;
+
+  try {
+    const { data } = await getLlm().callStructured<{ departments: string[]; services: string[]; faqs: { q: string; a: string }[]; highlights: string[] }>({
+      system, text, schema: KNOWLEDGE_SCHEMA, tier: "classify", maxTokens: 900,
+    });
+    const arr = (v: unknown) => (Array.isArray(v) ? v.map(clean).filter(Boolean) : []);
+    const faqs = (Array.isArray(data.faqs) ? data.faqs : [])
+      .map((f) => ({ q: clean(f?.q), a: clean(f?.a) }))
+      .filter((f) => f.q && f.a)
+      .slice(0, 6);
+    const k: DraftKnowledge = {
+      departments: arr(data.departments).slice(0, 12),
+      services: arr(data.services).slice(0, 10),
+      faqs,
+      highlights: arr(data.highlights).slice(0, 6),
+    };
+    const any = (k.departments?.length || k.services?.length || k.faqs?.length || k.highlights?.length);
+    return any ? k : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -124,6 +257,16 @@ async function detectLocal(query: string, name?: string): Promise<DetectResult> 
     placeId,
   };
   if (!detected.name) return { detected: null, source: "none" };
+
+  // Lever A — draft the store's knowledge (departments, services, FAQs) from its
+  // public footprint so the owner confirms instead of starts blank. Best-effort:
+  // any failure just returns the basics.
+  const reviewSnippets = (p.reviews ?? [])
+    .map((r) => clean(r.text?.text ?? r.originalText?.text))
+    .filter(Boolean)
+    .slice(0, 6);
+  detected.knowledge = await draftKnowledge(detected, reviewSnippets);
+
   return { detected, source: "google" };
 }
 
