@@ -54,7 +54,20 @@ export interface DetectedBusiness {
   offerings?: string[];
   /** Local only — a draft knowledge base the owner confirms (Lever A). */
   knowledge?: DraftKnowledge;
+  /** Online / B2B only — the product-company playbook draft (P3). */
+  b2b?: B2bDraft;
   placeId?: string;
+}
+
+/** The product/B2B company draft — what a prospect asks about, and which leads to
+ *  capture. Built from the company's own site (home + about/product/pricing/…). */
+export interface B2bDraft {
+  features?: string[];       // key product capabilities/features
+  integrations?: string[];   // systems it connects to
+  pricingTiers?: string[];   // named plans/tiers, or "contact sales"
+  faqs?: { q: string; a: string }[];
+  /** Lead types worth capturing — subset of demo / quote / support / careers. */
+  captureTypes?: string[];
 }
 
 export interface DetectResult {
@@ -308,13 +321,28 @@ const ONLINE_SCHEMA = {
   properties: {
     name: { type: "string", description: "The company / product / brand name." },
     category: { type: "string", description: "A short label for what kind of company this is, e.g. 'DCIM software', 'SaaS platform', 'IT consulting', 'e-commerce brand'. ≤5 words." },
-    summary: { type: "string", description: "1–2 plain sentences: what the company does and who it serves. Grounded ONLY in the page text." },
-    offerings: { type: "array", items: { type: "string" }, maxItems: 6, description: "The main products, services, or capabilities named on the page (up to 6 short phrases). [] if unclear." },
+    summary: { type: "string", description: "1–2 plain sentences: what the company does and who it serves. Grounded ONLY in the text." },
+    offerings: { type: "array", items: { type: "string" }, maxItems: 6, description: "The main products or services named (up to 6 short phrases). [] if unclear." },
+    features: { type: "array", items: { type: "string" }, maxItems: 8, description: "Key product capabilities/features a prospect would ask about. [] if not a product company." },
+    integrations: { type: "array", items: { type: "string" }, maxItems: 8, description: "Named systems/tools/platforms it integrates or works with. [] if none stated." },
+    pricingTiers: { type: "array", items: { type: "string" }, maxItems: 6, description: "Named pricing plans/tiers (e.g. 'Starter', 'Pro', 'Enterprise'), or ['Contact sales'] if pricing is quote-only. [] if no pricing info." },
+    faqs: {
+      type: "array", maxItems: 6,
+      items: { type: "object", additionalProperties: false, properties: { q: { type: "string" }, a: { type: "string" } }, required: ["q", "a"] },
+      description: "The 4-6 questions a PROSPECT most often asks this kind of company, each with a short suggested answer grounded in the site.",
+    },
+    captureTypes: {
+      type: "array", items: { type: "string", enum: ["demo", "quote", "support", "careers"] }, maxItems: 4,
+      description: "Which leads this company should capture: 'demo' if it offers demos/trials; 'quote' if pricing is sales/enterprise-led; 'support' if it serves existing customers (docs/help/support); 'careers' if it's hiring. Pick only those the site supports.",
+    },
   },
-  required: ["name", "category", "summary", "offerings"],
+  required: ["name", "category", "summary", "offerings", "features", "integrations", "pricingTiers", "faqs", "captureTypes"],
 };
 
 const clean = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
+
+/** Pages worth reading on a product/B2B site (best-effort, in parallel). */
+const B2B_PATHS = ["/about", "/product", "/products", "/features", "/solutions", "/pricing", "/integrations"];
 
 async function detectOnline(query: string): Promise<DetectResult> {
   const url = normalizeUrl(query);
@@ -349,29 +377,56 @@ async function detectOnline(query: string): Promise<DetectResult> {
     };
   }
 
+  // Read a few key B2B pages so the product knowledge isn't homepage-only (P3).
+  const origin = (() => { try { return new URL(url).origin; } catch { return url; } })();
+  const extra = (await Promise.all(B2B_PATHS.map((p) => fetchPageText(`${origin}${p}`)))).filter(Boolean);
+  const siteText = [text, ...extra].join("\n\n").slice(0, 9000);
+  // Cheap hint: careers pages rarely sit on the paths above — flag from links.
+  const hiring = /\b(careers|jobs|we'?re hiring|join (our|the) team|open (roles|positions))\b/i.test(html);
+
+  const fallback = (): DetectResult => {
+    const name = title.split(/[|\-–—·:]/)[0].trim() || host;
+    return { detected: { name, website: url, category: "online business", summary: description || undefined }, source: "website" };
+  };
+
   try {
     const system =
-      "You read a company's homepage and summarize the business for an assistant that will answer prospects' questions about it. Be specific and grounded ONLY in the text provided — never invent products, claims, or numbers.";
-    const input = `WEBSITE: ${url}\nPAGE TITLE: ${title}\nMETA DESCRIPTION: ${description}\n\nHOMEPAGE TEXT:\n${text}`;
-    const { data } = await getLlm().callStructured<{ name: string; category: string; summary: string; offerings: string[] }>({
-      system,
-      text: input,
-      schema: ONLINE_SCHEMA,
-      tier: "classify",
-      maxTokens: 500,
-    });
-    const offerings = (Array.isArray(data.offerings) ? data.offerings : []).map(clean).filter(Boolean).slice(0, 6);
+      "You read a company's website (home + key pages) and prepare a knowledge base AND lead-capture setup for an AI assistant that will answer PROSPECTS' questions and capture leads for this company. Be specific and grounded ONLY in the text provided — never invent products, integrations, prices, or claims.";
+    const input = `WEBSITE: ${url}\nPAGE TITLE: ${title}\nMETA DESCRIPTION: ${description}${hiring ? "\n(The site appears to have a careers/hiring section.)" : ""}\n\nSITE TEXT (home + key pages):\n${siteText}`;
+    const { data } = await getLlm().callStructured<{
+      name: string; category: string; summary: string; offerings: string[];
+      features: string[]; integrations: string[]; pricingTiers: string[];
+      faqs: { q: string; a: string }[]; captureTypes: string[];
+    }>({ system, text: input, schema: ONLINE_SCHEMA, tier: "extract", maxTokens: 1100 });
+
+    const arr = (v: unknown, n: number) => (Array.isArray(v) ? v.map(clean).filter(Boolean).slice(0, n) : []);
+    const faqs = (Array.isArray(data.faqs) ? data.faqs : [])
+      .map((f) => ({ q: clean(f?.q), a: clean(f?.a) })).filter((f) => f.q && f.a).slice(0, 6);
+    const captureTypes = arr(data.captureTypes, 4)
+      .map((s) => s.toLowerCase())
+      .filter((s) => ["demo", "quote", "support", "careers"].includes(s));
+    if (hiring && !captureTypes.includes("careers")) captureTypes.push("careers");
+
+    const b2b: B2bDraft = {
+      features: arr(data.features, 8),
+      integrations: arr(data.integrations, 8),
+      pricingTiers: arr(data.pricingTiers, 6),
+      faqs,
+      captureTypes: [...new Set(captureTypes)],
+    };
+    const hasB2b = !!(b2b.features?.length || b2b.integrations?.length || b2b.faqs?.length || b2b.captureTypes?.length);
+
     const detected: DetectedBusiness = {
       name: clean(data.name) || title.split(/[|\-–—·:]/)[0].trim() || host,
       website: url,
       category: clean(data.category) || "online business",
       summary: clean(data.summary) || description || undefined,
-      offerings: offerings.length ? offerings : undefined,
+      offerings: arr(data.offerings, 6).length ? arr(data.offerings, 6) : undefined,
+      b2b: hasB2b ? b2b : undefined,
     };
     return { detected, source: "website" };
   } catch {
-    const name = title.split(/[|\-–—·:]/)[0].trim() || host;
-    return { detected: { name, website: url, category: "online business", summary: description || undefined }, source: "website" };
+    return fallback();
   }
 }
 
