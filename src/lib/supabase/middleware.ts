@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { authCookieName } from "./cookie-name";
 
 /**
  * Refreshes the Supabase auth session on every request and forwards the
@@ -24,8 +25,16 @@ export async function updateSession(request: NextRequest) {
   const embedded = !!process.env.EMBED_ORIGIN;
   const embedCookie = embedded ? { sameSite: "none" as const, secure: true } : {};
 
+  // Pin the cookie name (PUBLIC-url-derived) so this middleware client — which
+  // dials the internal host — reads the same cookie the browser wrote.
+  const cookieName = authCookieName();
+  const cookieOptions = {
+    ...(embedded ? { sameSite: "none" as const, secure: true, path: "/" } : {}),
+    ...(cookieName ? { name: cookieName } : {}),
+  };
+
   const supabase = createServerClient(url, anon, {
-    ...(embedded ? { cookieOptions: { sameSite: "none" as const, secure: true, path: "/" } } : {}),
+    ...(Object.keys(cookieOptions).length ? { cookieOptions } : {}),
     cookies: {
       getAll() {
         return request.cookies.getAll();

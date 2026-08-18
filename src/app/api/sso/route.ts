@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
+import { authCookieName } from "@/lib/supabase/cookie-name";
 import { ensureOrgForUser } from "@/lib/auth";
 import { verifyInboundToken } from "@/lib/sso";
 
@@ -45,9 +46,10 @@ export async function GET(req: Request) {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        cookieOptions: embedded
-          ? { sameSite: "none", secure: true, path: "/" }
-          : { sameSite: "lax", path: "/" },
+        cookieOptions: {
+          ...(embedded ? { sameSite: "none" as const, secure: true, path: "/" } : { sameSite: "lax" as const, path: "/" }),
+          ...(authCookieName() ? { name: authCookieName() } : {}),
+        },
         cookies: {
           getAll: () => cookieStore.getAll(),
           setAll: (toSet: { name: string; value: string; options?: Record<string, unknown> }[]) => {

@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { authCookieName } from "./cookie-name";
 
 /**
  * URL for SERVER-side Supabase calls. Prefer SUPABASE_INTERNAL_URL (the direct
@@ -21,10 +22,14 @@ export type RlsClient = Awaited<ReturnType<typeof createClient>>;
 
 export async function createClient() {
   const cookieStore = await cookies();
+  const name = authCookieName();
   return createServerClient(
     serverUrl(),
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      // Pin the cookie name to the PUBLIC-url-derived one so it matches what the
+      // browser client writes — even though this client dials the internal host.
+      ...(name ? { cookieOptions: { name } } : {}),
       cookies: {
         getAll() {
           return cookieStore.getAll();
