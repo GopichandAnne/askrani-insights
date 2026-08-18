@@ -17,11 +17,16 @@ export const maxDuration = 20;
  * an onboarding cost we choose to eat to make setup one question long.
  */
 export async function POST(req: Request) {
-  const secret = process.env.RANI_OPS_SECRET;
   const authz = req.headers.get("authorization") ?? "";
   const bearer = authz.startsWith("Bearer ") ? authz.slice(7) : "";
   const provided = req.headers.get("x-ops-secret") ?? bearer;
-  if (!secret || provided !== secret) {
+  // Accept the shared umbrella secret OR a dedicated public-detect secret. The
+  // latter lets the marketing site authenticate with its own value, decoupled
+  // from the shared ops secret (no need to reuse/recover it).
+  const shared = process.env.RANI_OPS_SECRET;
+  const webSecret = process.env.WEB_DETECT_SECRET;
+  const ok = !!provided && ((!!shared && provided === shared) || (!!webSecret && provided === webSecret));
+  if (!ok) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
