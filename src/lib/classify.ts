@@ -49,9 +49,14 @@ const SMOKE_GTYPE = /tobacco|cigar|hookah|\bvape\b|e_cigarette|smoke_shop/;
 const SMOKE_NAME = /\b(smoke\s*shop|smokeshop|smoke\s*(?:&|n|and)\s*vape|vape|vapor|vaping|e-?cigs?|e-?cigarettes?|tobacco|cigars?|hookah|shisha|head\s*shop|cbd|kratom|pipe\s*shop|dispensary)\b/i;
 
 /** The verticals we can monitor. Food (restaurant/grocery), personal-care
- *  ('salon' — med spas, day spas, aesthetics, salons, barbers), and smoke/vape
- *  retail ('smoke_vape' — smoke shops, vape/tobacco/cigar/hookah/CBD stores). */
-export type Vertical = "grocery" | "restaurant" | "salon" | "smoke_vape";
+ *  ('salon' — med spas, day spas, aesthetics, salons, barbers), smoke/vape retail
+ *  ('smoke_vape'), and the service verticals fitness / dental / real_estate.
+ *  'other' is the catch-all for anything the classifier can't place. Detection is
+ *  deterministic first (structured + name signals) then an LLM fallback for the
+ *  long tail — see nameVertical() here and smartVertical() in detect.ts. */
+export type Vertical =
+  | "grocery" | "restaurant" | "salon" | "smoke_vape"
+  | "fitness" | "dental" | "real_estate" | "other";
 
 function tagBits(cand: CandidateLike): {
   cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string;
@@ -114,28 +119,29 @@ export function structuredVertical(cand: CandidateLike): Vertical | null {
 
 /** Best-guess vertical for a place. Uses structured signals first, then the
  *  name, defaulting to restaurant only as a last resort. */
-export function inferVertical(cand: CandidateLike): Vertical {
-  const structured = structuredVertical(cand);
+/** Vertical from the NAME (and cuisine tag) alone, or null when the name gives no
+ *  signal — so callers can escalate to the LLM instead of guessing "restaurant".
+ *  A clear smoke/vape name wins, but a cigar BAR/LOUNGE (a venue) does not. */
+export function nameVertical(cand: CandidateLike): Vertical | null {
   const name = cand.name ?? "";
-  // A clear smoke/vape name is highly specific — trust it over a generic
-  // "convenience_store"→grocery structured guess (many smoke shops are typed as
-  // convenience stores) — but never over a beauty signal, and not for a cigar
-  // BAR/LOUNGE (a venue, not a retail shop), which stays a restaurant.
-  const smokeName = SMOKE_NAME.test(name) && !RESTAURANT_NAME.test(name) && !/\b(bar|lounge|grill|kitchen|caf[eé])\b/i.test(name);
-  if (structured !== "salon" && smokeName) return "smoke_vape";
-  if (structured) return structured;
-
-  const { cuisine } = tagBits(cand);
-  // Name signals: an explicit eatery word (grille, restaurant, kitchen, pizzeria…)
-  // is unambiguous and wins over generic grocery words like "market" that also
-  // show up in some restaurant names; otherwise a grocery keyword → grocery.
+  if (SMOKE_NAME.test(name) && !RESTAURANT_NAME.test(name) && !/\b(bar|lounge|grill|kitchen|caf[eé])\b/i.test(name)) return "smoke_vape";
+  // An explicit eatery word (grille, restaurant, kitchen, pizzeria…) is unambiguous
+  // and wins over generic grocery words like "market" some restaurant names carry.
   if (RESTAURANT_NAME.test(name)) return "restaurant";
   if (GROCERY_NAME.test(name)) return "grocery";
-  // A beauty/med-spa name (no food/shop signal) → salon.
   if (BEAUTY_NAME.test(name)) return "salon";
-  // cuisine tag without a shop tag → almost always a restaurant
-  if (cuisine) return "restaurant";
-  return "restaurant";
+  if (tagBits(cand).cuisine) return "restaurant"; // cuisine tag, no shop tag → restaurant
+  return null;
+}
+
+/** Best-guess vertical, DETERMINISTIC. Structured signals first, then the name; a
+ *  clear smoke/vape name overrides a generic grocery structured guess. Defaults to
+ *  restaurant as a last resort — for the smart (LLM) fallback see detect.ts. */
+export function inferVertical(cand: CandidateLike): Vertical {
+  const structured = structuredVertical(cand);
+  const nv = nameVertical(cand);
+  if (structured !== "salon" && nv === "smoke_vape") return "smoke_vape";
+  return structured ?? nv ?? "restaurant";
 }
 
 // ── subtype (cuisine / ethnicity) ───────────────────────────────────────────
@@ -372,6 +378,9 @@ export function verticalLabel(v: Vertical | string | null | undefined): string {
     case "salon": return "Beauty & spa";
     case "restaurant": return "Restaurant";
     case "smoke_vape": return "Smoke & vape";
+    case "fitness": return "Fitness & gym";
+    case "dental": return "Dental";
+    case "real_estate": return "Real estate";
     default: return "Business";
   }
 }
@@ -386,6 +395,10 @@ export function verticalLabel(v: Vertical | string | null | undefined): string {
  *  tuned behaviour is unchanged — this only wakes Google up for food. */
 export function verticalQuery(v: Vertical | string, subtype: string[] = [], format: string[] = []): string | undefined {
   if (v === "smoke_vape") return "smoke shop OR vape shop OR tobacco shop OR head shop";
+  if (v === "fitness") return "gym OR fitness studio OR yoga studio OR pilates OR crossfit";
+  if (v === "dental") return "dentist OR dental clinic OR orthodontist";
+  if (v === "real_estate") return "real estate agency OR realtor OR real estate broker";
+  if (v === "other") return undefined; // no confident query → OSM nearby fallback
 
   if (v === "salon") {
     const s = new Set(subtype);

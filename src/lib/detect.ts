@@ -1,5 +1,5 @@
 import { getProvider } from "@/lib/providers/registry";
-import { inferVertical, extractSubtype, subtypeLabel } from "@/lib/classify";
+import { structuredVertical, nameVertical, extractSubtype, subtypeLabel, type Vertical, type CandidateLike } from "@/lib/classify";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
@@ -145,7 +145,65 @@ const VERTICAL_KB: Record<string, { departments: string[]; services: string[]; f
     faqTopics: ["brands & products carried", "age requirement (21+ / valid ID)", "vape & disposable selection", "CBD / kratom availability", "hours & parking"],
     paths: ["/products", "/brands", "/about"],
   },
+  fitness: {
+    departments: ["Memberships", "Group classes", "Personal training", "Gym floor & equipment", "Amenities"],
+    services: ["Free trial / day pass", "Personal training", "Group classes", "Memberships & plans", "Nutrition coaching"],
+    faqTopics: ["membership plans & pricing", "class schedule", "free trial / day pass", "personal training", "hours & access"],
+    paths: ["/classes", "/membership", "/about"],
+  },
+  dental: {
+    departments: ["General dentistry", "Cleanings & hygiene", "Cosmetic", "Orthodontics", "Implants", "Emergency care"],
+    services: ["New-patient exam", "Cleanings", "Whitening", "Insurance accepted", "Emergency visits"],
+    faqTopics: ["insurance & payment plans", "new-patient exam", "emergency appointments", "cosmetic / ortho options", "hours & location"],
+    paths: ["/services", "/new-patients", "/about"],
+  },
+  real_estate: {
+    departments: ["Buying", "Selling", "Rentals", "Property management", "Commercial"],
+    services: ["Home valuation", "Buyer representation", "Listings", "Rentals", "Consultations"],
+    faqTopics: ["buying vs selling help", "free home valuation", "current listings", "areas served", "fees & process"],
+    paths: ["/listings", "/services", "/about"],
+  },
 };
+
+// ── vertical classification ──────────────────────────────────────────────────
+// Deterministic first (structured Google/OSM signals + name — free, instant), then
+// an LLM fallback for the long tail (fitness, dental, real estate, and anything the
+// rules can't place). Only the genuinely ambiguous cases pay for a model call.
+const VERTICAL_CHOICES = ["restaurant", "grocery", "salon", "smoke_vape", "fitness", "dental", "real_estate", "other"] as const;
+const VERTICAL_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: { vertical: { type: "string", enum: [...VERTICAL_CHOICES], description: "the single best-fit category for this business" } },
+  required: ["vertical"],
+};
+const VERTICAL_SYSTEM =
+  "Classify a local business into ONE category from the allowed list, using its name, Google category/types, and any summary. " +
+  "salon = beauty/hair/nails/spa/med-spa. smoke_vape = smoke/vape/tobacco/cigar/hookah/CBD shops. " +
+  "fitness = gyms, studios (yoga/pilates/crossfit), personal trainers. dental = dentists/orthodontists. " +
+  "real_estate = agents/brokerages/property management. grocery = food retail/markets. " +
+  "restaurant = places that serve prepared food or drink. Use 'other' only if none truly fit.";
+
+async function llmVertical(cand: CandidateLike, summary?: string): Promise<Vertical | null> {
+  const raw = (cand.raw ?? {}) as Record<string, unknown>;
+  const gtypes = [raw.primaryType, ...(Array.isArray(raw.types) ? raw.types : [])].filter(Boolean).join(", ");
+  const text = `NAME: ${cand.name ?? ""}\nGOOGLE CATEGORY: ${cand.category ?? raw.primaryType ?? "unknown"}\nGOOGLE TYPES: ${gtypes || "none"}${summary ? `\nSUMMARY: ${summary}` : ""}`;
+  const { data } = await getLlm().callStructured<{ vertical: string }>({ system: VERTICAL_SYSTEM, text, schema: VERTICAL_SCHEMA, tier: "classify", maxTokens: 64 });
+  return (VERTICAL_CHOICES as readonly string[]).includes(data?.vertical) ? (data.vertical as Vertical) : null;
+}
+
+/** The intelligent classifier used at onboarding: deterministic signals win (free
+ *  + instant), else the model picks from the full set. Fail-soft — falls back to
+ *  'restaurant' only when nothing matched AND the model is unavailable. */
+async function smartVertical(cand: CandidateLike, summary?: string): Promise<Vertical> {
+  const structured = structuredVertical(cand);
+  const nv = nameVertical(cand);
+  if (structured !== "salon" && nv === "smoke_vape") return "smoke_vape";
+  if (structured) return structured;
+  if (nv) return nv;
+  if (isLlmConfigured()) {
+    try { const v = await llmVertical(cand, summary); if (v) return v; } catch { /* fail-soft */ }
+  }
+  return "restaurant";
+}
 
 async function fetchPageText(url: string): Promise<string> {
   const ctrl = new AbortController();
@@ -259,11 +317,12 @@ async function detectLocal(query: string, name?: string): Promise<DetectResult> 
 
   const candLike = { name: p.displayName?.text, category: p.primaryType, raw: p };
   const subtype = subtypeLabel(extractSubtype(candLike));
+  const vertical = await smartVertical(candLike, p.editorialSummary?.text);
 
   const detected: DetectedBusiness = {
     name: p.displayName?.text ?? name ?? "",
     category: p.primaryType,
-    vertical: inferVertical(candLike),
+    vertical,
     subtype: subtype || undefined,
     address: p.formattedAddress,
     website: p.websiteUri,
