@@ -3,6 +3,7 @@ import { getProvider } from "@/lib/providers/registry";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { spendForCost } from "@/lib/credits";
 import { type WorkspaceRow } from "@/lib/workspace";
+import { staleCached } from "@/lib/staleCache";
 
 /**
  * Findability — collection engine (headless). Tracks where a workspace's target
@@ -211,4 +212,124 @@ export async function refreshFindability(ws: WorkspaceRow, opts: { runs?: number
   try { await spendForCost(orgId, costUsd, { kind: "findability_refresh", workspaceId: ws.id, calls }); } catch { /* record-only */ }
 
   return { activated: true, keywords: kws.length, snapshots: rows.length, found, costUsd };
+}
+
+// ── derived reads (phase 2) — the score + metrics for the pillar UI ──────────
+export interface FKeywordRead { term: string; intent: Intent; yourRank: number | null; topCompetitor: string | null; trend: number | null; confidence: boolean }
+export interface FShareRow { name: string; isYou: boolean; topThree: number; total: number }
+export interface FindabilityReport {
+  at: string;
+  empty: boolean;
+  capturedOn: string | null;
+  score: number;                 // 0-100
+  scoreDelta: number | null;     // vs the prior snapshot window
+  breakdown: { position: number; coverage: number; momentum: number };
+  avgPosition: number | null;    // mean rank where you appear
+  avgPositionDelta: number | null; // + = improved (lower avg rank)
+  coverage: { inTop3: number; total: number };
+  biggestSlip: { term: string; from: number | null; to: number | null } | null;
+  keywords: FKeywordRead[];      // sorted by intent then rank
+  share: FShareRow[];            // top-3 share of local search, you + competitors
+  keywordCount: number;
+}
+
+interface Snap { keyword_id: string; term: string; intent: Intent; your_rank: number | null; confidence: boolean; top_competitor: string | null; competitor_ranks: Record<string, number>; captured_on: string }
+
+// #1 = 100 … #20 = 5, not-found = 0. Linear, simple, defensible.
+const rankScore = (r: number | null) => (r == null ? 0 : Math.max(0, Math.round((100 * (21 - r)) / 20)));
+const clamp = (n: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, n));
+const INTENT_ORDER: Record<Intent, number> = { everyday: 0, urgent: 1, high_value: 2 };
+
+function subScores(snaps: Snap[], weights: Map<string, number>) {
+  let wSum = 0, posW = 0, inTop3 = 0; const found: number[] = [];
+  for (const s of snaps) {
+    const w = weights.get(s.keyword_id) ?? 1;
+    wSum += w; posW += w * rankScore(s.your_rank);
+    if (s.your_rank != null) { found.push(s.your_rank); if (s.your_rank <= 3) inTop3++; }
+  }
+  return {
+    position: wSum ? Math.round(posW / wSum) : 0,                       // value-weighted position strength
+    coverage: snaps.length ? Math.round((100 * inTop3) / snaps.length) : 0,
+    avg: found.length ? Math.round(found.reduce((a, b) => a + b, 0) / found.length) : null,
+    inTop3,
+  };
+}
+
+const emptyReport = (): FindabilityReport => ({
+  at: new Date().toISOString(), empty: true, capturedOn: null, score: 0, scoreDelta: null,
+  breakdown: { position: 0, coverage: 0, momentum: 50 }, avgPosition: null, avgPositionDelta: null,
+  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0,
+});
+
+/** Compute the Findability score + reads from the snapshots. Read-only; no cost. */
+export async function buildFindabilityReport(ws: WorkspaceRow): Promise<FindabilityReport> {
+  const svc = createServiceClient();
+  const since = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10);
+  const { data: kwRows } = await svc.from("findability_keyword").select("id, value_weight").eq("workspace_id", ws.id);
+  const weights = new Map<string, number>(((kwRows ?? []) as { id: string; value_weight: number }[]).map((k) => [k.id, Number(k.value_weight) || 1]));
+  const { data: rows } = await svc.from("findability_snapshot")
+    .select("keyword_id, term, intent, your_rank, confidence, top_competitor, competitor_ranks, captured_on")
+    .eq("workspace_id", ws.id).gte("captured_on", since).order("captured_on", { ascending: false });
+  const snaps = (rows ?? []) as Snap[];
+  if (!snaps.length) return emptyReport();
+
+  const days = [...new Set(snaps.map((s) => s.captured_on))].sort().reverse();
+  const current = days[0];
+  const cur = snaps.filter((s) => s.captured_on === current);
+  // Prior = the most recent day ≥5 days back (weekly), else yesterday's, else none.
+  const priorDay = days.find((d) => Date.parse(current) - Date.parse(d) >= 5 * 86_400_000) ?? days[1] ?? null;
+  const prior = priorDay ? snaps.filter((s) => s.captured_on === priorDay) : [];
+  const priorRank = new Map(prior.map((s) => [s.keyword_id, s.your_rank]));
+
+  const c = subScores(cur, weights);
+  const p = prior.length ? subScores(prior, weights) : null;
+
+  // Momentum: mean rank improvement vs prior (positive = better), mapped to 0-100.
+  const deltas: number[] = [];
+  for (const s of cur) { const pr = priorRank.get(s.keyword_id); if (pr != null && s.your_rank != null) deltas.push(pr - s.your_rank); }
+  const avgDelta = deltas.length ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
+  const momentum = deltas.length ? clamp(Math.round(50 + avgDelta * 8)) : 50;
+
+  const score = Math.round(0.55 * c.position + 0.25 * c.coverage + 0.2 * momentum);
+  const scoreDelta = p ? score - Math.round(0.55 * p.position + 0.25 * p.coverage + 0.2 * 50) : null;
+
+  const keywords: FKeywordRead[] = cur
+    .map((s) => {
+      const pr = priorRank.get(s.keyword_id);
+      return { term: s.term, intent: s.intent, yourRank: s.your_rank, topCompetitor: s.top_competitor, trend: pr != null && s.your_rank != null ? pr - s.your_rank : null, confidence: s.confidence };
+    })
+    .sort((a, b) => INTENT_ORDER[a.intent] - INTENT_ORDER[b.intent] || (a.yourRank ?? 99) - (b.yourRank ?? 99));
+
+  // Biggest slip: worst rank drop vs prior; else the weakest high-value term.
+  let biggestSlip: FindabilityReport["biggestSlip"] = null;
+  const worsened = keywords.filter((k) => k.trend != null && k.trend < 0).sort((a, b) => (a.trend as number) - (b.trend as number));
+  if (worsened.length) {
+    const k = worsened[0];
+    biggestSlip = { term: k.term, from: k.yourRank != null && k.trend != null ? k.yourRank + k.trend : null, to: k.yourRank };
+  } else {
+    const hv = keywords.filter((k) => k.intent === "high_value").sort((a, b) => (b.yourRank ?? 99) - (a.yourRank ?? 99))[0];
+    if (hv) biggestSlip = { term: hv.term, from: null, to: hv.yourRank };
+  }
+
+  // Share of local search: top-3 count for you + each competitor, across all terms.
+  const total = cur.length; let youTop3 = 0; const compTop3 = new Map<string, number>();
+  for (const s of cur) {
+    if (s.your_rank != null && s.your_rank <= 3) youTop3++;
+    for (const [name, pos] of Object.entries(s.competitor_ranks ?? {})) if (pos <= 3) compTop3.set(name, (compTop3.get(name) ?? 0) + 1);
+  }
+  const share: FShareRow[] = [{ name: "You", isYou: true, topThree: youTop3, total },
+    ...[...compTop3].map(([name, cnt]) => ({ name, isYou: false, topThree: cnt, total }))]
+    .sort((a, b) => b.topThree - a.topThree).slice(0, 6);
+
+  return {
+    at: new Date().toISOString(), empty: false, capturedOn: current, score, scoreDelta,
+    breakdown: { position: c.position, coverage: c.coverage, momentum },
+    avgPosition: c.avg, avgPositionDelta: p && p.avg != null && c.avg != null ? p.avg - c.avg : null,
+    coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length,
+  };
+}
+
+/** Cached report — served instantly, regenerated when stale. */
+export function getOrMakeFindabilityReport(ws: WorkspaceRow, maxAgeHours = 6): Promise<FindabilityReport> {
+  return staleCached(ws, "findability", maxAgeHours, () => buildFindabilityReport(ws), { isValid: (c) => !c.empty });
 }
