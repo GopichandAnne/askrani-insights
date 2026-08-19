@@ -231,6 +231,7 @@ export interface FindabilityReport {
   keywords: FKeywordRead[];      // sorted by intent then rank
   share: FShareRow[];            // top-3 share of local search, you + competitors
   keywordCount: number;
+  recommendation: string | null; // "what to do" — the single most valuable action
 }
 
 interface Snap { keyword_id: string; term: string; intent: Intent; your_rank: number | null; confidence: boolean; top_competitor: string | null; competitor_ranks: Record<string, number>; captured_on: string }
@@ -258,8 +259,31 @@ function subScores(snaps: Snap[], weights: Map<string, number>) {
 const emptyReport = (): FindabilityReport => ({
   at: new Date().toISOString(), empty: true, capturedOn: null, score: 0, scoreDelta: null,
   breakdown: { position: 0, coverage: 0, momentum: 50 }, avgPosition: null, avgPositionDelta: null,
-  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0,
+  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0, recommendation: null,
 });
+
+// ── "what to do" — one grounded action from the findability picture ──────────
+const REC_SCHEMA = {
+  type: "object", additionalProperties: false,
+  properties: { action: { type: "string", description: "one or two sentences: the single most valuable action to improve findability this week, grounded in the data — concrete and specific, no lists, no fluff." } },
+  required: ["action"],
+};
+const REC_SYSTEM =
+  "You advise a local business on getting found in Google search. From its search-rank data — where it ranks for the terms customers type vs its competitors — write the SINGLE most valuable action to take this week, in 1-2 concrete sentences. Prioritize the high-value terms it's buried or slipping on and where a specific competitor is beating it. Plain, direct, no lists.";
+
+async function makeRecommendation(ws: WorkspaceRow, keywords: FKeywordRead[], share: FShareRow[], biggestSlip: FindabilityReport["biggestSlip"]): Promise<string | null> {
+  if (!isLlmConfigured() || !keywords.length) return null;
+  const weak = keywords.filter((k) => k.intent === "high_value" && (k.yourRank == null || k.yourRank > 3)).slice(0, 4);
+  const leaders = share.filter((s) => !s.isYou).slice(0, 3);
+  const text = `BUSINESS vertical: ${ws.vertical}\n`
+    + `HIGH-VALUE terms you're weak on: ${weak.map((k) => `"${k.term}" (${k.yourRank ? "#" + k.yourRank : "not ranking"}${k.topCompetitor ? `, rival ${k.topCompetitor}` : ""})`).join("; ") || "none"}\n`
+    + `Biggest slip: ${biggestSlip ? `"${biggestSlip.term}" → ${biggestSlip.to ? "#" + biggestSlip.to : "not ranking"}` : "none"}\n`
+    + `Competitors leading local search: ${leaders.map((l) => `${l.name} (${l.topThree}/${l.total})`).join(", ") || "none"}`;
+  try {
+    const { data } = await getLlm().callStructured<{ action: string }>({ system: REC_SYSTEM, text, schema: REC_SCHEMA, tier: "classify", maxTokens: 160 });
+    return String(data?.action ?? "").trim() || null;
+  } catch { return null; }
+}
 
 /** Compute the Findability score + reads from the snapshots. Read-only; no cost. */
 export async function buildFindabilityReport(ws: WorkspaceRow): Promise<FindabilityReport> {
@@ -321,15 +345,29 @@ export async function buildFindabilityReport(ws: WorkspaceRow): Promise<Findabil
     ...[...compTop3].map(([name, cnt]) => ({ name, isYou: false, topThree: cnt, total }))]
     .sort((a, b) => b.topThree - a.topThree).slice(0, 6);
 
+  const recommendation = await makeRecommendation(ws, keywords, share, biggestSlip);
+
   return {
     at: new Date().toISOString(), empty: false, capturedOn: current, score, scoreDelta,
     breakdown: { position: c.position, coverage: c.coverage, momentum },
     avgPosition: c.avg, avgPositionDelta: p && p.avg != null && c.avg != null ? p.avg - c.avg : null,
-    coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length,
+    coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length, recommendation,
   };
 }
 
 /** Cached report — served instantly, regenerated when stale. */
 export function getOrMakeFindabilityReport(ws: WorkspaceRow, maxAgeHours = 6): Promise<FindabilityReport> {
   return staleCached(ws, "findability", maxAgeHours, () => buildFindabilityReport(ws), { isValid: (c) => !c.empty });
+}
+
+/** The compact summary the weekly digest reads (goals.findabilityBrief) — so the
+ *  brief comes from cached goals with no scrape/LLM at digest time. */
+export interface FindabilityBrief {
+  score: number; scoreDelta: number | null; biggestSlip: FindabilityReport["biggestSlip"];
+  topRival: string | null; coverage: { inTop3: number; total: number }; recommendation: string | null; capturedOn: string | null;
+}
+export async function computeFindabilityBrief(ws: WorkspaceRow): Promise<FindabilityBrief | null> {
+  const r = await buildFindabilityReport(ws);
+  if (r.empty) return null;
+  return { score: r.score, scoreDelta: r.scoreDelta, biggestSlip: r.biggestSlip, topRival: r.share.find((s) => !s.isYou)?.name ?? null, coverage: r.coverage, recommendation: r.recommendation, capturedOn: r.capturedOn };
 }

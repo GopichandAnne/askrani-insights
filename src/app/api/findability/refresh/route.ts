@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrg, workspaceInOrg, unauthorized, badRequest } from "@/lib/api";
 import { spendCredits, refundCredits, getBalance } from "@/lib/credits";
-import { refreshFindability, FINDABILITY_REFRESH_CREDITS } from "@/lib/findability";
+import { refreshFindability, computeFindabilityBrief, FINDABILITY_REFRESH_CREDITS } from "@/lib/findability";
 import { createServiceClient } from "@/lib/supabase/server";
 import { type WorkspaceRow } from "@/lib/workspace";
 
@@ -37,8 +37,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, ...result, note: "Nothing to measure yet — needs a located target business." });
   }
 
+  const brief = await computeFindabilityBrief(ws as unknown as WorkspaceRow);
   await svc.from("workspace").update({
-    goals: { ...((ws.goals ?? {}) as Record<string, unknown>), lastFindabilityAt: new Date().toISOString() },
+    goals: { ...((ws.goals ?? {}) as Record<string, unknown>), lastFindabilityAt: new Date().toISOString(), findabilityBrief: brief },
   }).eq("id", workspaceId);
 
   return NextResponse.json({ ok: true, ...result });

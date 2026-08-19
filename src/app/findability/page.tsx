@@ -96,6 +96,19 @@ export default async function FindabilityPage() {
             </div>
           </div>
 
+          {/* What to do */}
+          {report.recommendation && (
+            <div className="card">
+              <div className="flex items-start gap-3">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand text-sm text-white">💡</span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-brand-deep">What to do</p>
+                  <p className="mt-1 text-sm text-ink">{report.recommendation}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Rank by search term, grouped by intent */}
           <div className="card">
             <div className="mb-3 flex items-center gap-2">

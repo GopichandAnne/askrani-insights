@@ -104,6 +104,32 @@ export function buildDigest(
     });
   }
 
+  // ── Findability — where you rank in Google search vs competitors ──────────
+  const fb = goals.findabilityBrief as any | undefined;
+  if (fb && typeof fb.score === "number") {
+    const slip = fb.biggestSlip;
+    const realSlip = slip && slip.from != null && (slip.to == null || slip.to > slip.from);
+    if (realSlip) {
+      push({
+        id: `find:slip:${clean(slip.term).slice(0, 30).toLowerCase()}:${slip.to ?? "x"}`,
+        severity: "alert", pillar: "Findability", icon: "🔎",
+        title: "You slipped in Google search",
+        detail: `You're now ${slip.to ? `#${slip.to}` : "not ranking"} for “${clean(slip.term)}”${fb.topRival ? `; ${clean(fb.topRival)} is ahead of you` : ""}.`,
+        act: fb.recommendation ? { kind: "content", move: clean(fb.recommendation) } : undefined,
+        href: "/findability",
+      });
+    } else if (fb.coverage && fb.coverage.total && fb.coverage.inTop3 / fb.coverage.total < 0.5) {
+      push({
+        id: `find:cov:${fb.coverage.inTop3}-${fb.coverage.total}`,
+        severity: "opportunity", pillar: "Findability", icon: "🔎",
+        title: "Hard to find for most searches",
+        detail: `You're top-3 for only ${fb.coverage.inTop3} of ${fb.coverage.total} customer searches${fb.topRival ? ` — ${clean(fb.topRival)} leads` : ""}.`,
+        act: fb.recommendation ? { kind: "content", move: clean(fb.recommendation) } : undefined,
+        href: "/findability",
+      });
+    }
+  }
+
   // ── Review pulse — what's CHANGING in reviews, not just the current state ──
   const pulse = goals.pulse as any | undefined;
   if (pulse && !pulse.failed) {

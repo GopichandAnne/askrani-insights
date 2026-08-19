@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { refreshFindability } from "@/lib/findability";
+import { refreshFindability, computeFindabilityBrief } from "@/lib/findability";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 import { type WorkspaceRow } from "@/lib/workspace";
 
@@ -49,7 +49,10 @@ async function run(req: Request) {
     try {
       const r = await refreshFindability(ws);
       if (r.activated) {
-        await svc.from("workspace").update({ goals: { ...goals, lastFindabilityAt: new Date().toISOString() } }).eq("id", ws.id);
+        // Cache the compact brief on goals for the weekly digest (buildDigest reads
+        // goals.findabilityBrief — no scrape/LLM at digest time).
+        const brief = await computeFindabilityBrief(ws);
+        await svc.from("workspace").update({ goals: { ...goals, lastFindabilityAt: new Date().toISOString(), findabilityBrief: brief } }).eq("id", ws.id);
         processed++;
       } else skipped++;
     } catch (e) {
