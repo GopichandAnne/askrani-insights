@@ -332,8 +332,10 @@ async function makePlaybook(ws: WorkspaceRow, keywords: FKeywordRead[], share: F
     + weak.map((k) => `- "${k.term}" [${k.intent}] — you ${k.yourRank ? "#" + k.yourRank : "not in top 20"}${k.topCompetitor ? `, ${k.topCompetitor} ${k.topCompetitorRank ? "#" + k.topCompetitorRank : "ahead"}` : ""}`).join("\n")
     + `\nCompetitors leading local search overall: ${leaders.map((l) => `${l.name} (${l.topThree}/${l.total} top-3)`).join(", ") || "none"}`;
   try {
+    // Budget for a recommendation + up to 3 rich plays (gap + 2-3 levers + act);
+    // too small and Anthropic truncates the forced tool-call to an empty object.
     const { data } = await getLlm().callStructured<{ recommendation: string; plays: RawPlay[] }>({
-      system: PLAYBOOK_SYSTEM, text, schema: PLAYBOOK_SCHEMA, tier: "extract", maxTokens: 1100,
+      system: PLAYBOOK_SYSTEM, text, schema: PLAYBOOK_SCHEMA, tier: "extract", maxTokens: 3200,
     });
     const plays: PlaybookPlay[] = (data?.plays ?? []).map((rp) => {
       const k = byTerm.get(nt(rp.term))
