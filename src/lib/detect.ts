@@ -193,7 +193,7 @@ async function llmVertical(cand: CandidateLike, summary?: string): Promise<Verti
 /** The intelligent classifier used at onboarding: deterministic signals win (free
  *  + instant), else the model picks from the full set. Fail-soft — falls back to
  *  'restaurant' only when nothing matched AND the model is unavailable. */
-async function smartVertical(cand: CandidateLike, summary?: string): Promise<Vertical> {
+export async function smartVertical(cand: CandidateLike, summary?: string): Promise<Vertical> {
   const structured = structuredVertical(cand);
   const nv = nameVertical(cand);
   if (structured !== "salon" && nv === "smoke_vape") return "smoke_vape";

@@ -1,5 +1,6 @@
 import { getProvider } from "@/lib/providers/registry";
 import { structuredVertical, nameVertical, extractSubtype, subtypeLabel } from "@/lib/classify";
+import { smartVertical } from "@/lib/detect";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
@@ -77,9 +78,18 @@ export async function exploreArea(input: { area: string; keyword?: string }): Pr
   const near = geo ? { lat: geo.lat, lng: geo.lng, radiusKm: 12 } : undefined;
   const query = `${kw} in ${area}`;
 
+  // The whole scan is ONE searched category, so classify the keyword ONCE (LLM,
+  // classify-tier) to get a polished vertical for the cards — in PARALLEL with the
+  // Google fetch so it adds no latency, and only when a keyword was given (a bare
+  // "what's here" area scan has no single category → per-business signals decide).
+  const searched = (input.keyword ?? "").trim();
   let cands: any[] = [];
+  let areaVertical: string | null = null;
   try {
-    cands = await google.discoverProfiles({ query, near, limit: 20 });
+    [cands, areaVertical] = await Promise.all([
+      google.discoverProfiles({ query, near, limit: 20 }),
+      searched ? smartVertical({ name: searched }) : Promise.resolve(null),
+    ]);
   } catch (e) {
     return { results: [], error: (e as Error).message, center: geo ?? undefined, areaLabel: geo?.label };
   }
@@ -94,10 +104,11 @@ export async function exploreArea(input: { area: string; keyword?: string }): Pr
       address: p.formattedAddress,
       website: c.website,
       geo: c.geo,
-      // Structured (Google/OSM) signal, then name; default to 'other' — NOT
-      // restaurant — so a market scan of e.g. auto shops isn't labeled "Restaurant".
-      // The card shows the real Google category for 'other'.
-      vertical: structuredVertical(c) ?? nameVertical(c) ?? "other",
+      // Confident per-business signal first (a restaurant in a "gym" search stays a
+      // restaurant), then the once-classified area vertical (gives fitness/dental/
+      // real_estate their real label), then name, then 'other' (card shows the real
+      // Google category). Never defaults to restaurant.
+      vertical: structuredVertical(c) ?? nameVertical(c) ?? areaVertical ?? "other",
       subtype: subtypeLabel(extractSubtype(c)) ?? "",
       distanceKm,
       mapsUrl: c.url,
