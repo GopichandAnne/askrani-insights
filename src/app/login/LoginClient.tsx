@@ -17,6 +17,24 @@ const normPhone = (s: string) => {
   return digits ? `+${digits}` : "";
 };
 
+// Country dial codes for the phone field — defaults to US (+1) so most owners
+// never type a country code. Covers the US + the main diaspora/expansion markets;
+// power users can still paste a full "+.." number and it's used as-is.
+const DIAL_CODES = [
+  { dial: "+1", flag: "🇺🇸", name: "US / Canada" },
+  { dial: "+44", flag: "🇬🇧", name: "UK" },
+  { dial: "+91", flag: "🇮🇳", name: "India" },
+  { dial: "+61", flag: "🇦🇺", name: "Australia" },
+  { dial: "+971", flag: "🇦🇪", name: "UAE" },
+  { dial: "+52", flag: "🇲🇽", name: "Mexico" },
+  { dial: "+63", flag: "🇵🇭", name: "Philippines" },
+  { dial: "+65", flag: "🇸🇬", name: "Singapore" },
+  { dial: "+49", flag: "🇩🇪", name: "Germany" },
+  { dial: "+33", flag: "🇫🇷", name: "France" },
+  { dial: "+81", flag: "🇯🇵", name: "Japan" },
+  { dial: "+55", flag: "🇧🇷", name: "Brazil" },
+];
+
 // Base URL of the Ask Rani (Rani) app for the unified "Sign in with Ask Rani" SSO.
 const RANI_APP = (process.env.NEXT_PUBLIC_RANI_APP_URL || "https://app.askrani.ai").replace(/\/$/, "");
 
@@ -30,6 +48,7 @@ export function LoginClient() {
   const [tab, setTab] = useState<Tab>("signin");
   const [method, setMethod] = useState<Method>("phone");
   const [step, setStep] = useState<"form" | "code">("form");
+  const [dial, setDial] = useState("+1");
   const [f, setF] = useState({ name: "", business: "", email: "", phone: "" });
   const [code, setCode] = useState("");
   const [pendingPhone, setPendingPhone] = useState("");
@@ -53,9 +72,12 @@ export function LoginClient() {
         setMsg({ ok: true, text: `Check your inbox — we emailed a sign-in link to ${email}.` });
         return;
       }
-      // phone SMS OTP (both sign-in and register)
-      const phone = normPhone(f.phone);
-      if (phone.length < 9) { setMsg({ text: "Enter your phone number with country code, e.g. +1 512 555 0142." }); return; }
+      // phone SMS OTP (both sign-in and register) — combine the selected dial code
+      // with the local number; a pasted full "+.." number is used verbatim.
+      const raw = f.phone.trim();
+      const nat = raw.replace(/\D/g, "");
+      const phone = raw.startsWith("+") ? normPhone(raw) : (nat ? `${dial}${nat}` : "");
+      if (phone.replace(/\D/g, "").length < 7) { setMsg({ text: "Enter your phone number, e.g. 512 555 0142." }); return; }
       if (tab === "register" && (!f.name.trim() || !f.email.trim())) { setMsg({ text: "Please add your name and email too." }); return; }
       const data = tab === "register"
         ? { full_name: f.name.trim(), business_name: f.business.trim(), signup_email: f.email.trim() }
@@ -157,7 +179,14 @@ export function LoginClient() {
                 )}
 
                 {(tab === "register" || method === "phone")
-                  ? <input value={f.phone} onChange={set("phone")} type="tel" placeholder="Phone — e.g. +1 512 555 0142" className={inputCls} />
+                  ? (
+                    <div className="flex gap-2">
+                      <select value={dial} onChange={(e) => setDial(e.target.value)} aria-label="Country code" className={`${inputCls} w-auto shrink-0 pr-2`}>
+                        {DIAL_CODES.map((c) => <option key={c.name} value={c.dial}>{c.flag} {c.dial}</option>)}
+                      </select>
+                      <input value={f.phone} onChange={set("phone")} type="tel" inputMode="tel" placeholder="512 555 0142" className={inputCls} />
+                    </div>
+                  )
                   : <input value={f.email} onChange={set("email")} type="email" placeholder="you@business.com" className={inputCls} />}
 
                 <button onClick={submit} disabled={busy} className="btn btn-primary w-full py-3 disabled:opacity-60">
