@@ -22,6 +22,7 @@ const ICONS = {
   winning: <svg {...I}><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z" /><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3" /><path d="M10 14h4M9 20h6M12 14v6" /></svg>,
   edge: <svg {...I}><path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9z" /></svg>,
   explore: <svg {...I}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>,
+  findability: <svg {...I}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none" /></svg>,
   market: <svg {...I}><path d="M3 9l1.5-5h15L21 9" /><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9" /><path d="M3 9h18" /><path d="M9 13h6" /></svg>,
   around: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M3.5 9h17M3.5 15h17" /><path d="M12 3a14 14 0 0 0 0 18a14 14 0 0 0 0-18Z" /></svg>,
   billing: <svg {...I}><rect x="2.5" y="5" width="19" height="14" rx="2.5" /><path d="M2.5 10h19" /></svg>,
@@ -37,7 +38,7 @@ const ICONS = {
   more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
 };
 const SHORT: Record<string, string> = {
-  "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
+  "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
   "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin", "/assistant": "Ask",
 };
 
