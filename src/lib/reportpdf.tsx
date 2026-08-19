@@ -353,5 +353,35 @@ export function buildReportSections(goals: Record<string, any>): ReportSection[]
   }
   if (chgRows.length) sections.push({ title: "What's changing", note: "Shifts in what customers are saying — get ahead of them.", rows: chgRows });
 
+  // 5) Findability — where you rank in Google search vs competitors
+  const fbFull = goals.findability && !goals.findability.empty ? goals.findability : null;
+  const fbBrief = goals.findabilityBrief && typeof goals.findabilityBrief.score === "number" ? goals.findabilityBrief : null;
+  if (fbFull || fbBrief) {
+    const fbRows: ReportRow[] = [];
+    const score: number = fbFull?.score ?? fbBrief!.score;
+    const cov = fbFull?.coverage ?? fbBrief?.coverage;
+    const topRival = fbFull ? (fbFull.share ?? []).find((s: any) => !s.isYou)?.name : fbBrief?.topRival;
+    fbRows.push({
+      primary: `Findability score: ${score} / 100`,
+      secondary: cov ? `top-3 for ${cov.inTop3} of ${cov.total} customer searches` : undefined,
+      tag: score >= 60 ? "strong" : score >= 40 ? "watch" : "weak", tagTone: score >= 60 ? "brand" : score >= 40 ? "neutral" : "alert",
+    });
+    if (fbFull) {
+      // the high-value terms you're buried on (or, failing that, your weakest terms)
+      let terms = ((fbFull.keywords ?? []) as any[]).filter((k) => k.intent === "high_value" && (k.yourRank == null || k.yourRank > 3)).slice(0, 4);
+      if (!terms.length) terms = [...((fbFull.keywords ?? []) as any[])].sort((a, b) => (b.yourRank ?? 99) - (a.yourRank ?? 99)).slice(0, 3);
+      for (const k of terms) {
+        fbRows.push({ primary: clean(k.term), secondary: k.topCompetitor ? `${clean(k.topCompetitor)} ranks above you` : undefined, tag: k.yourRank ? `#${k.yourRank}` : "not ranking", tagTone: "alert" });
+      }
+    } else if (fbBrief?.biggestSlip?.term) {
+      const bs = fbBrief.biggestSlip;
+      fbRows.push({ primary: clean(bs.term), secondary: topRival ? `${clean(topRival)} is ahead of you` : undefined, tag: bs.to ? `#${bs.to}` : "not ranking", tagTone: "alert" });
+    }
+    if (topRival) fbRows.push({ primary: `${clean(topRival)} leads local search`, secondary: "shows up in the top 3 for more of your customer searches", tag: "rival", tagTone: "neutral" });
+    const rec = fbFull?.recommendation ?? fbBrief?.recommendation;
+    if (rec) fbRows.push({ primary: clean(rec), tag: "do this", tagTone: "brand" });
+    if (fbRows.length) sections.push({ title: "Findability in Google search", note: "Where customers find you vs your competitors when they search — and what to fix first.", rows: fbRows });
+  }
+
   return sections;
 }
