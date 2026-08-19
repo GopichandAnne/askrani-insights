@@ -12,11 +12,17 @@
     {
       "path": "/api/digest/tick",
       "schedule": "30 14 * * *"
+    },
+    {
+      "path": "/api/findability/tick",
+      "schedule": "45 15 * * *"
     }
   ],
   "functions": {
     "src/app/api/worker/tick/route.ts": { "maxDuration": 300 },
     "src/app/api/collect/route.ts": { "maxDuration": 300 },
-    "src/app/api/workspace/create/route.ts": { "maxDuration": 120 }
+    "src/app/api/workspace/create/route.ts": { "maxDuration": 120 },
+    "src/app/api/findability/tick/route.ts": { "maxDuration": 300 },
+    "src/app/api/findability/refresh/route.ts": { "maxDuration": 120 }
   }
 }
