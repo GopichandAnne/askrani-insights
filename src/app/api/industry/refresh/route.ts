@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { refreshIndustryCorpus, industryHashtags } from "@/lib/industry";
+import { refreshIndustryCorpus } from "@/lib/industry";
 import { hashtagActorConfigured } from "@/lib/providers/apify/platforms";
 
 /**
@@ -25,9 +25,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ activated: false, reason: "Set APIFY_TOKEN (and optionally APIFY_INSTAGRAM_HASHTAG_ACTOR) to enable." });
   }
   const body = await req.json().catch(() => ({}));
-  const vertical = String(body.vertical ?? "").trim();
-  if (!["restaurant", "salon", "grocery"].includes(vertical)) {
-    return NextResponse.json({ error: "vertical must be restaurant | salon | grocery" }, { status: 400 });
+  // Any vertical is allowed — the curated ones use tuned hashtags, the rest get
+  // LLM-derived ones (cached). Just guard against an empty/garbage value.
+  const vertical = String(body.vertical ?? "").trim().toLowerCase().slice(0, 40);
+  if (!/^[a-z_]{2,}$/.test(vertical)) {
+    return NextResponse.json({ error: "vertical required (e.g. restaurant, fitness, dental, real_estate…)" }, { status: 400 });
   }
   const subtype: string[] = Array.isArray(body.subtype) ? body.subtype.map(String) : [];
   try {
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
       limitPerTag: Number(body.limitPerTag) || undefined,
       maxTags: Number(body.maxTags) || undefined,
     });
-    return NextResponse.json({ ...result, plannedTags: industryHashtags(vertical, subtype) });
+    return NextResponse.json({ ...result, plannedTags: result.tags });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

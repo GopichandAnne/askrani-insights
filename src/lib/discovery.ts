@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { discoverCandidates } from "@/lib/providers/registry";
 import type { ProfileCandidate } from "@/lib/providers/types";
 import { extractSubtype, subtypeSimilarity, extractFormat, formatSimilarity, inferVertical, structuredVertical, isNonFood, verticalQuery, type Vertical } from "@/lib/classify";
+import { getVerticalProfile } from "@/lib/verticalprofile";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
@@ -508,13 +509,20 @@ export async function autoDiscoverCompetitors(
   }
   if (!format.length) format = extractFormat({ name: target.name });
 
-  // One discovery pass at a given radius. Google Places now runs for food too
-  // (verticalQuery returns a real query), so recall is far better than the old
-  // OSM-only pass. Prefill distance for candidates that lack it (Google carries
-  // geo but not distanceKm) so geo scoring works for every source.
+  // The competitor-discovery search phrase: a curated, cuisine-aware query for the
+  // hand-tuned verticals; for anything else (e.g. 'other', a novel type) an
+  // LLM-derived phrase, cached per vertical. So recall stays sharp for every kind
+  // of business, not just the ones we hardcoded.
+  const discoveryQuery = verticalQuery(vertical, subtype, format)
+    ?? (await getVerticalProfile(svc, vertical))?.discovery_query
+    ?? undefined;
+
+  // One discovery pass at a given radius. Prefill distance for candidates that
+  // lack it (Google carries geo but not distanceKm) so geo scoring works for
+  // every source.
   const gather = async (radiusKm: number) => {
     const raw = await discoverCandidates({
-      query: verticalQuery(vertical, subtype, format),
+      query: discoveryQuery,
       near: { ...geo, radiusKm },
       vertical,
       limit: 40,

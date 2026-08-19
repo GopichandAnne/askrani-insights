@@ -3,6 +3,7 @@ import { createClient, createServiceClient, type RlsClient } from "@/lib/supabas
 import { type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyHashtag, hashtagActorConfigured } from "@/lib/providers/apify/platforms";
+import { getVerticalProfile } from "@/lib/verticalprofile";
 
 /**
  * The national INDUSTRY corpus — "best content getting traction in your industry"
@@ -61,8 +62,18 @@ export async function refreshIndustryCorpus(
   vertical: string, subtype: string[] = [], opts: { limitPerTag?: number; maxTags?: number } = {},
 ): Promise<RefreshResult> {
   if (!hashtagActorConfigured()) return { activated: false, tags: [], scraped: 0, costUsd: 0 };
-  const tags = industryHashtags(vertical, subtype, opts.maxTags ?? 5);
   const svc = createServiceClient();
+  const maxTags = opts.maxTags ?? 5;
+  let tags = industryHashtags(vertical, subtype, maxTags);
+  // No hand-tuned tags for this vertical (e.g. a novel type) → derive them with
+  // the LLM, cached per vertical, so its industry corpus isn't just #smallbusiness.
+  if (!(vertical in VERTICAL_BASE)) {
+    const prof = await getVerticalProfile(svc, vertical);
+    if (prof?.hashtags?.length) {
+      const sub = subtype.flatMap((s) => SUBTYPE_TAGS[s] ?? []);
+      tags = [...new Set([...sub, ...prof.hashtags])].slice(0, maxTags);
+    }
+  }
   let scraped = 0, costUsd = 0;
   for (const tag of tags) {
     const { items, costUsd: c } = await collectApifyHashtag(tag, { limit: opts.limitPerTag ?? 30 });
