@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createWorkspaceFromCandidate, autoDiscoverCompetitors } from "@/lib/discovery";
-import { inferVertical } from "@/lib/classify";
+import { inferVertical, isVertical } from "@/lib/classify";
 import { createServiceClient } from "@/lib/supabase/server";
 import { quoteDeepRead, getBalance } from "@/lib/credits";
 import { logEvent } from "@/lib/analytics";
@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 90;
 
 const RETENTION_DAYS = 30;
-const VALID = new Set(["grocery", "restaurant", "salon"]);
 
 /**
  * Deep read — step 1 (QUOTE). Creates an EPHEMERAL workspace for the picked
@@ -26,7 +25,7 @@ export async function POST(req: Request) {
   const { candidate, vertical: rawVertical, scope: rawScope } = await req.json().catch(() => ({}));
   if (!candidate?.name) return badRequest("candidate.name required");
   const scope: "single" | "area" = rawScope === "area" ? "area" : "single";
-  const vertical = VALID.has(rawVertical) ? rawVertical : inferVertical(candidate);
+  const vertical = isVertical(rawVertical) ? rawVertical : inferVertical(candidate);
 
   try {
     const ws = await createWorkspaceFromCandidate(auth.orgId, candidate, vertical);

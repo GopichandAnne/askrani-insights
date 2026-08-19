@@ -513,8 +513,12 @@ export async function autoDiscoverCompetitors(
   // hand-tuned verticals; for anything else (e.g. 'other', a novel type) an
   // LLM-derived phrase, cached per vertical. So recall stays sharp for every kind
   // of business, not just the ones we hardcoded.
+  // For the catch-all 'other' bucket, key the LLM profile on the real Google
+  // category (e.g. car_repair, lawyer) — all novel types collapse to 'other', so
+  // 'other' itself is a useless generation/cache key.
+  const profileKey = vertical === "other" && target.category ? target.category : vertical;
   const discoveryQuery = verticalQuery(vertical, subtype, format)
-    ?? (await getVerticalProfile(svc, vertical))?.discovery_query
+    ?? (await getVerticalProfile(svc, profileKey))?.discovery_query
     ?? undefined;
 
   // One discovery pass at a given radius. Prefill distance for candidates that

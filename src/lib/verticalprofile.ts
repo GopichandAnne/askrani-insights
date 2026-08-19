@@ -67,21 +67,23 @@ async function generate(vertical: string): Promise<VerticalProfile | null> {
 /** Cached LLM-derived profile for a vertical. Reads the cache, generates + persists
  *  on a miss. Never throws — returns null so callers fall back to generic. */
 export async function getVerticalProfile(svc: Svc, vertical: string): Promise<VerticalProfile | null> {
+  const key = String(vertical ?? "").trim().toLowerCase().slice(0, 60);
+  if (!key) return null;
   try {
     const { data } = await svc
       .from("vertical_profile")
       .select("discovery_query, hashtags")
-      .eq("vertical", vertical)
+      .eq("vertical", key)
       .maybeSingle();
     if (data) return { discovery_query: data.discovery_query ?? null, hashtags: (data.hashtags as string[]) ?? [] };
   } catch {
     // table not migrated yet → generate (won't persist), still returns intel
   }
-  const gen = await generate(vertical);
+  const gen = await generate(key);
   if (!gen) return null;
   try {
     await svc.from("vertical_profile").upsert(
-      { vertical, discovery_query: gen.discovery_query, hashtags: gen.hashtags, updated_at: new Date().toISOString() },
+      { vertical: key, discovery_query: gen.discovery_query, hashtags: gen.hashtags, updated_at: new Date().toISOString() },
       { onConflict: "vertical" },
     );
   } catch {

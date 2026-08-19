@@ -58,6 +58,14 @@ export type Vertical =
   | "grocery" | "restaurant" | "salon" | "smoke_vape"
   | "fitness" | "dental" | "real_estate" | "other";
 
+/** All monitored verticals as a runtime list — the single source of truth for
+ *  validation (mirrors the `Vertical` union and the DB `vertical` enum). Use
+ *  isVertical() to honor an already-classified vertical instead of re-inferring. */
+export const VERTICALS = ["restaurant", "grocery", "salon", "smoke_vape", "fitness", "dental", "real_estate", "other"] as const;
+export function isVertical(x: unknown): x is Vertical {
+  return typeof x === "string" && (VERTICALS as readonly string[]).includes(x);
+}
+
 function tagBits(cand: CandidateLike): {
   cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string;
   leisure?: string; healthcare?: string;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createWorkspaceFromCandidate, autoDiscoverCompetitors } from "@/lib/discovery";
-import { inferVertical } from "@/lib/classify";
+import { inferVertical, isVertical } from "@/lib/classify";
 import { createServiceClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/analytics";
 
@@ -13,10 +13,10 @@ export async function POST(req: Request) {
   if (!auth) return unauthorized();
   const { candidate, vertical: rawVertical } = await req.json().catch(() => ({}));
   if (!candidate?.name) return badRequest("candidate.name required");
-  // Auto-detect the vertical from the picked place's tags/name; honor an explicit
-  // client override only when it's a valid value.
-  const VALID = new Set(["grocery", "restaurant", "salon"]);
-  const vertical = VALID.has(rawVertical) ? rawVertical : inferVertical(candidate);
+  // Honor the vertical DETECTION already classified (the client sends it as
+  // cand.detectedVertical, from the intelligent detect) for ANY valid vertical;
+  // only fall back to the deterministic classifier if it's missing/invalid.
+  const vertical = isVertical(rawVertical) ? rawVertical : inferVertical(candidate);
 
   try {
     const ws = await createWorkspaceFromCandidate(auth.orgId, candidate, vertical);
