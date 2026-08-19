@@ -139,6 +139,12 @@ const VERTICAL_KB: Record<string, { departments: string[]; services: string[]; f
     faqTopics: ["services & pricing", "walk-in vs appointment", "bridal & events", "hours & parking"],
     paths: ["/services", "/pricing", "/about"],
   },
+  smoke_vape: {
+    departments: ["Vapes & e-liquids", "Disposables", "Tobacco & cigarettes", "Cigars", "Hookah & shisha", "Glass & pipes", "CBD & wellness", "Kratom", "Accessories"],
+    services: ["In-store pickup", "Special orders", "Loyalty / rewards", "Age-verified (21+) sales", "Delivery"],
+    faqTopics: ["brands & products carried", "age requirement (21+ / valid ID)", "vape & disposable selection", "CBD / kratom availability", "hours & parking"],
+    paths: ["/products", "/brands", "/about"],
+  },
 };
 
 async function fetchPageText(url: string): Promise<string> {

@@ -40,9 +40,18 @@ const BEAUTY_SHOP = new Set(["beauty", "hairdresser", "cosmetics", "tattoo", "ma
 const BEAUTY_GTYPE = /\bspa\b|beauty_salon|hair_care|hair_salon|nail_salon|barber|skin_care|medical_spa|med_spa|wellness_center|massage|tanning|waxing|facial|laser|dermatolog|aesthetic/;
 const BEAUTY_NAME = /\b(med\s*spa|medspa|medical\s*spa|aesthetics?|laser|botox|filler|injectable|dermatolog|skin\s*(care|clinic|bar|studio)|facial|hydrafacial|lash|brow|microblad|microneedl|threading|waxing|\bwax\b|nails?|nail\s*bar|salon|barber|\bspa\b|wellness|rejuven|\bglow\b|beauty\s*bar|cosmetic|esthetic)\b/i;
 
-/** The verticals we can monitor. Food (restaurant/grocery) + personal-care
- *  ('salon' in the DB enum — med spas, day spas, aesthetics, salons, barbers). */
-export type Vertical = "grocery" | "restaurant" | "salon";
+// Smoke / vape / tobacco retail ('smoke_vape' in the DB enum). Smoke shops, vape
+// stores, tobacco & cigar shops, hookah retail, CBD/kratom shops, head shops.
+const SMOKE_SHOP = new Set(["tobacco", "e-cigarette", "e-cigarettes", "cbd"]);
+const SMOKE_GTYPE = /tobacco|cigar|hookah|\bvape\b|e_cigarette|smoke_shop/;
+// Unambiguous smoke-retail name tokens. Deliberately NOT bare "smoke" (a BBQ
+// "Smokehouse" is a restaurant); require shop/vape/tobacco/cigar/hookah/etc.
+const SMOKE_NAME = /\b(smoke\s*shop|smokeshop|smoke\s*(?:&|n|and)\s*vape|vape|vapor|vaping|e-?cigs?|e-?cigarettes?|tobacco|cigars?|hookah|shisha|head\s*shop|cbd|kratom|pipe\s*shop|dispensary)\b/i;
+
+/** The verticals we can monitor. Food (restaurant/grocery), personal-care
+ *  ('salon' — med spas, day spas, aesthetics, salons, barbers), and smoke/vape
+ *  retail ('smoke_vape' — smoke shops, vape/tobacco/cigar/hookah/CBD stores). */
+export type Vertical = "grocery" | "restaurant" | "salon" | "smoke_vape";
 
 function tagBits(cand: CandidateLike): {
   cls?: string; type?: string; shop?: string; amenity?: string; cuisine?: string;
@@ -78,6 +87,7 @@ export function structuredVertical(cand: CandidateLike): Vertical | null {
   if (shop && BEAUTY_SHOP.has(shop)) return "salon";
   if (leisure === "spa") return "salon";
   if (healthcare && /aesthetic|cosmetic|dermat|beauty|spa/.test(healthcare)) return "salon";
+  if (shop && SMOKE_SHOP.has(shop)) return "smoke_vape";
   if (shop && GROCERY_SHOP.has(shop)) return "grocery";
   if (cls === "shop" || (type && GROCERY_SHOP.has(type))) return "grocery";
   if (amenity && RESTAURANT_AMENITY.has(amenity)) return "restaurant";
@@ -86,10 +96,12 @@ export function structuredVertical(cand: CandidateLike): Vertical | null {
   // 2) Google Places types — primaryType is the most authoritative single signal
   //    (e.g. "grocery_store", "asian_grocery_store", "indian_restaurant", "spa").
   if (primaryType) {
+    if (SMOKE_GTYPE.test(primaryType)) return "smoke_vape";
     if (BEAUTY_GTYPE.test(primaryType)) return "salon";
     if (GROCERY_GTYPE.test(primaryType)) return "grocery";
     if (RESTAURANT_GTYPE.test(primaryType)) return "restaurant";
   }
+  if (gtypes.some((t) => SMOKE_GTYPE.test(t))) return "smoke_vape";
   const gGroc = gtypes.some((t) => GROCERY_GTYPE.test(t));
   const gRest = gtypes.some((t) => RESTAURANT_GTYPE.test(t));
   const gBeauty = gtypes.some((t) => BEAUTY_GTYPE.test(t));
@@ -104,10 +116,16 @@ export function structuredVertical(cand: CandidateLike): Vertical | null {
  *  name, defaulting to restaurant only as a last resort. */
 export function inferVertical(cand: CandidateLike): Vertical {
   const structured = structuredVertical(cand);
+  const name = cand.name ?? "";
+  // A clear smoke/vape name is highly specific — trust it over a generic
+  // "convenience_store"→grocery structured guess (many smoke shops are typed as
+  // convenience stores) — but never over a beauty signal, and not for a cigar
+  // BAR/LOUNGE (a venue, not a retail shop), which stays a restaurant.
+  const smokeName = SMOKE_NAME.test(name) && !RESTAURANT_NAME.test(name) && !/\b(bar|lounge|grill|kitchen|caf[eé])\b/i.test(name);
+  if (structured !== "salon" && smokeName) return "smoke_vape";
   if (structured) return structured;
 
   const { cuisine } = tagBits(cand);
-  const name = cand.name ?? "";
   // Name signals: an explicit eatery word (grille, restaurant, kitchen, pizzeria…)
   // is unambiguous and wins over generic grocery words like "market" that also
   // show up in some restaurant names; otherwise a grocery keyword → grocery.
@@ -353,6 +371,7 @@ export function verticalLabel(v: Vertical | string | null | undefined): string {
     case "grocery": return "Grocery";
     case "salon": return "Beauty & spa";
     case "restaurant": return "Restaurant";
+    case "smoke_vape": return "Smoke & vape";
     default: return "Business";
   }
 }
@@ -366,6 +385,8 @@ export function verticalLabel(v: Vertical | string | null | undefined): string {
  *  OSM's nearby mode ignores this query (it uses its own category terms), so its
  *  tuned behaviour is unchanged — this only wakes Google up for food. */
 export function verticalQuery(v: Vertical | string, subtype: string[] = [], format: string[] = []): string | undefined {
+  if (v === "smoke_vape") return "smoke shop OR vape shop OR tobacco shop OR head shop";
+
   if (v === "salon") {
     const s = new Set(subtype);
     if (s.has("injectables") || s.has("laser_body") || s.has("skincare") || s.has("medspa"))

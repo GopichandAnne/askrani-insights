@@ -22,6 +22,7 @@ const VERTICAL_BASE: Record<string, string[]> = {
   restaurant: ["foodie", "foodreels"],
   salon: ["medspa", "aesthetics"],
   grocery: ["cooking", "mealprep"],
+  smoke_vape: ["smokeshop", "vapelife"],
 };
 const SUBTYPE_TAGS: Record<string, string[]> = {
   // cuisines
