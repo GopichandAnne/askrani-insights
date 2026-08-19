@@ -28,7 +28,7 @@ const GEN_SCHEMA = {
   properties: {
     discovery_query: {
       type: "string",
-      description: "A Google Places TEXT-SEARCH phrase that finds this category's direct competitors. Join close synonyms with OR. No location, no punctuation beyond OR. e.g. 'auto repair shop OR mechanic OR tire shop'.",
+      description: "A Google Places TEXT-SEARCH phrase for DIRECT competitors — the SAME core business type only, using its 3-5 closest synonyms joined by OR. Do NOT broaden into adjacent categories or umbrella services. No location. e.g. groomer → 'dog grooming OR pet grooming OR pet groomer' (NOT vets/daycare/boarding); auto → 'auto repair OR mechanic OR car repair shop'.",
     },
     hashtags: {
       type: "array",
@@ -41,7 +41,7 @@ const GEN_SCHEMA = {
 };
 
 const GEN_SYSTEM =
-  "You configure market intelligence for a local-business category. Given a category label, produce: (1) a Google Places text-search phrase that finds that category's direct competitors, and (2) 3-4 Instagram hashtags whose top posts show the best-performing content in that industry. Be specific to the category. No location in the query; no '#' in the hashtags.";
+  "You configure competitor discovery + content intel for a local-business category. Given a category label, produce: (1) discovery_query — a Google Places text-search phrase targeting DIRECT competitors (the SAME core business, its 3-5 closest synonyms joined by OR; never broaden into adjacent categories or umbrella services), and (2) 3-4 Instagram hashtags whose top posts show the best-performing content in that industry. No location in the query; no '#' in the hashtags. When the category itself is an umbrella (e.g. 'pet care', 'lawyer'), pick its single most common storefront interpretation and keep the query to that.";
 
 async function generate(vertical: string): Promise<VerticalProfile | null> {
   if (!isLlmConfigured()) return null;
