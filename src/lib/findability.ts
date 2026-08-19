@@ -215,8 +215,19 @@ export async function refreshFindability(ws: WorkspaceRow, opts: { runs?: number
 }
 
 // ── derived reads (phase 2) — the score + metrics for the pillar UI ──────────
-export interface FKeywordRead { term: string; intent: Intent; yourRank: number | null; topCompetitor: string | null; trend: number | null; confidence: boolean }
+export interface FKeywordRead { term: string; intent: Intent; yourRank: number | null; topCompetitor: string | null; topCompetitorRank: number | null; trend: number | null; confidence: boolean }
 export interface FShareRow { name: string; isYou: boolean; topThree: number; total: number }
+export interface PlaybookLever { title: string; detail: string }
+export interface PlaybookPlay {
+  term: string;
+  intent: Intent;
+  yourRank: number | null;
+  rival: string | null;
+  rivalRank: number | null;
+  gap: string;                   // one line — why you're losing this search to the rival
+  levers: PlaybookLever[];       // 2-3 ranked, concrete moves to close the gap
+  act: { label: string; move: string; context: string }; // one-tap "Do it with Rani" (feeds /api/act)
+}
 export interface FindabilityReport {
   at: string;
   empty: boolean;
@@ -231,7 +242,8 @@ export interface FindabilityReport {
   keywords: FKeywordRead[];      // sorted by intent then rank
   share: FShareRow[];            // top-3 share of local search, you + competitors
   keywordCount: number;
-  recommendation: string | null; // "what to do" — the single most valuable action
+  recommendation: string | null; // "what to do" — the single most valuable action (TL;DR over the playbook)
+  playbook: PlaybookPlay[];      // per-term plays: ranked levers to outrank the rival ahead + one-tap act
 }
 
 interface Snap { keyword_id: string; term: string; intent: Intent; your_rank: number | null; confidence: boolean; top_competitor: string | null; competitor_ranks: Record<string, number>; captured_on: string }
@@ -259,30 +271,91 @@ function subScores(snaps: Snap[], weights: Map<string, number>) {
 const emptyReport = (): FindabilityReport => ({
   at: new Date().toISOString(), empty: true, capturedOn: null, score: 0, scoreDelta: null,
   breakdown: { position: 0, coverage: 0, momentum: 50 }, avgPosition: null, avgPositionDelta: null,
-  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0, recommendation: null,
+  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0, recommendation: null, playbook: [],
 });
 
-// ── "what to do" — one grounded action from the findability picture ──────────
-const REC_SCHEMA = {
+// ── the playbook — a TL;DR action + per-term plays to outrank the rival ahead ─
+const PLAYBOOK_SCHEMA = {
   type: "object", additionalProperties: false,
-  properties: { action: { type: "string", description: "one or two sentences: the single most valuable action to improve findability this week, grounded in the data — concrete and specific, no lists, no fluff." } },
-  required: ["action"],
+  properties: {
+    recommendation: { type: "string", description: "the SINGLE most valuable action this week, 1-2 concrete sentences — the headline over the plays. Plain, direct, no lists." },
+    plays: {
+      type: "array", maxItems: 3,
+      description: "one play for each of the (up to 3) most valuable search terms the business is losing.",
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          term: { type: "string", description: "the exact tracked search term this play targets — copy it verbatim from the input list." },
+          gap: { type: "string", description: "one sentence: WHY the named rival is winning this search (what they have that this business lacks). Concrete, no fluff." },
+          levers: {
+            type: "array", minItems: 2, maxItems: 3,
+            description: "the concrete moves to close the gap for THIS term, most impactful first.",
+            items: {
+              type: "object", additionalProperties: false,
+              properties: {
+                title: { type: "string", description: "the lever in 2-4 words, e.g. 'Service page', 'Review velocity', 'GBP category', 'Local citations', 'Photos', 'Google Post'." },
+                detail: { type: "string", description: "one specific sentence — exactly what to do for this term and business. No placeholders." },
+              }, required: ["title", "detail"],
+            },
+          },
+          act: {
+            type: "object", additionalProperties: false,
+            properties: {
+              label: { type: "string", description: "a short button label for the one artifact to generate now, e.g. 'Draft the service page', 'Draft a review request', 'Draft a Google Post'." },
+              move: { type: "string", description: "a first-person instruction to a copywriter for that single artifact, grounded in this term and the rival. One sentence." },
+            }, required: ["label", "move"],
+          },
+        }, required: ["term", "gap", "levers", "act"],
+      },
+    },
+  }, required: ["recommendation", "plays"],
 };
-const REC_SYSTEM =
-  "You advise a local business on getting found in Google search. From its search-rank data — where it ranks for the terms customers type vs its competitors — write the SINGLE most valuable action to take this week, in 1-2 concrete sentences. Prioritize the high-value terms it's buried or slipping on and where a specific competitor is beating it. Plain, direct, no lists.";
+const PLAYBOOK_SYSTEM =
+  "You are a local-SEO strategist helping a small business outrank specific competitors in Google's local search. You get the high-value searches it is LOSING and the exact rival ranking above it on each. For the up to 3 most valuable terms, write a play: (1) a one-sentence gap — why that rival is winning the search; (2) 2-3 ranked, concrete levers the owner can actually pull — a targeted service/landing page, Google Business Profile category & attributes, review velocity using the term's language, local citations/NAP consistency, photos, Google Posts — each a single specific sentence, most impactful first; (3) an 'act' = the ONE marketing artifact to generate right now (a targeted post/page or a review request) with a short button label and a first-person instruction. Also give one headline 'recommendation' — the single highest-value move overall. Be specific and practical; ground everything in the given terms and rivals; never use placeholders or generic filler.";
 
-async function makeRecommendation(ws: WorkspaceRow, keywords: FKeywordRead[], share: FShareRow[], biggestSlip: FindabilityReport["biggestSlip"]): Promise<string | null> {
-  if (!isLlmConfigured() || !keywords.length) return null;
-  const weak = keywords.filter((k) => k.intent === "high_value" && (k.yourRank == null || k.yourRank > 3)).slice(0, 4);
+interface RawPlay { term: string; gap: string; levers: { title: string; detail: string }[]; act: { label: string; move: string } }
+const nt = (s: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+async function makePlaybook(ws: WorkspaceRow, keywords: FKeywordRead[], share: FShareRow[]): Promise<{ recommendation: string | null; plays: PlaybookPlay[] }> {
+  if (!isLlmConfigured() || !keywords.length) return { recommendation: null, plays: [] };
+  const weak = keywords
+    .filter((k) => k.yourRank == null || k.yourRank > 3)
+    .sort((a, b) => INTENT_ORDER[b.intent] - INTENT_ORDER[a.intent] || (b.yourRank ?? 99) - (a.yourRank ?? 99))
+    .slice(0, 6);
+  if (!weak.length) {
+    return { recommendation: "You're in the top 3 for your key searches — keep reviews fresh and your Google profile active to hold the lead.", plays: [] };
+  }
+  const byTerm = new Map(keywords.map((k) => [nt(k.term), k]));
   const leaders = share.filter((s) => !s.isYou).slice(0, 3);
   const text = `BUSINESS vertical: ${ws.vertical}\n`
-    + `HIGH-VALUE terms you're weak on: ${weak.map((k) => `"${k.term}" (${k.yourRank ? "#" + k.yourRank : "not ranking"}${k.topCompetitor ? `, rival ${k.topCompetitor}` : ""})`).join("; ") || "none"}\n`
-    + `Biggest slip: ${biggestSlip ? `"${biggestSlip.term}" → ${biggestSlip.to ? "#" + biggestSlip.to : "not ranking"}` : "none"}\n`
-    + `Competitors leading local search: ${leaders.map((l) => `${l.name} (${l.topThree}/${l.total})`).join(", ") || "none"}`;
+    + `SEARCHES YOU'RE LOSING (most valuable first):\n`
+    + weak.map((k) => `- "${k.term}" [${k.intent}] — you ${k.yourRank ? "#" + k.yourRank : "not in top 20"}${k.topCompetitor ? `, ${k.topCompetitor} ${k.topCompetitorRank ? "#" + k.topCompetitorRank : "ahead"}` : ""}`).join("\n")
+    + `\nCompetitors leading local search overall: ${leaders.map((l) => `${l.name} (${l.topThree}/${l.total} top-3)`).join(", ") || "none"}`;
   try {
-    const { data } = await getLlm().callStructured<{ action: string }>({ system: REC_SYSTEM, text, schema: REC_SCHEMA, tier: "classify", maxTokens: 160 });
-    return String(data?.action ?? "").trim() || null;
-  } catch { return null; }
+    const { data } = await getLlm().callStructured<{ recommendation: string; plays: RawPlay[] }>({
+      system: PLAYBOOK_SYSTEM, text, schema: PLAYBOOK_SCHEMA, tier: "extract", maxTokens: 1100,
+    });
+    const plays: PlaybookPlay[] = (data?.plays ?? []).map((rp) => {
+      const k = byTerm.get(nt(rp.term))
+        ?? weak.find((w) => nt(w.term).includes(nt(rp.term)) || nt(rp.term).includes(nt(w.term)))
+        ?? null;
+      const levers = (rp.levers ?? []).slice(0, 3)
+        .map((l) => ({ title: String(l.title ?? "").trim().slice(0, 40), detail: String(l.detail ?? "").trim() }))
+        .filter((l) => l.title && l.detail);
+      const term = k?.term ?? String(rp.term ?? "").trim();
+      const yourRank = k?.yourRank ?? null;
+      const rival = k?.topCompetitor ?? null;
+      const rivalRank = k?.topCompetitorRank ?? null;
+      const context = `Target Google search: "${term}". You rank ${yourRank ? "#" + yourRank : "outside the top 20"}; ${rival ? `${rival} ranks ${rivalRank ? "#" + rivalRank : "above you"}` : "a competitor ranks above you"}. Angle the copy to win this exact local search. Key levers: ${levers.map((l) => l.title).join(", ") || "local relevance"}.`;
+      return {
+        term, intent: k?.intent ?? "high_value", yourRank, rival, rivalRank,
+        gap: String(rp.gap ?? "").trim(),
+        levers,
+        act: { label: String(rp.act?.label ?? "Draft a post").trim().slice(0, 40), move: String(rp.act?.move ?? `Help us rank for "${term}"`).trim(), context },
+      };
+    }).filter((p) => p.term && p.levers.length);
+    return { recommendation: String(data?.recommendation ?? "").trim() || null, plays };
+  } catch { return { recommendation: null, plays: [] }; }
 }
 
 /** Compute the Findability score + reads from the snapshots. Read-only; no cost. */
@@ -320,7 +393,8 @@ export async function buildFindabilityReport(ws: WorkspaceRow): Promise<Findabil
   const keywords: FKeywordRead[] = cur
     .map((s) => {
       const pr = priorRank.get(s.keyword_id);
-      return { term: s.term, intent: s.intent, yourRank: s.your_rank, topCompetitor: s.top_competitor, trend: pr != null && s.your_rank != null ? pr - s.your_rank : null, confidence: s.confidence };
+      const rivalRank = s.top_competitor ? (s.competitor_ranks?.[s.top_competitor] ?? null) : null;
+      return { term: s.term, intent: s.intent, yourRank: s.your_rank, topCompetitor: s.top_competitor, topCompetitorRank: rivalRank, trend: pr != null && s.your_rank != null ? pr - s.your_rank : null, confidence: s.confidence };
     })
     .sort((a, b) => INTENT_ORDER[a.intent] - INTENT_ORDER[b.intent] || (a.yourRank ?? 99) - (b.yourRank ?? 99));
 
@@ -345,13 +419,13 @@ export async function buildFindabilityReport(ws: WorkspaceRow): Promise<Findabil
     ...[...compTop3].map(([name, cnt]) => ({ name, isYou: false, topThree: cnt, total }))]
     .sort((a, b) => b.topThree - a.topThree).slice(0, 6);
 
-  const recommendation = await makeRecommendation(ws, keywords, share, biggestSlip);
+  const { recommendation, plays } = await makePlaybook(ws, keywords, share);
 
   return {
     at: new Date().toISOString(), empty: false, capturedOn: current, score, scoreDelta,
     breakdown: { position: c.position, coverage: c.coverage, momentum },
     avgPosition: c.avg, avgPositionDelta: p && p.avg != null && c.avg != null ? p.avg - c.avg : null,
-    coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length, recommendation,
+    coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length, recommendation, playbook: plays,
   };
 }
 

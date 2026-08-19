@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { activeWorkspace } from "@/lib/workspace";
 import { getOrMakeFindabilityReport, type FindabilityReport } from "@/lib/findability";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { ActOnIt } from "@/components/ActOnIt";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -106,6 +107,44 @@ export default async function FindabilityPage() {
                   <p className="mt-1 text-sm text-ink">{report.recommendation}</p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Playbook — per-term plays to outrank the rival ahead, each one tap to act */}
+          {report.playbook.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🎯</span>
+                <h2 className="font-display text-lg font-bold">Your playbook to outrank them</h2>
+              </div>
+              {report.playbook.map((p) => {
+                const chip = rankChip(p.yourRank);
+                return (
+                  <div key={p.term} className="card">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-semibold text-ink">{shortTerm(p.term)}</span>
+                      <span className={`chip ${chip.cls} font-mono`}>{chip.txt}</span>
+                      {p.rival && (
+                        <span className="text-xs text-ink-faint">
+                          vs <span className="text-ink-soft">{p.rival}</span>{p.rivalRank ? ` #${p.rivalRank}` : ""}
+                        </span>
+                      )}
+                    </div>
+                    {p.gap && <p className="mt-1.5 text-sm text-ink-soft">{p.gap}</p>}
+                    <ol className="mt-3 space-y-2">
+                      {p.levers.map((l, i) => (
+                        <li key={i} className="flex gap-2.5 text-sm">
+                          <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[11px] font-bold text-brand-deep">{i + 1}</span>
+                          <span><b className="text-ink">{l.title}.</b> <span className="text-ink-soft">{l.detail}</span></span>
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="mt-3.5">
+                      <ActOnIt kind="content" label={`✍️ ${p.act.label}`} move={p.act.move} context={p.act.context} small />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 

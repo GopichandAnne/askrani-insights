@@ -380,6 +380,15 @@ export function buildReportSections(goals: Record<string, any>): ReportSection[]
     if (topRival) fbRows.push({ primary: `${clean(topRival)} leads local search`, secondary: "shows up in the top 3 for more of your customer searches", tag: "rival", tagTone: "neutral" });
     const rec = fbFull?.recommendation ?? fbBrief?.recommendation;
     if (rec) fbRows.push({ primary: clean(rec), tag: "do this", tagTone: "brand" });
+    // Playbook — per-term plays to outrank the rival ahead (full report only)
+    for (const p of (fbFull?.playbook ?? []).slice(0, 3) as any[]) {
+      const levers = (p.levers ?? []).slice(0, 2).map((l: any) => `${clean(l.title)}: ${clean(l.detail)}`).join("  •  ");
+      fbRows.push({
+        primary: `Outrank ${p.rival ? clean(p.rival) : "the leader"} for "${clean(p.term)}"${p.yourRank ? ` (you #${p.yourRank})` : ""}`,
+        secondary: levers || (p.gap ? clean(p.gap) : undefined),
+        tag: "play", tagTone: "brand",
+      });
+    }
     if (fbRows.length) sections.push({ title: "Findability in Google search", note: "Where customers find you vs your competitors when they search — and what to fix first.", rows: fbRows });
   }
 
