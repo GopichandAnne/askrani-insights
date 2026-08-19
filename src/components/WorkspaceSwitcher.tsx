@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { verticalEmoji } from "@/lib/classify";
 
 export interface WsOption {
   id: string;
@@ -40,7 +41,7 @@ export function WorkspaceSwitcher({ workspaces, activeId }: { workspaces: WsOpti
     router.refresh();
   }
 
-  const icon = (v: string) => (v === "grocery" ? "🛒" : "🍽️");
+  const icon = (v: string) => verticalEmoji(v);
 
   return (
     <div ref={ref} className="relative">

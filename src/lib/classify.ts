@@ -379,6 +379,20 @@ export function subtypeLabel(subtype: string[]): string | undefined {
   return subtype.slice(0, 2).map(pretty).join(" / ");
 }
 
+/** Emoji for a vertical (for chips). Catch-all 'other'/unknown → a neutral pin. */
+export function verticalEmoji(v: Vertical | string | null | undefined): string {
+  switch (v) {
+    case "grocery": return "🛒";
+    case "salon": return "💆";
+    case "smoke_vape": return "💨";
+    case "fitness": return "🏋️";
+    case "dental": return "🦷";
+    case "real_estate": return "🏠";
+    case "restaurant": return "🍽️";
+    default: return "📍";
+  }
+}
+
 /** Human label for a vertical (for chips / copy). */
 export function verticalLabel(v: Vertical | string | null | undefined): string {
   switch (v) {

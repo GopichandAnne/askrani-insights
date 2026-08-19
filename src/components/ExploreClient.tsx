@@ -5,6 +5,10 @@ import dynamic from "next/dynamic";
 import { track } from "@/components/Analytics";
 import type { MapPoint } from "@/components/MapPicker";
 import type { ExploreResponse, ExploreResult, MarketRead } from "@/lib/explore";
+import { verticalEmoji, verticalLabel } from "@/lib/classify";
+
+/** "car_repair" → "Car Repair" — a readable chip for the 'other' catch-all. */
+const prettyCategory = (c: string) => c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
 const MapPicker = dynamic(() => import("@/components/MapPicker").then((m) => m.MapPicker), {
   ssr: false,
@@ -425,7 +429,7 @@ function ResultRow({ r, rank, onMonitor, onDeep }: { r: ExploreResult; rank: num
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold">{r.name}</span>
-          <span className="chip bg-brand-soft text-brand-deep">{r.vertical === "grocery" ? "🛒 Grocery" : r.vertical === "salon" ? "💆 Beauty & spa" : "🍽️ Restaurant"}{r.subtype ? ` · ${r.subtype}` : ""}</span>
+          <span className="chip bg-brand-soft text-brand-deep">{verticalEmoji(r.vertical)} {r.vertical === "other" && r.category ? prettyCategory(r.category) : verticalLabel(r.vertical)}{r.subtype ? ` · ${r.subtype}` : ""}</span>
         </div>
         <div className="mt-0.5 truncate text-xs text-ink-faint">
           {r.address ?? ""}{r.distanceKm != null ? ` · ${r.distanceKm}km` : ""}

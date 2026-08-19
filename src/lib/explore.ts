@@ -1,5 +1,5 @@
 import { getProvider } from "@/lib/providers/registry";
-import { inferVertical, extractSubtype, subtypeLabel } from "@/lib/classify";
+import { structuredVertical, nameVertical, extractSubtype, subtypeLabel } from "@/lib/classify";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
@@ -94,7 +94,10 @@ export async function exploreArea(input: { area: string; keyword?: string }): Pr
       address: p.formattedAddress,
       website: c.website,
       geo: c.geo,
-      vertical: inferVertical(c),
+      // Structured (Google/OSM) signal, then name; default to 'other' — NOT
+      // restaurant — so a market scan of e.g. auto shops isn't labeled "Restaurant".
+      // The card shows the real Google category for 'other'.
+      vertical: structuredVertical(c) ?? nameVertical(c) ?? "other",
       subtype: subtypeLabel(extractSubtype(c)) ?? "",
       distanceKm,
       mapsUrl: c.url,
