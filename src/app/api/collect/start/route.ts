@@ -3,6 +3,8 @@ import { requireOrg, unauthorized, badRequest, workspaceInOrg } from "@/lib/api"
 import { enqueueWorkspaceCollection, nudgeWorker, requeuePausedForOrg } from "@/lib/jobs";
 import { hasCredits, getBalance } from "@/lib/credits";
 import { logEvent } from "@/lib/analytics";
+import { getUser } from "@/lib/auth";
+import { ensureRaniLinkByEmail } from "@/lib/raniWallet";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,15 @@ export async function POST(req: Request) {
   if (!(await workspaceInOrg(workspaceId, auth.orgId))) return unauthorized();
 
   try {
+    // One account, one wallet: link this org to its Rani store (by the owner's
+    // verified email) BEFORE the credit gate, so the check + the spend both draw
+    // from the shared wallet when the business runs both apps. Throttled + no-op
+    // when the shared wallet isn't configured; falls back to the local ledger.
+    try {
+      const u = await getUser();
+      await ensureRaniLinkByEmail(auth.orgId, u?.email ?? null);
+    } catch { /* best-effort */ }
+
     // Phase 2 gate: monitoring runs on credits. Block enqueue when empty.
     if (!(await hasCredits(auth.orgId))) {
       return NextResponse.json({ enqueued: 0, needsCredits: true, balance: await getBalance(auth.orgId) });
