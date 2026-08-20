@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { activeWorkspace, workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { getUser, ensureOrgForUser } from "@/lib/auth";
+import { ensureRaniLinkByEmail } from "@/lib/raniWallet";
 import { isAreaMode } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
@@ -25,6 +28,18 @@ export default async function HomePage() {
   if (state.status === "signedout" || state.status === "unconfigured") return <Landing />;
   // Area workspaces have no "you" — the market hub is their home.
   if (state.status === "ok" && isAreaMode(state.workspace)) redirect("/market");
+
+  // One account, one wallet: opportunistically link this org to its Rani store by
+  // the owner's verified email (throttled to ~12h inside). Covers the Insights-first
+  // owner who subscribes to Rani later. Post-response + best-effort — never blocks.
+  if (state.status === "ok") {
+    after(async () => {
+      try {
+        const user = await getUser();
+        if (user?.email) await ensureRaniLinkByEmail(await ensureOrgForUser(user.id, user.email), user.email);
+      } catch { /* best-effort */ }
+    });
+  }
 
   return (
     <div className="animate-fade-in space-y-6">

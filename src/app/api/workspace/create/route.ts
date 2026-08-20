@@ -4,6 +4,8 @@ import { createWorkspaceFromCandidate, autoDiscoverCompetitors } from "@/lib/dis
 import { inferVertical, isVertical } from "@/lib/classify";
 import { createServiceClient } from "@/lib/supabase/server";
 import { logEvent } from "@/lib/analytics";
+import { getUser } from "@/lib/auth";
+import { ensureRaniLinkByEmail } from "@/lib/raniWallet";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 90;
@@ -30,6 +32,16 @@ export async function POST(req: Request) {
     );
 
     void logEvent("workspace_created", { vertical, competitors: competitors.length }, { orgId: auth.orgId, path: "/onboarding" });
+
+    // One account, one wallet: if this owner's verified email owns a Rani store,
+    // auto-link this org to it so Insights spends draw from the same purse. This is
+    // the natural moment — the org now has a spend-capable workspace. Best-effort
+    // and a no-op unless the shared wallet is configured and the emails match.
+    try {
+      const u = await getUser();
+      await ensureRaniLinkByEmail(auth.orgId, u?.email ?? null);
+    } catch { /* best-effort — never block workspace creation */ }
+
     // NOTE: collection is NOT started here. The user reviews/edits the competitor
     // set first, then explicitly starts it (POST /api/collect/start).
     return NextResponse.json({
