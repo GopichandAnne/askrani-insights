@@ -181,10 +181,10 @@ export function LoginClient() {
                 {(tab === "register" || method === "phone")
                   ? (
                     <div className="flex gap-2">
-                      <select value={dial} onChange={(e) => setDial(e.target.value)} aria-label="Country code" className={`${inputCls} w-auto shrink-0 pr-2`}>
+                      <select value={dial} onChange={(e) => setDial(e.target.value)} aria-label="Country code" className="w-24 shrink-0 rounded-xl border border-line bg-white/80 px-2 py-3 text-sm outline-none focus:border-brand">
                         {DIAL_CODES.map((c) => <option key={c.name} value={c.dial}>{c.flag} {c.dial}</option>)}
                       </select>
-                      <input value={f.phone} onChange={set("phone")} type="tel" inputMode="tel" placeholder="512 555 0142" className={inputCls} />
+                      <input value={f.phone} onChange={set("phone")} type="tel" inputMode="tel" placeholder="512 555 0142" className={`${inputCls} min-w-0 flex-1`} />
                     </div>
                   )
                   : <input value={f.email} onChange={set("email")} type="email" placeholder="you@business.com" className={inputCls} />}
