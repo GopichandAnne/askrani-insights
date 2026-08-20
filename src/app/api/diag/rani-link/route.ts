@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { resolveStoreForEmail, sharedWalletConfigured } from "@/lib/raniWallet";
+import { resolveStoreForEmail, sharedWalletConfigured, ensureRaniLinkByEmail } from "@/lib/raniWallet";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -42,10 +43,38 @@ export async function GET(req: Request) {
     }
   }
 
+  // link=1: drive the REAL auto-link for this email's Insights org and read back
+  // goals.raniStore before/after — the full end-to-end write test.
+  let link: unknown = null;
+  if (url.searchParams.get("link") === "1" && email) {
+    const svc = createServiceClient();
+    const { data: userList } = await svc.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const user = (userList?.users ?? []).find((u: { email?: string | null }) => (u.email ?? "").toLowerCase() === email);
+    if (!user) {
+      link = { error: "no Insights user for this email" };
+    } else {
+      const { data: mem } = await svc.from("org_membership").select("organization_id").eq("user_id", user.id).limit(1).maybeSingle();
+      const orgId = (mem?.organization_id as string | undefined) ?? null;
+      if (!orgId) {
+        link = { error: "no org for user", userId: user.id };
+      } else {
+        const readStores = async () => {
+          const { data } = await svc.from("workspace").select("goals").eq("organization_id", orgId);
+          return (data ?? []).map((w: { goals?: Record<string, unknown> | null }) => (w?.goals?.raniStore as string) ?? null);
+        };
+        const before = await readStores();
+        const linkedResult = await ensureRaniLinkByEmail(orgId, email);
+        const after = await readStores();
+        link = { orgId, workspaces: after.length, linkedResult, beforeRaniStore: before, afterRaniStore: after };
+      }
+    }
+  }
+
   return NextResponse.json({
     sharedWalletConfigured: sharedWalletConfigured(),
     email: email || null,
     store,
     raw,
+    link,
   });
 }
