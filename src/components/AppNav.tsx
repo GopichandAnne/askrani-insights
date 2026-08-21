@@ -146,13 +146,16 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
         <div className="glass-strong flex items-center gap-2 px-4 py-2.5">
           <Link href="/" aria-label="home" className="shrink-0"><RaniMark size={26} /></Link>
           {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
-          <AskTrigger className="max-w-[40%] flex-1" />
           <span className="ml-auto"><CreditsPill credits={credits} /></span>
         </div>
       </header>
 
-      {/* ── Mobile bottom tab bar (5 primary + More) ────────────────── */}
-      <nav className="no-print fixed inset-x-0 bottom-0 z-40 lg:hidden">
+      {/* ── Mobile bottom stack: Ask bar (thumb-reachable) + tab bar ── */}
+      <div className="no-print fixed inset-x-0 bottom-0 z-40 lg:hidden">
+        <div className="mx-auto max-w-xl px-3 pb-1.5">
+          <AskTrigger className="w-full shadow-glow" />
+        </div>
+        <nav>
         <div className="glass-strong mx-auto flex max-w-xl items-center justify-around gap-0.5 px-1.5 py-1.5">
           {items.slice(0, 5).map((n) => (
             <Link
@@ -179,7 +182,8 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
             </button>
           )}
         </div>
-      </nav>
+        </nav>
+      </div>
 
       {/* ── Mobile "More" sheet — everything not in the bottom 5 ─────── */}
       {menu && (
