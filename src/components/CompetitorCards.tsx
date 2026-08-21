@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import type { CompetitorCardsResult, CompetitorCard, CompetitorPost, CompetitorChange } from "@/lib/competitors";
+import type { PriceGap } from "@/lib/pricegaps";
+
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+function gapChip(g: PriceGap): { cls: string; txt: string } {
+  if (g.verdict === "you_cheaper") return { cls: "bg-trust-direct/15 text-trust-direct", txt: `you ${g.yourPrice} ✓` };
+  if (g.verdict === "undercut") return { cls: "bg-coral/15 text-coral-dark", txt: g.yourPrice ? `you ${g.yourPrice}` : "you pricier" };
+  return { cls: "bg-surface-sunken text-ink-faint", txt: "you n/a" };
+}
 
 /**
  * Per-competitor cards — one rival, one card: rating, price vs you, latest move,
@@ -69,11 +77,13 @@ function ChangeRow({ c }: { c: CompetitorChange }) {
   );
 }
 
-function Card({ c, you }: { c: CompetitorCard; you: CompetitorCardsResult["you"] }) {
+function Card({ c, you, gaps }: { c: CompetitorCard; you: CompetitorCardsResult["you"]; gaps?: PriceGap[] }) {
   const [open, setOpen] = useState(false);
+  const [allGaps, setAllGaps] = useState(false);
   const latest = c.recentChanges[0];
   const topPost = c.topPosts[0];
-  const moreCount = Math.max(0, c.recentChanges.length - 1) + Math.max(0, c.topPosts.length - 1) + c.offers.length;
+  const hasGaps = !!gaps && gaps.length > 0;
+  const moreCount = Math.max(0, c.recentChanges.length - 1) + Math.max(0, c.topPosts.length - 1) + c.offers.length + (gaps?.length ?? 0);
 
   return (
     <div className="card flex flex-col gap-3">
@@ -113,12 +123,38 @@ function Card({ c, you }: { c: CompetitorCard; you: CompetitorCardsResult["you"]
       {/* expand */}
       {moreCount > 0 && (
         <button onClick={() => setOpen((o) => !o)} className="w-fit text-xs font-medium text-brand hover:underline">
-          {open ? "Show less ▴" : `More details ▾`}
+          {open ? "Show less ▴" : hasGaps ? "Prices vs you · more ▾" : "More details ▾"}
         </button>
       )}
 
       {open && (
         <div className="space-y-4 border-t border-line/70 pt-3">
+          {/* prices vs you — biggest gaps first (the drill-down default) */}
+          {hasGaps && (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">Prices vs you · biggest gaps first</p>
+              <ul className="divide-y divide-line/50">
+                {(allGaps ? gaps! : gaps!.slice(0, 6)).map((g, i) => {
+                  const chip = gapChip(g);
+                  return (
+                    <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                      <span className="min-w-0 truncate text-ink">{g.item}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="font-semibold tabular-nums text-ink">{g.rivalPrice}</span>
+                        <span className={`chip ${chip.cls} tabular-nums`}>{chip.txt}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {gaps!.length > 6 && (
+                <button onClick={() => setAllGaps((a) => !a)} className="mt-2 text-xs font-medium text-brand hover:underline">
+                  {allGaps ? "Show fewer" : `Show all ${gaps!.length} priced items`}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* all ratings */}
           {c.ratingSources.length > 1 && (
             <div>
@@ -176,7 +212,7 @@ function Card({ c, you }: { c: CompetitorCard; you: CompetitorCardsResult["you"]
   );
 }
 
-export function CompetitorCards({ data }: { data: CompetitorCardsResult }) {
+export function CompetitorCards({ data, gapsByRival }: { data: CompetitorCardsResult; gapsByRival?: Record<string, PriceGap[]> }) {
   if (!data.cards.length) {
     return (
       <p className="card border-dashed text-sm text-ink-soft">
@@ -191,7 +227,7 @@ export function CompetitorCards({ data }: { data: CompetitorCardsResult }) {
         {data.you.avgPrice != null && <> Your average priced item: <span className="font-medium text-brand-deep">${data.you.avgPrice.toFixed(2)}</span>.</>}
       </p>
       <div className="grid items-start gap-4 md:grid-cols-2">
-        {data.cards.map((c) => (<Card key={c.businessId} c={c} you={data.you} />))}
+        {data.cards.map((c) => (<Card key={c.businessId} c={c} you={data.you} gaps={gapsByRival?.[normName(c.name)]} />))}
       </div>
     </div>
   );

@@ -6,10 +6,15 @@ import { CompetitorsMap } from "@/components/CompetitorsMap";
 import { CompetitorCards } from "@/components/CompetitorCards";
 import { MarketTabs } from "@/components/MarketTabs";
 import { competitorCards } from "@/lib/competitors";
+import { getOrMakePriceGaps, type PriceGap } from "@/lib/pricegaps";
 import type { MapPoint } from "@/components/MapPicker";
 
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const priceNum = (s?: string) => { const m = String(s ?? "").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
+const gapMag = (g: PriceGap) => { const y = priceNum(g.yourPrice), r = priceNum(g.rivalPrice); return y != null && r != null ? Math.abs(y - r) : -1; };
+
 export const dynamic = "force-dynamic";
-export const maxDuration = 30; // reuses buildWorkspaceReport (a few aggregations)
+export const maxDuration = 45; // buildWorkspaceReport + priceGaps (cold-cache LLM)
 
 type Geo = { lat: number; lng: number };
 const geoOf = (attrs: unknown): Geo | null => {
@@ -23,7 +28,7 @@ export default async function CompetitorsPage() {
   const area = isAreaMode(state.workspace);
 
   const supabase = await createClient();
-  const [{ data: edges }, { data: target }, cardData] = await Promise.all([
+  const [{ data: edges }, { data: target }, cardData, priceGaps] = await Promise.all([
     supabase
       .from("competitor_edge")
       .select("id,relation,score,competitor:competitor_id(canonical_name,attributes)")
@@ -33,7 +38,13 @@ export default async function CompetitorsPage() {
       ? supabase.from("business").select("canonical_name,attributes").eq("id", state.workspace.target_business_id).maybeSingle()
       : Promise.resolve({ data: null }),
     competitorCards(state.workspace),
+    getOrMakePriceGaps(state.workspace),
   ]);
+
+  // per-rival "you vs them" price gaps, biggest first — the drill-down default.
+  const gapsByRival: Record<string, PriceGap[]> = {};
+  for (const g of priceGaps.gaps ?? []) { (gapsByRival[normName(g.rival)] ??= []).push(g); }
+  for (const k of Object.keys(gapsByRival)) gapsByRival[k].sort((a, b) => gapMag(b) - gapMag(a));
 
   // map points: your business (if geo) + each competitor with geo
   const points: MapPoint[] = [];
@@ -60,7 +71,7 @@ export default async function CompetitorsPage() {
       <MarketTabs />
 
       {/* primary: per-competitor cards */}
-      <CompetitorCards data={cardData} />
+      <CompetitorCards data={cardData} gapsByRival={gapsByRival} />
 
       {/* secondary: the map */}
       {points.length > 0 && (
