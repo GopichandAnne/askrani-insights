@@ -3,6 +3,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ReportToolbar } from "@/components/ReportToolbar";
 import { DeliverySettings } from "@/components/DeliverySettings";
 import { buildWorkspaceReport } from "@/lib/report";
+import { buildDigest } from "@/lib/digest";
 import { emailConfigured } from "@/lib/notify";
 import { whatsappConfigured, whatsappBusinessNumber } from "@/lib/whatsapp";
 import { REPORT_ON_DEMAND_CREDITS, planOfOrg, cadenceForPlan } from "@/lib/credits";
@@ -39,6 +40,10 @@ export default async function ReportsPage() {
   const cadence = cadenceForPlan(auth ? await planOfOrg(auth.orgId) : "free");
 
   const goals = ((state.workspace as { goals?: Record<string, unknown> }).goals ?? {}) as Record<string, unknown>;
+  // The report leads with the SAME weekly synthesis Home shows and the PDF/email
+  // sends — one report model, not a fourth independent re-aggregation.
+  const digest = buildDigest({ name: state.workspace.name, vertical: state.workspace.vertical }, goals);
+  const SEV_GROUPS = [["alert", "Needs your attention"], ["opportunity", "Opportunities to grab"], ["fyi", "Good to know"]] as const;
   const emailReady = emailConfigured();
   const whatsappReady = whatsappConfigured();
 
@@ -66,6 +71,35 @@ export default async function ReportsPage() {
         whatsappReady={whatsappReady}
         businessNumber={whatsappBusinessNumber() ?? ""}
       />
+
+      {/* the report itself — the same weekly synthesis that gets emailed/sent */}
+      {digest.items.length > 0 && (
+        <section className="print-card rounded-xl border border-line bg-surface p-5">
+          <h2 className="font-medium">This week — {digest.headline}</h2>
+          <p className="mt-0.5 text-xs text-ink-faint">The summary sent to you {cadence}. Grouped by what needs you first.</p>
+          <div className="mt-4 space-y-4">
+            {SEV_GROUPS.map(([sev, label]) => {
+              const group = digest.items.filter((i) => i.severity === sev);
+              if (!group.length) return null;
+              return (
+                <div key={sev}>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-brand-deep">{label}</div>
+                  <ul className="mt-2 space-y-2">
+                    {group.map((it) => (
+                      <li key={it.id} className="flex gap-2.5 text-sm">
+                        <span aria-hidden>{it.icon}</span>
+                        <span><b className="text-ink">{it.title}.</b> <span className="text-ink-soft">{it.detail}</span>{it.href && <a href={it.href} className="no-print ml-1 text-xs font-medium text-brand hover:underline">details →</a>}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <div className="pt-1"><h2 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Full breakdown</h2></div>
 
       {/* snapshot */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -198,8 +232,9 @@ export default async function ReportsPage() {
       </Card>
 
       <p className="no-print text-xs text-ink-faint">
-        Confidence and source labels appear on each underlying screen (Offers, Feed). This report reflects
-        everything collected up to {generated}.
+        The summary at the top is exactly what's emailed/sent; the breakdown is the detail behind it. Live
+        confidence and source labels appear on each underlying screen (Offers, Feed). Reflects everything
+        collected up to {generated}.
       </p>
     </div>
   );
