@@ -31,9 +31,16 @@ const KNOWLEDGE_CAP = 7000;
 
 /** Assemble a compact, structured "what we actually know" pack from the cached
  *  pillars. Only real, collected facts go in — this is the entire grounding. */
-export function buildKnowledge(ws: { name: string; vertical?: string }, goals: Record<string, any>): string {
+export function buildKnowledge(ws: { name: string; vertical?: string }, goals: Record<string, any>, query = ""): string {
   const S: string[] = [];
   const push = (title: string, lines: string[]) => { if (lines.length) S.push(`## ${title}\n${lines.join("\n")}`); };
+  // Content terms from the question (≥4 letters, minus common words, plural-loose)
+  // so an item question like "who's cheapest on tomatoes?" surfaces EVERY rival's
+  // tomato line — without junk stems like "ha" (from "has") matching everything.
+  const STOP = new Set(["best", "price", "prices", "cheap", "cheaper", "cheapest", "what", "which", "does", "near", "this", "that", "week", "weekly", "today", "have", "with", "your", "their", "them", "they", "there", "here", "list", "give", "show", "tell", "much", "many", "most", "some", "compare", "vs", "than", "more", "less", "lowest", "highest", "deal", "deals", "sale", "sales", "offer", "offers", "right", "know", "want", "need", "good", "better"]);
+  const qStem = (s: string) => s.replace(/(?:es|s)$/, "");
+  const qWords = [...new Set((query.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !STOP.has(w)).map(qStem))];
+  const qHit = (text: string) => { const t = text.toLowerCase(); return qWords.some((w) => w.length >= 4 && t.includes(w)); };
 
   // your reputation / position
   const rep = goals.you?.reputation;
@@ -50,8 +57,14 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
   // your current offers
   push("Your current offers", arr(goals.myDeals?.deals).slice(0, 8).map((d) => `- ${clean(d.deal)}${d.when ? ` (${clean(d.when)})` : ""}`).filter((x) => x.length > 2));
 
-  // competitor priced items + promos
-  const priced = arr(goals.flyerDeals?.deals).map((d) => `- ${clean(d.rival)}: ${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}`).filter((x) => x.length > 4).slice(0, 24);
+  // competitor priced items + promos — items matching the question come FIRST so a
+  // specific "price on X?" question sees every rival that lists X (cap lifted when
+  // the question is item-specific).
+  const flyer = arr(goals.flyerDeals?.deals);
+  const rank = (d: any) => (qWords.length && qHit(`${d.item ?? ""} ${d.rival ?? ""}`) ? 0 : 1);
+  const priced = [...flyer].sort((a, b) => rank(a) - rank(b))
+    .map((d) => `- ${clean(d.rival)}: ${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}`).filter((x) => x.length > 4)
+    .slice(0, qWords.length ? 45 : 24);
   const promos = arr(goals.deals?.deals).map((d) => `- ${clean(d.rival)}: ${clean(d.deal)}`).filter((x) => x.length > 4).slice(0, 12);
   push("Competitor prices & deals (from their flyers/posts)", [...priced, ...promos]);
 
@@ -168,7 +181,7 @@ export async function answerFromData(
   if (!q) return { answer: "Ask me anything about your market — competitor deals, prices, your rating vs rivals, what's trending nearby, or 'what should I run this month?'.", grounded: false };
   if (!isLlmConfigured()) return { answer: "The assistant isn't fully set up yet — please try again later.", grounded: false };
 
-  const summaries = buildKnowledge(ws, goals);
+  const summaries = buildKnowledge(ws, goals, q);
   let liveText = "";
   let liveSources: RetrievedSource[] = [];
   if (svc && ws.id) {
