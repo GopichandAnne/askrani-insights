@@ -284,6 +284,22 @@ export async function findDeliveryUrls(name: string, city: string, want: Deliver
 export interface SocialWant { instagram?: boolean; facebook?: boolean; tiktok?: boolean }
 export interface SocialFound { instagram?: string; facebook?: string; tiktok?: string; searched: boolean }
 
+// Platform / aggregator accounts that get mis-attributed as a business's "own"
+// handle when its listing lives on a platform site (Clover/DoorDash/Square/etc.) —
+// e.g. a Clover-hosted "Kitchen To-Go" listing resolving to @clover.canada. These
+// are never a real local business's handle, so reject them outright.
+const GENERIC_HANDLES = new Set([
+  "clover", "clovercanada", "cloverpos", "cloverapp", "clovercommerce", "getclover",
+  "doordash", "doordashcanada", "ubereats", "uber", "ubereatsus", "grubhub", "seamless", "postmates",
+  "toast", "toasttab", "toastpos", "square", "squareup", "squarepos", "godaddy",
+  "wix", "wixcom", "weebly", "shopify", "yelp", "yelpforbusiness", "tripadvisor",
+  "opentable", "linktree", "linktr", "instagram", "facebook", "facebookapp", "meta",
+]);
+const normHandle = (h: string) => h.toLowerCase().replace(/^@/, "").replace(/[^a-z0-9]/g, "");
+export function isGenericHandle(h: string): boolean {
+  return GENERIC_HANDLES.has(normHandle(h));
+}
+
 /** Discover social handles for a business, intelligently matched to its location.
  *  `searched:false` means search returned nothing (likely a transient block) — the
  *  caller should retry later rather than mark the business resolved. */
@@ -302,7 +318,7 @@ export async function findSocialHandles(
   for (const [key, host] of hosts) {
     if (!want[key]) continue;
     const h = await findHandle(name, city, host, state);
-    if (h) out[key] = `${PREFIX[host]}${h}`;
+    if (h && !isGenericHandle(h)) out[key] = `${PREFIX[host]}${h}`;
   }
   out.searched = state.searched;
   return out;

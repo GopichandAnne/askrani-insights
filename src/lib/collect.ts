@@ -212,7 +212,12 @@ export async function collectBusiness(
       try {
         const cands = await g.discoverProfiles({ query: biz.canonical_name, near: geo, limit: 1 });
         const cand = cands[0];
-        if (cand?.externalId && !attrs.place_id) attrs.place_id = cand.externalId;
+        // Don't claim a place_id another business already owns — that's how a
+        // DoorDash/Clover ghost listing ends up mapped to the real store's place.
+        if (cand?.externalId && !attrs.place_id) {
+          const { data: owner } = await svc.from("business").select("id").filter("attributes->>place_id", "eq", cand.externalId).neq("id", businessId).limit(1).maybeSingle();
+          if (!owner) attrs.place_id = cand.externalId;
+        }
         if (cand?.website) {
           try { biz.website = new URL(cand.website).origin; } catch { biz.website = cand.website; }
           await svc.from("business").update({ website: biz.website }).eq("id", businessId);
@@ -360,6 +365,10 @@ export async function collectBusiness(
         const cands = await google.discoverProfiles({ query: `${biz.canonical_name}`, near: geo, limit: 1 });
         gCalls++; // Text Search
         placeId = cands[0]?.externalId;
+        if (placeId) {
+          const { data: owner } = await svc.from("business").select("id").filter("attributes->>place_id", "eq", placeId).neq("id", businessId).limit(1).maybeSingle();
+          if (owner) placeId = undefined; // another business owns this place — skip
+        }
         if (placeId) {
           attrs.place_id = placeId;
           attrsDirty = true;

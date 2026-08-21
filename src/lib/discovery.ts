@@ -212,9 +212,19 @@ export async function upsertBusiness(
   const subtype = extractSubtype(cand as any);
   const format = extractFormat(cand as any);
 
+  // Google Place ID (candidates from the google provider carry it on raw.id) — a
+  // strong identity key: two records for the SAME place must dedup to one, even
+  // when their names/websites differ (e.g. a real grocery vs a DoorDash ghost
+  // listing at the same address).
+  const placeId = typeof cand.raw?.id === "string" ? (cand.raw.id as string) : undefined;
+
   const SEL = "id, canonical_name, attributes";
   let existing: { id: string; canonical_name: string | null; attributes: any } | null = null;
-  if (website) {
+  if (placeId) {
+    const { data } = await svc.from("business").select(SEL).filter("attributes->>place_id", "eq", placeId).limit(1).maybeSingle();
+    existing = (data as any) ?? null;
+  }
+  if (!existing && website) {
     const { data } = await svc.from("business").select(SEL).eq("website", website).limit(1).maybeSingle();
     existing = (data as any) ?? null;
   }
@@ -242,6 +252,7 @@ export async function upsertBusiness(
         category: cand.category ?? vertical,
         confidence: 0.7,
         attributes: {
+          ...(placeId ? { place_id: placeId } : {}),
           ...(cand.geo ? { geo: cand.geo } : {}),
           ...(address ? { address } : {}),
           ...(subtype.length ? { subtype } : {}),
