@@ -1,6 +1,8 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { PillarBuilding } from "@/components/PillarBuilding";
 import { DraftButton } from "@/components/DraftButton";
+import { withinBudget } from "@/lib/pillarBudget";
 import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
 import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
 import { getOrMakeMenuLens, type PricePosition, type Differentiator } from "@/lib/menu";
@@ -99,13 +101,15 @@ export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
 
-  const [w, demand, menu, deals, flyers] = await Promise.all([
+  const built = await withinBudget(Promise.all([
     getOrMakeWinning(state.workspace),
     getOrMakeDemand(state.workspace),
     getOrMakeMenuLens(state.workspace),
     getOrMakeDeals(state.workspace),
     getFlyerDeals(state.workspace),
-  ]);
+  ]));
+  if (!built) return <PillarBuilding title="What's winning" subtitle="Fusing your competitors' menus, deals and demand signals — this first read is finishing in the background." />;
+  const [w, demand, menu, deals, flyers] = built;
   const gaps = w.winning.filter((x) => !x.onYourMenu);
   const yours = w.winning.filter((x) => x.onYourMenu);
   // flyer deals grouped by rival for display

@@ -69,7 +69,10 @@ const MODELS = {
 
 class AnthropicClient implements LlmClient {
   readonly provider = "anthropic";
-  private client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+  // Bound every call: the SDK defaults to a 10-MINUTE timeout with 2 retries, so
+  // one slow/stuck request would hang whatever page awaits it (the "infinite
+  // spinner"). 60s + a single retry fails fast instead.
+  private client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY!, timeout: 60_000, maxRetries: 1 });
 
   modelFor(tier: "classify" | "extract") {
     return MODELS.anthropic[tier];

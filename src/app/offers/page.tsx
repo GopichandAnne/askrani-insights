@@ -10,9 +10,12 @@ import { quoteFlyerRead, FLYER_READ_COMPETITOR_CAP, planOfOrg, retentionDaysForP
 import { requireOrg } from "@/lib/api";
 import { FlyerReadButton } from "@/components/FlyerReadButton";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { PillarBuilding } from "@/components/PillarBuilding";
 import { MarketTabs } from "@/components/MarketTabs";
+import { withinBudget } from "@/lib/pillarBudget";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60; // room for the cold-cache report builds
 
 const SOURCE_LABEL: Record<string, string> = { instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", youtube: "YouTube", google: "Google", website: "website", doordash: "DoorDash", ubereats: "Uber Eats" };
 const sourceLabel = (s?: string) => (s && SOURCE_LABEL[s]) || "online";
@@ -60,7 +63,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
-  const [rivalDeals, myDeals, priceGaps, social, menuCompare] = await Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days), getOrMakeMenuCompare(ws)]);
+  const built = await withinBudget(Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days), getOrMakeMenuCompare(ws)]));
+  if (!built) return <PillarBuilding title="Offers & deals" subtitle="Comparing prices, promos and deals across your competitors — this first read is finishing in the background." />;
+  const [rivalDeals, myDeals, priceGaps, social, menuCompare] = built;
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
 
   // price-drop detection over FULL history (a competitor lowered an item's price)

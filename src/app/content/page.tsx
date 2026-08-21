@@ -1,7 +1,9 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { PillarBuilding } from "@/components/PillarBuilding";
 import { DraftButton } from "@/components/DraftButton";
+import { withinBudget } from "@/lib/pillarBudget";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
 import { getAdsReport } from "@/lib/ads";
@@ -123,11 +125,13 @@ export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
 
-  const [c, industry, ads] = await Promise.all([
+  const built = await withinBudget(Promise.all([
     getOrMakeContent(state.workspace),
     getOrMakeIndustryBest(state.workspace),
     getAdsReport(state.workspace),
-  ]);
+  ]));
+  if (!built) return <PillarBuilding title="Content" subtitle="Reading what's working on your competitors' feeds — this first pass is finishing in the background." />;
+  const [c, industry, ads] = built;
   // social pulse — cached read only (warmed on collection), so the page stays fast
   const supabase = await createClient();
   const { data: spRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
