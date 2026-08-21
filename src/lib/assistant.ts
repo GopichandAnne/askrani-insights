@@ -104,9 +104,9 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
 const SCHEMA = {
   type: "object", additionalProperties: false,
   properties: {
-    answer: { type: "string", description: "Concise answer, grounded strictly in DATA. Real names/numbers. No markdown headers." },
+    answer: { type: "string", description: "The reply in a warm, natural assistant voice — like texting the owner. LEAD with the direct answer to their question, then the specifics (real names + exact numbers). Plain text only (no markdown symbols); short line breaks are fine for a quick list. NEVER write [L…] citation labels in this text — sources are shown separately." },
     grounded: { type: "boolean", description: "true only if DATA actually contained what was needed to answer; false if you had to say you don't have it." },
-    sourceIds: { type: "array", items: { type: "string" }, description: "The [Ln] labels of the LIVE RECORDS you used for SPECIFIC facts. Empty for general advice, moves, or summary-only answers." },
+    sourceIds: { type: "array", items: { type: "string" }, description: "The [Ln] labels of the LIVE RECORDS you relied on for SPECIFIC facts — they populate the Sources panel shown UNDER the reply, so never also write them in the answer text. Empty for general advice, moves, or summary-only answers." },
     action: {
       type: "object", additionalProperties: false,
       description: "Set ONLY when the owner explicitly asks to change a setting or remove a competitor. Otherwise omit it entirely (or kind='none').",
@@ -133,8 +133,8 @@ const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `RULES:\n` +
   `1. Facts come ONLY from SUMMARIES/LIVE RECORDS (market) and YOUR OPERATIONS (their own store). NEVER invent or guess prices, names, ratings, dates, or sales numbers. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
   `2. COMBINE INSIDE + OUTSIDE. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete moves. Ground the rationale in real data — cross-reference YOUR OPERATIONS with the market: e.g., don't cut price on a best-seller even if a rival is cheaper; if a rival is winning something your OWN customers keep asking for, that's a strong signal; and if they have promote-and-earn advocates or a loyalty list, prefer ACTIVATING those (a zero-cost channel their own customers power) over matching rivals' paid ads. Time it to a relevant UPCOMING OCCASION when one fits. The creative idea is yours, but every fact must trace to DATA. Set grounded=true when built on real data.\n` +
-  `3. Be concise and specific: short sentences or a tight list, real names and exact numbers, no markdown headers, no fluff. Talk like a sharp local advisor who knows their block — not like a report.\n` +
-  `4. CITATIONS: LIVE RECORDS are labelled [L1], [L2], … When you state a SPECIFIC fact from one (an exact price, a specific post, a specific change), cite it inline with its label, e.g. [L2], and list every label you cited in sourceIds. Do NOT cite for general advice, move/promo ideas, occasion timing, or anything from SUMMARIES — leave sourceIds empty then. Never cite more than 3.\n` +
+  `3. VOICE — reply like a real assistant texting the owner: warm, natural, direct. OPEN with the actual answer to their question in the first sentence, then the specifics (real names, exact numbers). Keep it tight and human, not a report — no headers, no markdown symbols, no filler, no forced "let me know if…". For several prices/items, a short line-separated list reads cleaner than a run-on sentence.\n` +
+  `4. SOURCES: LIVE RECORDS are labelled [L1], [L2], … Put the labels you relied on for SPECIFIC facts (an exact price, a specific post/change) in sourceIds so the app can list them under your reply — but do NOT write [L…] anywhere in the answer text itself. Only for specific facts, never for general advice, ideas, occasion timing, or SUMMARIES; at most 3.\n` +
   `5. RECENT CONVERSATION (if given) is only for follow-up context, not facts.\n` +
   `6. ACTIONS — you can make a few changes for the owner. ONLY when they explicitly ask, set "action": to send their reports to an email → kind="set_notify_email", email=<address>; to send reports to a WhatsApp number → kind="set_notify_whatsapp", phone=<number>; to connect their Ask Rani store so their own store data + shared credits link up → kind="link_rani_store", slug=<store name/slug they gave>; to stop watching a competitor → kind="remove_competitor", name=<competitor>. When you set an action, write a short answer CONFIRMING it's done (e.g. "Done — reports will go to …") and set grounded=true. For everything else omit action (or kind="none"). NEVER invent an action they didn't ask for.`;
 
@@ -217,11 +217,13 @@ export async function answerFromData(
     const raw = clean(data.answer);
     if (!raw) return { answer: "I couldn't put that together — try rephrasing?", grounded: false, ...(action ? { action } : {}) };
 
-    // cited ids = from the structured field ∪ any [Ln] markers left in the text
-    const cited = new Set<string>((Array.isArray(data.sourceIds) ? data.sourceIds : []).map((s) => String(s).trim()));
-    for (const m of raw.matchAll(/\[[^\]]*?(L\d+)[^\]]*?\]/g)) cited.add(m[1]);
-    // strip citation brackets from the shown text so it reads clean
-    const answer = raw.replace(/\s*\[[^\]]*?L\d+[^\]]*?\]/g, "").replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+    // cited ids = the structured field ∪ any citation markers the model left inline,
+    // in EITHER form ([L9] or a bare [9]) — normalize both to the Ln id for the panel.
+    const cited = new Set<string>((Array.isArray(data.sourceIds) ? data.sourceIds : []).map((s) => { const n = String(s).match(/\d+/); return n ? `L${n[0]}` : String(s).trim(); }));
+    for (const m of raw.matchAll(/\[\s*(?:L\s*)?\d+(?:\s*,\s*(?:L\s*)?\d+)*\s*\]/gi)) { for (const num of m[0].match(/\d+/g) ?? []) cited.add(`L${num}`); }
+    // strip ALL citation brackets ([L9], [9], [2, 9]) from the shown text so it reads
+    // like a real reply, not a research paper — the Sources panel shows them instead.
+    const answer = raw.replace(/\s*\[\s*(?:L\s*)?\d+(?:\s*,\s*(?:L\s*)?\d+)*\s*\]/gi, "").replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
 
     const byId = new Map(liveSources.map((s) => [s.id, s]));
     const sources: ChatSource[] = [...cited].map((id) => byId.get(id)).filter((s): s is RetrievedSource => !!s)
