@@ -8,8 +8,6 @@ import { isAreaMode } from "@/lib/subject";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
-import { BriefingCard } from "@/components/BriefingCard";
-import { EdgeThisWeek } from "@/components/EdgeThisWeek";
 import { DraftButton } from "@/components/DraftButton";
 import { DigestFeed } from "@/components/DigestFeed";
 import { buildDigest } from "@/lib/digest";
@@ -354,12 +352,15 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
         </div>
       </section>
 
-      {/* 1 — This Week: what needs you (digest), then the briefing + edge synthesis */}
+      {/* 1 — This Week: ONE synthesis (the digest is the ranked "what changed + what
+          to do"). The briefing + edge widgets said the same thing three ways; the
+          full market read stays one click away at /edge. */}
       <div className="space-y-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-brand-deep">This week</p>
         <DigestFeed digest={digest} />
-        <BriefingCard />
-        <EdgeThisWeek />
+        <div className="flex justify-end">
+          <Link href="/edge" className="text-sm font-medium text-brand hover:underline">See the full market read →</Link>
+        </div>
         {topTrends.length > 0 && (
           <Link href="/around" className="card card-hover glow-hover block">
             <div className="flex items-center gap-3">
