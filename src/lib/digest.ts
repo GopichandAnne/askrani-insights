@@ -97,9 +97,9 @@ export function buildDigest(
   for (const p of ((you?.discoverability?.missing ?? []) as string[]).slice(0, 1)) {
     push({
       id: `rep:missing:${String(p).toLowerCase()}`,
-      severity: "opportunity", pillar: "Discoverability", icon: "🔎",
-      title: `You're missing from ${p}`,
-      detail: `Customers look there for a business like yours. Claiming it lifts how easily you're found.`,
+      severity: "opportunity", pillar: "Listings", icon: "📇",
+      title: `You're not listed on ${p}`,
+      detail: `Customers look there for a business like yours. Claiming the listing is one more place they can find you.`,
       href: "/you",
     });
   }

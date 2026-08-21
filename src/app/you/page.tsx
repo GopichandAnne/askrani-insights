@@ -139,7 +139,7 @@ export default async function YouPage() {
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">You</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-soft">
           How <span className="font-medium text-brand-deep">{you.name}</span> is doing — your reputation, what customers love and want fixed,
-          where you&apos;re findable, and how your prices sit. All from your own reviews and listings.
+          where you&apos;re listed, and how your prices sit. All from your own reviews and listings.
         </p>
       </div>
 
@@ -242,11 +242,12 @@ export default async function YouPage() {
         <section className="card">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-semibold">
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🔎</span>
-              Where you&apos;re findable
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">📇</span>
+              Your listings
             </h2>
             <span className="text-sm font-bold text-brand-deep">{you.discoverability.scorePct}%</span>
           </div>
+          <p className="mt-0.5 text-xs text-ink-faint">Which platforms list your business — where customers can find you.</p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {you.discoverability.present.map((p, i) => (
               <span key={i} className="chip bg-trust-direct/12 text-trust-direct">✓ {platformLabel(p.platform)}</span>
@@ -257,9 +258,10 @@ export default async function YouPage() {
           </div>
           {you.discoverability.missing.length > 0 && (
             <p className="mt-2.5 text-xs text-ink-soft">
-              Not yet on <span className="font-medium text-ink">{you.discoverability.missing.map(platformLabel).join(", ")}</span> — each is a place customers look for you.
+              Not yet on <span className="font-medium text-ink">{you.discoverability.missing.map(platformLabel).join(", ")}</span> — each is a listing customers check when they look for you.
             </p>
           )}
+          <a href="/findability" className="mt-3 inline-block text-xs font-medium text-brand hover:underline">Where you rank in Google search →</a>
         </section>
 
         <section className="card">
