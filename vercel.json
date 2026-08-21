@@ -16,6 +16,10 @@
     {
       "path": "/api/findability/tick",
       "schedule": "45 15 * * *"
+    },
+    {
+      "path": "/api/flyers/sweep",
+      "schedule": "*/3 * * * *"
     }
   ],
   "functions": {
@@ -23,6 +27,7 @@
     "src/app/api/collect/route.ts": { "maxDuration": 300 },
     "src/app/api/workspace/create/route.ts": { "maxDuration": 120 },
     "src/app/api/findability/tick/route.ts": { "maxDuration": 300 },
-    "src/app/api/findability/refresh/route.ts": { "maxDuration": 120 }
+    "src/app/api/findability/refresh/route.ts": { "maxDuration": 120 },
+    "src/app/api/flyers/sweep/route.ts": { "maxDuration": 300 }
   }
 }

@@ -12,6 +12,7 @@ import { FlyerReadButton } from "@/components/FlyerReadButton";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
 import { CollectingScreen } from "@/components/CollectingScreen";
+import { RivalPriceList } from "@/components/RivalPriceList";
 import { MarketTabs } from "@/components/MarketTabs";
 import { withinBudget } from "@/lib/pillarBudget";
 import { collectionActive } from "@/lib/jobs";
@@ -57,6 +58,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
 
   // Still scraping? Show clear progress, not a spinner or half-collected data.
   if (await collectionActive(ws.id)) return <CollectingScreen workspaceId={ws.id} title="Offers & deals" />;
+  const flyerRunning = (ws.goals as { flyerJob?: { status?: string } } | undefined)?.flyerJob?.status === "running";
 
   const auth = await requireOrg();
   const retentionDays = retentionDaysForPlan(auth ? await planOfOrg(auth.orgId) : "free");
@@ -302,27 +304,16 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
                     {r.promos.slice(0, 4).map((d, i) => <span key={i} className="chip bg-coral/15 text-coral-dark">🏷️ {d.deal}{d.when ? ` · ${d.when}` : ""}{agoLabel(d.postedAt) ? <span className="ml-1 opacity-70">· {agoLabel(d.postedAt)}</span> : null}</span>)}
                   </div>
                 )}
-                {r.priced.length > 0 && (
-                  <ul className="mt-3 divide-y divide-line/50">
-                    {r.priced.slice(0, 8).map((d, i) => (
-                      <li key={i} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                        <span className="flex min-w-0 items-center gap-1.5 truncate text-ink">
-                          {isNew(d) && <span className="chip shrink-0 bg-trust-direct/15 px-1.5 py-0 text-[10px] font-bold text-trust-direct">NEW</span>}
-                          {isDropped(d) && <span className="chip shrink-0 bg-coral/15 px-1.5 py-0 text-[10px] font-bold text-coral-dark">⬇ DROP</span>}
-                          <span className="truncate">{d.item}{d.terms ? <span className="text-ink-faint"> · {d.terms}</span> : null}</span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {agoLabel(dealDate(d)) && <span className="text-[11px] text-ink-faint">{agoLabel(dealDate(d))}</span>}
-                          {d.price && <span className="font-semibold text-coral-dark">{d.price}</span>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                {r.priced.length === 0 && r.promos.length > 0 && (
+                  <p className="mt-2 text-[11px] text-ink-faint">
+                    {flyerRunning ? "⏳ reading this rival’s flyer prices…" : "🏷️ Flyer prices not read yet — run “Flyer read” to pull itemized prices."}
+                  </p>
                 )}
-                <div className="mt-2 flex items-center justify-between text-xs">
-                  <span className="text-ink-faint">{r.priced.length > 8 ? `+${r.priced.length - 8} more items` : `${r.priced.length + r.promos.length} offers`}</span>
-                  {link && <a href={link} target="_blank" rel="noreferrer" className="font-medium text-brand hover:underline">see source ↗</a>}
-                </div>
+                <RivalPriceList
+                  items={r.priced.map((d) => ({ item: d.item, terms: d.terms || undefined, price: d.price || undefined, ago: agoLabel(dealDate(d)) || undefined, isNew: isNew(d), isDropped: isDropped(d) }))}
+                  offersLabel={`${r.priced.length + r.promos.length} offers`}
+                  sourceLink={link ?? null}
+                />
               </div>
             );
           })}
