@@ -2,8 +2,10 @@ import { activeWorkspace } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
+import { CollectingScreen } from "@/components/CollectingScreen";
 import { DraftButton } from "@/components/DraftButton";
 import { withinBudget } from "@/lib/pillarBudget";
+import { collectionActive } from "@/lib/jobs";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
 import { getAdsReport } from "@/lib/ads";
@@ -124,6 +126,7 @@ function SocialPulseSection({ p }: { p: SocialPulse }) {
 export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
+  if (await collectionActive(state.workspace.id)) return <CollectingScreen workspaceId={state.workspace.id} title="Content" />;
 
   const built = await withinBudget(Promise.all([
     getOrMakeContent(state.workspace),

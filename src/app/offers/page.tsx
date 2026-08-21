@@ -11,8 +11,10 @@ import { requireOrg } from "@/lib/api";
 import { FlyerReadButton } from "@/components/FlyerReadButton";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
+import { CollectingScreen } from "@/components/CollectingScreen";
 import { MarketTabs } from "@/components/MarketTabs";
 import { withinBudget } from "@/lib/pillarBudget";
+import { collectionActive } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // room for the cold-cache report builds
@@ -52,6 +54,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Offers & deals" />;
   const ws = state.workspace;
+
+  // Still scraping? Show clear progress, not a spinner or half-collected data.
+  if (await collectionActive(ws.id)) return <CollectingScreen workspaceId={ws.id} title="Offers & deals" />;
 
   const auth = await requireOrg();
   const retentionDays = retentionDaysForPlan(auth ? await planOfOrg(auth.orgId) : "free");

@@ -1,8 +1,10 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
+import { CollectingScreen } from "@/components/CollectingScreen";
 import { DraftButton } from "@/components/DraftButton";
 import { withinBudget } from "@/lib/pillarBudget";
+import { collectionActive } from "@/lib/jobs";
 import { getOrMakeWinning, type WinningEntity } from "@/lib/winning";
 import { getOrMakeDemand, type DemandItem } from "@/lib/demand";
 import { getOrMakeMenuLens, type PricePosition, type Differentiator } from "@/lib/menu";
@@ -100,6 +102,7 @@ function Row({ w }: { w: WinningEntity }) {
 export default async function WinningPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="What's winning" />;
+  if (await collectionActive(state.workspace.id)) return <CollectingScreen workspaceId={state.workspace.id} title="What's winning" />;
 
   const built = await withinBudget(Promise.all([
     getOrMakeWinning(state.workspace),

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { activeWorkspace } from "@/lib/workspace";
 import { isAreaMode } from "@/lib/subject";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
+import { CollectingScreen } from "@/components/CollectingScreen";
+import { collectionActive } from "@/lib/jobs";
 import { MarketTabs } from "@/components/MarketTabs";
 import { MarketTrends } from "@/components/MarketTrends";
 import { MarketMemory } from "@/components/MarketMemory";
@@ -13,6 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function MarketPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Market" />;
+  if (await collectionActive(state.workspace.id)) return <CollectingScreen workspaceId={state.workspace.id} title="Market" />;
   const area = isAreaMode(state.workspace);
 
   const [trends, memory] = await Promise.all([

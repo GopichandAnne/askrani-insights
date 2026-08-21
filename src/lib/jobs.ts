@@ -300,3 +300,11 @@ export async function getWorkspaceJobs(workspaceId: string) {
   }
   return out;
 }
+
+/** Is a scrape currently underway for this workspace? (any pending/running job)
+ *  Pillar pages check this to show a clear "gathering signals" progress state
+ *  instead of a spinner or a report built from half-collected data. */
+export async function collectionActive(workspaceId: string): Promise<boolean> {
+  const jobs = await getWorkspaceJobs(workspaceId);
+  return jobs.some((j: { status?: string }) => j.status === "pending" || j.status === "running");
+}
