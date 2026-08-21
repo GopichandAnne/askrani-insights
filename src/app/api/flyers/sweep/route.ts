@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runFlyerBatch, type FlyerJob } from "@/lib/flyers";
+import { runFlyerBatch, enqueueFlyerJob, type FlyerJob } from "@/lib/flyers";
 import type { WorkspaceRow } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,24 @@ function authorized(req: Request): boolean {
   if (cron && auth === `Bearer ${cron}`) return true;
   if (cron && req.headers.get("x-vercel-cron") === "1") return true;
   return false;
+}
+
+// Admin/ops path: enqueue a fresh flyer read for one workspace (runs in prod so
+// profiles include Google photos) and drive it to completion in this request; the
+// cron sweep finishes anything left. `?enqueue=<workspaceId>`.
+async function enqueueAndDrive(workspaceId: string) {
+  const svc = createServiceClient();
+  const { data: w } = await svc.from("workspace").select("id, name, vertical, target_business_id, organization_id, goals").eq("id", workspaceId).maybeSingle();
+  if (!w) return { error: "workspace not found" };
+  const ws = { id: w.id, name: w.name, vertical: w.vertical, target_business_id: w.target_business_id, goals: w.goals } as WorkspaceRow;
+  const { total } = await enqueueFlyerJob(ws, w.organization_id as string, 0);
+  const deadline = Date.now() + 250_000;
+  let last;
+  for (let i = 0; i < 40 && Date.now() < deadline; i++) {
+    last = await runFlyerBatch(ws);
+    if (last.status !== "running") break;
+  }
+  return { enqueued: workspaceId, profiles: total, processed: last?.processed ?? 0, total: last?.total ?? total, deals: last?.deals ?? 0, status: last?.status ?? "?" };
 }
 
 async function sweep() {
@@ -58,11 +76,11 @@ async function sweep() {
   return { swept: out.length, jobs: out };
 }
 
-export async function GET(req: Request) {
+async function handle(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const enqueue = new URL(req.url).searchParams.get("enqueue");
+  if (enqueue) return NextResponse.json(await enqueueAndDrive(enqueue));
   return NextResponse.json(await sweep());
 }
-export async function POST(req: Request) {
-  if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  return NextResponse.json(await sweep());
-}
+export const GET = handle;
+export const POST = handle;
