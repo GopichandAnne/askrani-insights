@@ -98,7 +98,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               activeWorkspaceId={activeId}
               credits={credits}
             />
-            <main className="mx-auto w-full max-w-6xl px-4 pb-36 pt-4 sm:px-6 lg:pb-12 lg:pl-28 lg:pr-8 lg:pt-24">
+            <main className="mx-auto w-full max-w-6xl px-4 pb-36 pt-4 sm:px-6 lg:pb-28 lg:pl-28 lg:pr-8 lg:pt-24">
               <CreditBanner />
               {activeId && <CollectionBanner workspaceId={activeId} />}
               <EphemeralBanner />

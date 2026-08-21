@@ -132,7 +132,6 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
         <div className="px-6 pt-3">
           <div className="glass-strong flex items-center gap-3 rounded-2xl px-3 py-2">
             {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
-            <AskTrigger className="w-full max-w-md" />
             <div className="ml-auto flex items-center gap-3">
               <CreditsPill credits={credits} />
               {email && <span className="hidden truncate px-1 text-xs text-ink-faint lg:inline" title={email}>{email}</span>}
@@ -140,6 +139,13 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
           </div>
         </div>
       </header>
+
+      {/* ── Desktop bottom Ask bar (thumb/pointer reach, chat-style) ─── */}
+      <div className="no-print pointer-events-none fixed bottom-0 right-0 z-30 hidden lg:left-20 lg:block">
+        <div className="pointer-events-auto mx-auto max-w-2xl px-8 pb-5">
+          <AskTrigger className="w-full shadow-glow" />
+        </div>
+      </div>
 
       {/* ── Mobile top bar ──────────────────────────────────────────── */}
       <header className="no-print sticky top-0 z-40 lg:hidden">
