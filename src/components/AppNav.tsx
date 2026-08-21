@@ -38,7 +38,7 @@ const ICONS = {
   more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
 };
 const SHORT: Record<string, string> = {
-  "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Explore", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
+  "/": "Week", "/you": "You", "/edge": "Edge", "/explore": "Watch", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
   "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin", "/assistant": "Ask",
 };
 

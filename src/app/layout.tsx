@@ -29,11 +29,12 @@ const NAV: NavItem[] = [
   { href: "/market", label: "Market", icon: "market", match: ["/feed", "/offers", "/competitors"] },
   { href: "/findability", label: "Findability", icon: "findability" },
   { href: "/assistant", label: "Ask Rani", icon: "assistant" },
-  { href: "/explore", label: "Explore", icon: "explore" },
   { href: "/around", label: "Around me", icon: "around" },
   { href: "/channels", label: "Channels", icon: "channels" },
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
+  // ── ways to start watching something new (on-ramps) ──
+  { href: "/explore", label: "Watch a market", icon: "explore" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
@@ -46,9 +47,10 @@ const AREA_NAV: NavItem[] = [
   { href: "/assistant", label: "Ask Rani", icon: "assistant" },
   { href: "/around", label: "Around", icon: "around" },
   { href: "/content", label: "Content", icon: "content" },
-  { href: "/explore", label: "Explore", icon: "explore" },
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
+  // ── ways to start watching something new (on-ramps) ──
+  { href: "/explore", label: "Watch a market", icon: "explore" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
