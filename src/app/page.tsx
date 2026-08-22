@@ -159,6 +159,9 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   const supabase = await createClient();
   const ids = await workspaceBusinessIds(workspace);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
+  // competitor-only scope: the "Your competitors" feed must never surface YOUR OWN
+  // posts/events. News stays area-wide (uses `scope`); rival social uses this.
+  const rivalScope = ids.competitorIds.length ? ids.competitorIds : ["00000000-0000-0000-0000-000000000000"];
 
   // org credits/plan for the dashboard strip (+ cached local trends for the tease)
   const { data: wsOrg } = await supabase.from("workspace").select("organization_id, goals").eq("id", workspace.id).maybeSingle();
@@ -187,7 +190,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     supabase
       .from("content_item")
       .select("id,text,url,platform,media,published_at,observed_at,business:business_id(canonical_name)")
-      .in("business_id", scope)
+      .in("business_id", rivalScope)
       .in("platform", ["instagram", "facebook", "tiktok", "youtube"])
       .order("observed_at", { ascending: false })
       .limit(80),
@@ -222,8 +225,10 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   //    ("H Mart — 24 new items") so it stays glanceable, then merge with local
   //    news/openings/trends. Grouping also tames noisy bulk menu imports.
   type Item = { key: string; kind: string; title: string; meta: string; when: number; href?: string; external?: boolean };
+  const targetName = report.reputation.find((r) => r.isTarget)?.name ?? report.pricing.find((p) => p.isTarget)?.name ?? null;
   const groups = new Map<string, { business: string; bucket: string; count: number; sample: string; when: number; sig: number }>();
   for (const e of report.events) {
+    if (targetName && e.business === targetName) continue; // your own moves aren't "competitor" news
     const bucket = eventBucket(e.type);
     const key = `${e.business}|${bucket}`;
     const g = groups.get(key) ?? { business: e.business, bucket, count: 0, sample: e.summary, when: 0, sig: 0 };

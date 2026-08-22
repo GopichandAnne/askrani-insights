@@ -189,7 +189,7 @@ export default async function WinningPage() {
               </h2>
               <p className="mb-3 text-xs text-ink-faint">Read straight from rivals&apos; posted sale flyers — the items they&apos;re promoting and at what price.</p>
               <div className="grid gap-4 md:grid-cols-2">
-                {[...flyersByRival.entries()].slice(0, 4).map(([rival, items], gi) => (
+                {[...flyersByRival.entries()].slice(0, 8).map(([rival, items], gi) => (
                   <div key={gi} className="rounded-2xl bg-white/55 p-3">
                     <p className="mb-1.5 text-sm font-semibold text-brand-deep">{rival}</p>
                     <ul className="divide-y divide-line/50">
