@@ -24,6 +24,10 @@ const C = {
 const SEV_COLOR: Record<DigestItem["severity"], string> = { alert: C.alert, opportunity: C.opportunity, fyi: C.fyi };
 
 export interface ReportStat { label: string; value: string; tone?: "brand" | "alert" | "neutral" }
+/** A labelled horizontal bar — "where you stand" at a glance (rating vs market,
+ *  findability /100). pct 0–100 fills the track; an optional marker draws a line
+ *  (e.g. the market average) with its own caption. */
+export interface ReportMeter { label: string; value: string; sub?: string; pct: number; tone: "brand" | "alert" | "neutral"; marker?: { pct: number; label: string } }
 export interface ReportGroupItem { pillar: string; title: string; detail: string; act?: string }
 export interface ReportRow { primary: string; secondary?: string; tag?: string; tagTone?: "brand" | "alert" | "neutral" }
 export interface ReportSection { title: string; note?: string; rows: ReportRow[] }
@@ -33,6 +37,7 @@ export interface ReportPdfInput {
   dateLabel: string;     // "August 12, 2026"
   headline: string;      // digest.headline
   stats: ReportStat[];
+  meters: ReportMeter[]; // "where you stand" bars — rating vs market, findability
   groups: { key: DigestItem["severity"]; title: string; items: ReportGroupItem[] }[];
   sections: ReportSection[];   // the detailed report — sales, marketing, popular, what's changing
   empty: boolean;
@@ -56,6 +61,17 @@ const s = StyleSheet.create({
   chipDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
   chipValue: { fontFamily: "Helvetica-Bold", fontSize: 10, color: C.ink },
   chipLabel: { fontSize: 9, color: C.inkSoft, marginLeft: 4 },
+  // "where you stand" meters
+  meterWrap: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", marginBottom: 18 },
+  meter: { width: "48%", marginBottom: 12 },
+  meterHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 },
+  meterLabel: { fontSize: 8.5, fontFamily: "Helvetica-Bold", letterSpacing: 0.6, textTransform: "uppercase", color: C.inkFaint },
+  meterValue: { fontSize: 13, fontFamily: "Helvetica-Bold", color: C.ink },
+  meterSub: { fontSize: 8.5, fontFamily: "Helvetica", color: C.inkFaint },
+  meterTrack: { height: 7, backgroundColor: C.sunken, borderRadius: 4, position: "relative" },
+  meterFill: { height: 7, borderRadius: 4 },
+  meterMarker: { position: "absolute", top: -2, width: 1.6, height: 11, backgroundColor: C.ink },
+  meterMarkerLabel: { fontSize: 7, color: C.inkSoft, marginTop: 2 },
   // group
   groupHead: { flexDirection: "row", alignItems: "center", marginTop: 6, marginBottom: 8 },
   groupBar: { width: 4, height: 13, borderRadius: 2, marginRight: 7 },
@@ -98,6 +114,26 @@ function StatChip({ stat }: { stat: ReportStat }) {
       <View style={[s.chipDot, { backgroundColor: dot }]} />
       <Text style={s.chipValue}>{stat.value}</Text>
       <Text style={s.chipLabel}>{stat.label}</Text>
+    </View>
+  );
+}
+
+const METER_COLOR: Record<ReportMeter["tone"], string> = { brand: C.brand, alert: C.coral, neutral: C.inkSoft };
+
+function Meter({ m }: { m: ReportMeter }) {
+  const fill = METER_COLOR[m.tone];
+  const pct = Math.max(2, Math.min(100, m.pct)); // never a zero-width sliver
+  return (
+    <View style={s.meter} wrap={false}>
+      <View style={s.meterHead}>
+        <Text style={s.meterLabel}>{m.label}</Text>
+        <Text style={s.meterValue}>{m.value}{m.sub ? <Text style={s.meterSub}> {m.sub}</Text> : null}</Text>
+      </View>
+      <View style={s.meterTrack}>
+        <View style={[s.meterFill, { width: `${pct}%`, backgroundColor: fill }]} />
+        {m.marker ? <View style={[s.meterMarker, { left: `${Math.max(0, Math.min(100, m.marker.pct))}%` }]} /> : null}
+      </View>
+      {m.marker ? <Text style={s.meterMarkerLabel}>▲ {m.marker.label}</Text> : null}
     </View>
   );
 }
@@ -175,6 +211,12 @@ function ReportDoc({ input }: { input: ReportPdfInput }) {
             </View>
           )}
 
+          {input.meters.length > 0 && (
+            <View style={s.meterWrap}>
+              {input.meters.map((m, i) => <Meter key={i} m={m} />)}
+            </View>
+          )}
+
           {input.empty ? (
             <View style={s.emptyCard}>
               <Text style={s.emptyTitle}>You&apos;re all caught up</Text>
@@ -247,16 +289,39 @@ export function buildReportInput(
   if (digest.opportunityCount > 0) stats.push({ value: String(digest.opportunityCount), label: digest.opportunityCount === 1 ? "opportunity" : "opportunities", tone: "brand" });
   if (digest.newCount > 0) stats.push({ value: String(digest.newCount), label: `new ${period === "daily" ? "today" : "this week"}`, tone: "neutral" });
 
-  const rep = goals.you?.reputation;
-  if (rep && typeof rep.rating === "number") {
-    const mkt = typeof rep.marketAvg === "number" ? ` vs ${rep.marketAvg}★ market` : "";
-    stats.push({ value: `${rep.rating}★`, label: `your rating${mkt}`, tone: rep.marketAvg != null && rep.rating >= rep.marketAvg ? "brand" : rep.marketAvg != null ? "alert" : "neutral" });
-  }
   const rivals = new Set<string>();
   for (const d of [...((goals.deals?.deals ?? []) as any[]), ...((goals.flyerDeals?.deals ?? []) as any[])]) {
     const r = String(d?.rival ?? "").trim(); if (r) rivals.add(r.toLowerCase());
   }
   if (rivals.size > 0) stats.push({ value: String(rivals.size), label: rivals.size === 1 ? "rival with live deals" : "rivals with live deals", tone: "neutral" });
+
+  // ── "where you stand" meters — the positional read, shown as bars not sentences ──
+  const meters: ReportMeter[] = [];
+  const rep = goals.you?.reputation;
+  if (rep && typeof rep.rating === "number") {
+    const beatsMarket = typeof rep.marketAvg === "number" ? rep.rating >= rep.marketAvg : null;
+    meters.push({
+      label: "Your rating vs market",
+      value: `${rep.rating}★`,
+      sub: typeof rep.rank === "number" && typeof rep.total === "number" ? `#${rep.rank} of ${rep.total}` : undefined,
+      pct: (rep.rating / 5) * 100,
+      tone: beatsMarket == null ? "neutral" : beatsMarket ? "brand" : "alert",
+      marker: typeof rep.marketAvg === "number" ? { pct: (rep.marketAvg / 5) * 100, label: `market avg ${rep.marketAvg}★` } : undefined,
+    });
+  }
+  const fbScore: number | null =
+    goals.findability && !goals.findability.empty && typeof goals.findability.score === "number" ? goals.findability.score
+    : goals.findabilityBrief && typeof goals.findabilityBrief.score === "number" ? goals.findabilityBrief.score
+    : null;
+  if (fbScore != null) {
+    meters.push({
+      label: "Findability in Google",
+      value: String(fbScore),
+      sub: "/ 100",
+      pct: fbScore,
+      tone: fbScore >= 60 ? "brand" : fbScore >= 40 ? "neutral" : "alert",
+    });
+  }
 
   // group items by severity, preserving the digest's internal ranking
   const groups = GROUP_ORDER
@@ -269,7 +334,7 @@ export function buildReportInput(
 
   const sections = buildReportSections(goals);
 
-  return { businessName: ws.name, periodLabel, dateLabel, headline: digest.headline, stats, groups, sections, empty: digest.items.length === 0 };
+  return { businessName: ws.name, periodLabel, dateLabel, headline: digest.headline, stats, meters, groups, sections, empty: digest.items.length === 0 };
 }
 
 const clean = (v: unknown) => String(v ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();

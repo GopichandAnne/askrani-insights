@@ -3,18 +3,11 @@
 import { useState } from "react";
 
 /**
- * Report actions: download the branded PDF, email it on demand (spends credits),
- * print, and CSV downloads. Client-only because it calls window.print() and posts
- * the on-demand send; the CSV/PDF links are plain downloads from the export routes.
+ * Report actions: download the branded PDF, the organised Excel workbook, email it
+ * on demand (spends credits), and print. Client-only because it calls window.print()
+ * and posts the on-demand send; the PDF/Excel links are plain downloads.
  */
 export function ReportToolbar({ canSend = false, sendCost = 5 }: { canSend?: boolean; sendCost?: number }) {
-  const exports: { type: string; label: string }[] = [
-    { type: "pricing", label: "Pricing CSV" },
-    { type: "offers", label: "Offers CSV" },
-    { type: "reputation", label: "Reputation CSV" },
-    { type: "events", label: "Events CSV" },
-  ];
-
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -40,6 +33,9 @@ export function ReportToolbar({ canSend = false, sendCost = 5 }: { canSend?: boo
       <a href="/api/reports/pdf?period=weekly" className="btn btn-primary">
         📄 Download PDF report
       </a>
+      <a href="/api/reports/export?period=weekly" className="btn btn-secondary">
+        📊 Download Excel workbook
+      </a>
       {canSend && (
         <button onClick={sendNow} disabled={sending} className="btn btn-secondary disabled:opacity-60">
           {sending ? "Sending…" : `✉️ Email me this report (${sendCost} credits)`}
@@ -48,15 +44,6 @@ export function ReportToolbar({ canSend = false, sendCost = 5 }: { canSend?: boo
       <button onClick={() => window.print()} className="btn btn-secondary">
         Print this page
       </button>
-      {exports.map((e) => (
-        <a
-          key={e.type}
-          href={`/api/reports/export?type=${e.type}`}
-          className="btn btn-secondary"
-        >
-          {e.label}
-        </a>
-      ))}
       {msg && (
         <span className={`w-full text-xs ${msg.ok ? "text-trust-direct" : "text-coral-dark"}`}>{msg.text}</span>
       )}

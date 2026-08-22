@@ -26,7 +26,7 @@ const COMMANDS: Command[] = [
   { label: "Offers & pricing", href: "/offers", icon: "💸", hint: "Prices & listings, you vs rivals", keywords: ["price", "prices", "pricing", "menu", "dishes", "products", "cost of items", "compare", "cheap", "expensive"] },
   { label: "Competitors", href: "/competitors", icon: "🧭", hint: "Your local rivals", keywords: ["rivals", "competition", "nearby", "businesses", "who", "compete"] },
   { label: "Recommendations", href: "/recommendations", icon: "🎯", hint: "What to do next", keywords: ["actions", "advice", "suggestions", "next moves", "todo", "ideas", "grow"] },
-  { label: "Market report", href: "/reports", icon: "📊", hint: "Full report · export · cost", keywords: ["report", "export", "pdf", "csv", "download", "summary", "monitoring cost", "spend", "budget"] },
+  { label: "Market report", href: "/reports", icon: "📊", hint: "Full report · export · cost", keywords: ["report", "export", "pdf", "excel", "xlsx", "spreadsheet", "download", "summary", "monitoring cost", "spend", "budget"] },
   { label: "Watch a market", href: "/explore", icon: "🔍", hint: "Scan an area free, then watch it", keywords: ["explore", "scan", "area", "region", "new market", "who's there", "size up", "watch area", "another region"] },
   { label: "New workspace", href: "/onboarding", icon: "✨", hint: "Add / set up a business", keywords: ["add business", "onboard", "setup", "set up", "new", "another store", "find my business"] },
 ];
