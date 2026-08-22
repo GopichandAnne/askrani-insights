@@ -176,10 +176,9 @@ export async function processOneJob(): Promise<TickResult> {
   if (error) throw new Error(`claim: ${error.message}`);
   if (!job || !job.id) return { processed: false, remaining: await pendingCount(svc) };
 
-  // Resolve the owning org once (used for the credit gate + debit + deep-read finalize).
-  const { data: wsRow } = await svc.from("workspace").select("organization_id, goals").eq("id", job.workspace_id).maybeSingle();
+  // Resolve the owning org once (used for the credit gate + debit).
+  const { data: wsRow } = await svc.from("workspace").select("organization_id").eq("id", job.workspace_id).maybeSingle();
   const orgId = (wsRow?.organization_id as string | undefined) ?? undefined;
-  const isDeepRead = !!(wsRow?.goals as any)?.ephemeral;
 
   // ── Phase 2 gate: don't run collection when the org is out of credits ──
   if (orgId && !(await hasCredits(orgId))) {
@@ -250,14 +249,15 @@ export async function processOneJob(): Promise<TickResult> {
     } catch {
       /* non-fatal — readers regenerate on demand if this didn't run */
     }
-    // A deep read is the COMPLETE picture — run competitor ads + flyer scans now
-    // that collection is done (part of the paid scan, not a subscription extra).
-    if (isDeepRead) {
-      try {
-        await nudgeDeepReadFinalize(job.workspace_id);
-      } catch {
-        /* non-fatal — ads/flyers just stay empty if this didn't run */
-      }
+    // Monitoring is ONE thing to the owner: everything about their market current.
+    // So competitor ads + flyer/image reads (incl. the owner's OWN flyer prices) run
+    // as an automatic stage of EVERY refresh, not just deep reads — kicked as its own
+    // function invocation so the heavy vision work keeps its own time budget. This is
+    // what unifies "social" and "flyers" into a single up-to-date monitoring cycle.
+    try {
+      await nudgeDeepReadFinalize(job.workspace_id);
+    } catch {
+      /* non-fatal — ads/flyers just stay empty if this didn't run */
     }
   }
 
