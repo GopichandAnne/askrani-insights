@@ -28,6 +28,8 @@ export interface YouReputation {
   delta: number | null;          // you − market
   rank: number | null;           // your position by rating among the market (1 = best)
   total: number;                 // businesses with a rating (you + rivals)
+  /** every rated business (you + rivals), best-first — powers the rank dot-plot. */
+  peers: { name: string; rating: number; isTarget: boolean }[];
   /** review velocity + rating trend from captured daily snapshots (null until we
    *  have ≥2 snapshots spanning ≥1 day). */
   velocity: ReviewVelocity | null;
@@ -180,6 +182,7 @@ export async function generateYou(ws: WorkspaceRow, db?: RlsClient): Promise<You
     delta: youRep?.rating != null && marketAvg != null ? Number((youRep.rating - marketAvg).toFixed(2)) : null,
     rank: rank && rank > 0 ? rank : null,
     total: rated.length,
+    peers: rated.map((r) => ({ name: r.name, rating: r.rating as number, isTarget: r.isTarget })),
     velocity,
     tracking: curCount != null,
   };

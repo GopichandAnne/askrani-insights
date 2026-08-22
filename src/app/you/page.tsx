@@ -9,6 +9,7 @@ import { getOrMakeYou, platformLabel, type YouReport, type ReviewToAnswer } from
 import type { ReviewPulse } from "@/lib/pulse";
 import { ActOnIt } from "@/components/ActOnIt";
 import { PulseColumns } from "@/components/PulseColumns";
+import { RatingRankChart } from "@/components/RatingRankChart";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the reviews LLM read on a cold cache
@@ -75,6 +76,8 @@ function Reputation({ r }: { r: YouReport["reputation"] }) {
           </div>
         )}
       </div>
+
+      <RatingRankChart peers={r.peers} marketAvg={r.marketAvg} />
 
       {r.velocity ? (
         <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line/60 pt-3 text-sm">
