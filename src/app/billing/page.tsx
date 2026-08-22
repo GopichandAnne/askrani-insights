@@ -5,6 +5,8 @@ import { creditsSummary, PLANS, getStripeCustomer } from "@/lib/credits";
 import { isStripeConfigured, CATALOG } from "@/lib/stripe";
 import { BillingActions, type BuyItem } from "@/components/BillingActions";
 import { ProfileCard } from "@/components/ProfileCard";
+import { TeamCard } from "@/components/TeamCard";
+import { isSuperAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +81,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
       {/* your details — name + editable contact phone (WhatsApp-ready, none sent yet) */}
       <ProfileCard initial={profileInitial} />
+
+      {/* team — owners can add/manage owners & members (WhatsApp intentionally out this version) */}
+      {(auth.role === "owner" || isSuperAdmin(user)) && <TeamCard />}
 
       {/* buy plans / top-ups */}
       <section className="card">

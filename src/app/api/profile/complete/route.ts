@@ -55,25 +55,36 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2) name the org from the business + stash owner contact for delivery + WhatsApp match
+  // 2) name the org from the business + stash owner contact for delivery + WhatsApp
+  //    match — but ONLY for a genuinely new owner. An INVITED teammate already
+  //    belongs to the inviter's org (which therefore has >1 member); for them we
+  //    must NOT rename the org or overwrite its ownerProfile — just release the
+  //    first-run gate (step 1 above already set their personal name).
   const svc = createServiceClient();
   try {
-    const { data: orgRow } = await svc
-      .from("organization")
-      .select("settings")
-      .eq("id", auth.orgId)
-      .maybeSingle();
-    const settings = ((orgRow?.settings as Record<string, unknown>) ?? {});
-    const ownerProfile = {
-      full_name,
-      phone,
-      email: email || user?.email || null,
-      updatedAt: new Date().toISOString(),
-    };
-    await svc
-      .from("organization")
-      .update({ name: business_name, settings: { ...settings, ownerProfile } })
-      .eq("id", auth.orgId);
+    const { count } = await svc
+      .from("org_membership")
+      .select("user_id", { count: "exact", head: true })
+      .eq("organization_id", auth.orgId);
+    const invitedIntoExistingTeam = (count ?? 1) > 1;
+    if (!invitedIntoExistingTeam) {
+      const { data: orgRow } = await svc
+        .from("organization")
+        .select("settings")
+        .eq("id", auth.orgId)
+        .maybeSingle();
+      const settings = ((orgRow?.settings as Record<string, unknown>) ?? {});
+      const ownerProfile = {
+        full_name,
+        phone,
+        email: email || user?.email || null,
+        updatedAt: new Date().toISOString(),
+      };
+      await svc
+        .from("organization")
+        .update({ name: business_name, settings: { ...settings, ownerProfile } })
+        .eq("id", auth.orgId);
+    }
   } catch {
     // non-fatal — org already exists; a rename/contact stash failing shouldn't block onboarding
   }
