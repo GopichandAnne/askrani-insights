@@ -66,12 +66,19 @@ export async function updateSession(request: NextRequest) {
       p.startsWith("/welcome") || p.startsWith("/login") || p.startsWith("/auth") ||
       p.startsWith("/api") || p.startsWith("/explore");
     if (!complete && !exempt) {
-      const to = request.nextUrl.clone();
-      to.pathname = "/welcome";
-      to.search = "";
-      const redirect = NextResponse.redirect(to);
-      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
-      return redirect;
+      // An INVITED teammate already belongs to a set-up workspace (via org_membership)
+      // — they must NOT be pushed through "set up your business". Only route genuinely
+      // new owners (no workspace they can see) to /welcome. RLS scopes this to the
+      // user's own orgs, and it only runs for not-yet-complete users, so it's cheap.
+      const { data: ws } = await supabase.from("workspace").select("id").limit(1).maybeSingle();
+      if (!ws) {
+        const to = request.nextUrl.clone();
+        to.pathname = "/welcome";
+        to.search = "";
+        const redirect = NextResponse.redirect(to);
+        response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+        return redirect;
+      }
     }
   }
 

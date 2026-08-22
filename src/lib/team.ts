@@ -123,7 +123,9 @@ export async function addTeamMemberByPhone(
       const { data, error } = await (svc as any).auth.admin.createUser({
         phone: `+${digits}`,
         phone_confirm: true,
-        user_metadata: name ? { full_name: name } : {},
+        // profile_complete: they're joining an existing team — skip the "set up your
+        // business" first-run flow and land them straight in the shared workspace.
+        user_metadata: { profile_complete: true, ...(name ? { full_name: name } : {}) },
       });
       if (error || !data?.user) return { ok: false, error: "Couldn't add that number — check it's valid and SMS sign-in is enabled." };
       userId = data.user.id as string;
@@ -153,7 +155,8 @@ export async function addTeamMember(
   if (!userId) {
     try {
       const { data, error } = await (svc as any).auth.admin.inviteUserByEmail(clean, {
-        data: name ? { full_name: name } : {},
+        // profile_complete: joining an existing team — skip the business-setup flow.
+        data: { profile_complete: true, ...(name ? { full_name: name } : {}) },
         redirectTo: `${origin}/auth/callback?next=/`,
       });
       if (error || !data?.user) return { ok: false, error: "Couldn't send the invite — check the email and try again." };
