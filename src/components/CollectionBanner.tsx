@@ -13,13 +13,32 @@ import { RaniRadar } from "@/components/RaniRadar";
  */
 type Job = { name?: string; status: string; lat?: number | null; lng?: number | null; isTarget?: boolean };
 
+// Catchy, rotating "what Rani's up to" lines — personality over raw stats.
+const PHRASES = [
+  "Rani's peeking at the competition 👀",
+  "Reading the neighbours' sale flyers 🧾",
+  "Spotting who just dropped their prices 💸",
+  "Scanning fresh posts & photos 📸",
+  "Sizing up this week's deals 🛒",
+  "Seeing what your rivals are promoting 📣",
+  "Catching the local buzz 🔍",
+  "Peeking at the shelves next door 🫣",
+];
+
 export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const pathname = usePathname();
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [ephemeral, setEphemeral] = useState(false);
-  const [flyers, setFlyers] = useState<{ processed: number; total: number } | null>(null);
   const [visible, setVisible] = useState(false);
+  const [phrase, setPhrase] = useState(0);
   const wasActive = useRef(false);
+
+  // rotate the catchy line while the banner is up
+  useEffect(() => {
+    if (!visible) return;
+    const t = setInterval(() => setPhrase((p) => (p + 1) % PHRASES.length), 3200);
+    return () => clearInterval(t);
+  }, [visible]);
 
   useEffect(() => {
     if (!workspaceId || pathname?.startsWith("/onboarding")) return;
@@ -35,7 +54,6 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
         const d = await r.json();
         const js = (d.jobs ?? []) as Job[];
         setEphemeral(!!d.ephemeral);
-        setFlyers(d.flyers ?? null);
         // stay live through BOTH stages: per-business collection AND the flyer/image read
         const active = js.some((j) => j.status === "pending" || j.status === "running") || !!d.flyers;
         if (active) { wasActive.current = true; setJobs(js); setVisible(true); }
@@ -72,12 +90,12 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
       ) : (
         <RaniCollecting businesses={businesses} done={done} total={total} allDone={done >= total} />
       )}
-      {flyers && (
-        <div className="mt-2 flex items-center gap-2 border-t border-line/50 pt-2 text-xs text-ink-soft">
-          <span className="rani-dots" aria-hidden><span /><span /><span /></span>
-          Reading flyers &amp; images{flyers.total ? <> · {flyers.processed}/{flyers.total} pages</> : "…"}
-        </div>
-      )}
+      {/* catchy, rotating status — no raw stats, just "something's happening" + a soft ETA */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line/50 pt-2 text-sm">
+        <span className="rani-dots" aria-hidden><span /><span /><span /></span>
+        <span key={phrase} className="animate-fade-in font-medium text-brand-deep">{PHRASES[phrase]}</span>
+        <span className="text-xs text-ink-faint">· usually a minute or two</span>
+      </div>
     </section>
   );
 }
