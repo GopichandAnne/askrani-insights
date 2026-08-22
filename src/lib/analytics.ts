@@ -12,6 +12,7 @@ export type AnalyticsEvent =
   | "monitor_area"
   | "signup"
   | "profile_completed"
+  | "profile_updated"
   | "workspace_created"
   | "collect_started"
   | "deep_read_quote"

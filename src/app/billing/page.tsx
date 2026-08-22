@@ -4,6 +4,8 @@ import { requireOrg } from "@/lib/api";
 import { creditsSummary, PLANS, getStripeCustomer } from "@/lib/credits";
 import { isStripeConfigured, CATALOG } from "@/lib/stripe";
 import { BillingActions, type BuyItem } from "@/components/BillingActions";
+import { ProfileCard } from "@/components/ProfileCard";
+import { createServiceClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Billing & credits — Ask Rani Insights" };
@@ -28,6 +30,16 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const toItem = (k: string): BuyItem => ({ key: k, label: CATALOG[k].label, priceUsd: CATALOG[k].priceUsd, credits: CATALOG[k].credits, mode: CATALOG[k].mode, plan: CATALOG[k].plan });
   const buyPlans = stripeReady ? ["starter", "growth", "pro"].filter((k) => CATALOG[k].price).map(toItem) : [];
   const buyTopups = stripeReady ? ["topup_500", "topup_1500", "topup_5000"].filter((k) => CATALOG[k].price).map(toItem) : [];
+
+  // owner profile (name / phone / email) for the editable "Your details" card
+  const svc = createServiceClient();
+  const { data: orgRow } = await svc.from("organization").select("settings").eq("id", auth.orgId).maybeSingle();
+  const op = (((orgRow?.settings as Record<string, any>) ?? {}).ownerProfile ?? {}) as Record<string, any>;
+  const profileInitial = {
+    full_name: op.full_name ?? (user.user_metadata as any)?.full_name ?? "",
+    phone: op.phone ?? (user.phone ? `+${user.phone}` : ""),
+    email: op.email ?? user.email ?? "",
+  };
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -64,6 +76,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <div className="mt-0.5 text-xs text-ink-faint">free credits to start</div>
         </div>
       </section>
+
+      {/* your details — name + editable contact phone (WhatsApp-ready, none sent yet) */}
+      <ProfileCard initial={profileInitial} />
 
       {/* buy plans / top-ups */}
       <section className="card">
