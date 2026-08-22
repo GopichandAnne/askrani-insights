@@ -142,6 +142,8 @@ export default async function YouPage() {
     : yGoals.findabilityBrief && typeof yGoals.findabilityBrief.score === "number" ? yGoals.findabilityBrief.score
     : null;
   const fbCov = yGoals.findability?.coverage ?? yGoals.findabilityBrief?.coverage;
+  // your OWN advertised prices, read from your sale flyer/posts (kept in myFlyerDeals)
+  const myFlyer = ((yGoals.myFlyerDeals?.deals ?? []) as { item: string; price?: string }[]).filter((d) => d.price).slice(0, 12);
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -307,7 +309,25 @@ export default async function YouPage() {
                 </p>
               ) : <p className="mt-1 text-sm text-ink-faint">No rival prices captured yet to compare.</p>}
             </>
-          ) : <p className="text-sm text-ink-faint">No priced items captured yet.</p>}
+          ) : myFlyer.length === 0 ? (
+            <p className="text-sm text-ink-faint">No priced items captured yet.</p>
+          ) : null}
+
+          {/* your own advertised prices, read from your sale flyer/posts */}
+          {myFlyer.length > 0 && (
+            <div className={price.avg != null ? "mt-3 border-t border-line/60 pt-3" : ""}>
+              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">From your latest flyer</p>
+              <ul className="divide-y divide-line/50">
+                {myFlyer.map((d, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 py-1 text-sm">
+                    <span className="min-w-0 truncate text-ink-soft">{d.item}</span>
+                    <span className="shrink-0 font-semibold text-brand-deep">{d.price}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-ink-faint">These are your own advertised prices — used to compare you against rivals on <a href="/offers" className="font-medium text-brand hover:underline">Offers</a>.</p>
+            </div>
+          )}
         </section>
       </div>
 

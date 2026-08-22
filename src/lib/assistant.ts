@@ -62,6 +62,13 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
   // the question is item-specific).
   const flyer = arr(goals.flyerDeals?.deals);
   const rank = (d: any) => (qWords.length && qHit(`${d.item ?? ""} ${d.rival ?? ""}`) ? 0 : 1);
+  // YOUR OWN advertised prices, read from your own sale flyer / posts — the owner's
+  // side of any "which items am I cheaper/pricier on?" question. Kept separate from
+  // rivals so the assistant never confuses your prices for a competitor's.
+  const ownPriced = [...arr(goals.myFlyerDeals?.deals)].sort((a, b) => rank(a) - rank(b))
+    .map((d: any) => `- ${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}`).filter((x) => x.length > 3)
+    .slice(0, qWords.length ? 45 : 20);
+  push("Your advertised prices (from your own flyer/posts)", ownPriced);
   const priced = [...flyer].sort((a, b) => rank(a) - rank(b))
     .map((d) => `- ${clean(d.rival)}: ${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}`).filter((x) => x.length > 4)
     .slice(0, qWords.length ? 45 : 24);
@@ -145,6 +152,7 @@ const SYSTEM = (ws: { name: string; vertical?: string }) =>
   `• UPCOMING OCCASIONS — calendar dates, for TIMING ideas ONLY. Never treat them as facts about competitors.\n` +
   `RULES:\n` +
   `1. Facts come ONLY from SUMMARIES/LIVE RECORDS (market) and YOUR OPERATIONS (their own store). NEVER invent or guess prices, names, ratings, dates, or sales numbers. If they aren't there, set grounded=false, say plainly you don't have that yet, and point to what you CAN answer or suggest a fresh scan.\n` +
+  `1b. PRICE QUESTIONS — be precise about WHOSE prices you have. "Your advertised prices" are the OWNER'S own; "Competitor prices" and "You vs rivals on price" are the market. If you have rivals' prices but the owner has no advertised price for the item in question, do NOT say "no prices were collected" — say what you DO have (name a couple of the competitor prices) and that you'd need the owner's own price for that item to compare. When the owner's own prices ARE present, use them together with rivals' to answer "which items am I cheaper/pricier on?".\n` +
   `2. COMBINE INSIDE + OUTSIDE. When the owner asks what to do / for a move, promo, campaign, or idea: give ONE or TWO concrete moves. Ground the rationale in real data — cross-reference YOUR OPERATIONS with the market: e.g., don't cut price on a best-seller even if a rival is cheaper; if a rival is winning something your OWN customers keep asking for, that's a strong signal; and if they have promote-and-earn advocates or a loyalty list, prefer ACTIVATING those (a zero-cost channel their own customers power) over matching rivals' paid ads. Time it to a relevant UPCOMING OCCASION when one fits. The creative idea is yours, but every fact must trace to DATA. Set grounded=true when built on real data.\n` +
   `3. VOICE — reply like a real assistant texting the owner: warm, natural, direct. OPEN with the actual answer to their question in the first sentence, then the specifics (real names, exact numbers). Keep it tight and human, not a report — no headers, no markdown symbols, no filler, no forced "let me know if…". For several prices/items, a short line-separated list reads cleaner than a run-on sentence.\n` +
   `3b. LANGUAGE — reply in the SAME language the owner wrote in (Spanish, Hindi, Hinglish, Telugu, Tamil, etc.), sounding natural to a native speaker. But keep business names, item names, and prices EXACTLY as they appear in the DATA — never translate or convert those.\n` +
