@@ -98,6 +98,13 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
   ].filter((x) => x.length > 4);
   push("What's popular / winning nearby", pop);
 
+  // what their photos/posts show — non-price visual context read from images
+  const vis = arr(goals.visuals?.businesses)
+    .filter((b: any) => arr(b.notes).length)
+    .slice(0, 6)
+    .map((b: any) => `- ${clean(b.name)}${b.isYou ? " (you)" : ""}: ${arr(b.notes).slice(0, 4).map(clean).join("; ")}`);
+  push("What their photos/posts show (visual read)", vis);
+
   // rival marketing
   const mkt: string[] = [];
   const sp = goals.socialPulse;

@@ -123,6 +123,31 @@ function SocialPulseSection({ p }: { p: SocialPulse }) {
   );
 }
 
+function VisualsCard({ businesses }: { businesses: { name: string; isYou: boolean; notes: string[] }[] }) {
+  const sorted = [...businesses].sort((a, b) => Number(b.isYou) - Number(a.isYou));
+  return (
+    <section className="card">
+      <h2 className="mb-1 flex items-center gap-2 font-semibold">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🖼️</span>
+        What their photos show
+      </h2>
+      <p className="mb-3 text-xs text-ink-faint">Read from their actual post &amp; profile images — what each business puts forward visually (products, quality, ambiance, themes), not just captions.</p>
+      <div className="grid gap-3 md:grid-cols-2">
+        {sorted.map((b, i) => (
+          <div key={i} className="rounded-2xl bg-white/55 p-3">
+            <p className="mb-1.5 text-sm font-semibold text-brand-deep">{b.name}{b.isYou ? " (you)" : ""}</p>
+            <ul className="space-y-1">
+              {b.notes.slice(0, 5).map((n, j) => (
+                <li key={j} className="flex gap-2 text-sm text-ink-soft"><span className="text-brand" aria-hidden>•</span><span>{n}</span></li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default async function ContentPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Content" />;
@@ -140,8 +165,10 @@ export default async function ContentPage() {
   const { data: spRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
   const pulse = (spRow?.goals as any)?.socialPulse as SocialPulse | undefined;
   const hasPulse = !!pulse && !pulse.failed && (pulse.breakouts.length > 0 || pulse.risingFormats.length > 0 || pulse.newCollabs.length > 0 || !!pulse.summary);
+  // visual read — what each business's photos/posts show (from the image vision pass)
+  const visuals = (((spRow?.goals as any)?.visuals?.businesses ?? []) as { name: string; isYou: boolean; notes: string[] }[]).filter((b) => b.notes?.length);
 
-  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0 && !hasPulse;
+  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0 && !hasPulse && visuals.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -173,6 +200,8 @@ export default async function ContentPage() {
           )}
 
           {hasPulse && pulse && <SocialPulseSection p={pulse} />}
+
+          {visuals.length > 0 && <VisualsCard businesses={visuals} />}
 
           {c.swipe.length > 0 && (
             <section>

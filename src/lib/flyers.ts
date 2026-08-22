@@ -95,6 +95,7 @@ const VISION_SCHEMA = {
         type: "object", additionalProperties: false,
         properties: {
           imageIndex: { type: "integer", description: "the [index] of the image (0-based)" },
+          context: { type: "array", items: { type: "string" }, description: "2-4 short phrases on what THIS image shows about the business BEYOND prices — featured products/dishes/services, quality/freshness/ambiance signals, visual themes, or notable/new items. Fill this for EVERY image, including lifestyle/brand/ambiance photos that have no prices." },
           deals: {
             type: "array",
             items: {
@@ -115,7 +116,7 @@ const VISION_SCHEMA = {
   required: ["images"],
 };
 const VISION_SYSTEM =
-  "You read a local business's PROMOTIONAL images across any industry — sale flyers, menu boards, service & treatment price lists, price signs. For each image, list every OFFERING (a product, dish, service, treatment, package or combo) with its price EXACTLY as printed and any terms/validity. Works the same for a grocery flyer, a restaurant menu special, a salon service list, a med-spa treatment menu, or a barber's price board. Read only what is visibly printed — never guess a price. If an image is a lifestyle/brand/logo photo with no offerings or prices, return nothing for it.";
+  "You read a local business's PROMOTIONAL images across any industry — sale flyers, menu boards, service & treatment price lists, price signs. For each image, list every OFFERING (a product, dish, service, treatment, package or combo) with its price EXACTLY as printed and any terms/validity. Works the same for a grocery flyer, a restaurant menu special, a salon service list, a med-spa treatment menu, or a barber's price board. Read only what is visibly printed — never guess a price. If an image is a lifestyle/brand/logo photo with no offerings or prices, return an empty deals array for it. SEPARATELY, for EVERY image (offering or not), fill `context` with 2-4 short phrases capturing what it conveys about the business beyond prices — the offerings/products/dishes/services shown, quality/freshness/ambiance, visual style/theme, or anything notable or new. This visual read is used to understand each business, so never leave context empty for a real photo.";
 
 /** Competitors' Instagram + Facebook profiles, interleaved so both platforms are sampled. */
 export async function resolveFlyerProfiles(ws: WorkspaceRow, svc: Svc, maxCompetitors = 8): Promise<FlyerProfile[]> {
@@ -240,17 +241,18 @@ async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: numbe
   return results.length;
 }
 
-async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDeal[]> {
+async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<{ deals: FlyerDeal[]; visuals: { rival: string; note: string }[] }> {
   const deals: FlyerDeal[] = [];
+  const visuals: { rival: string; note: string }[] = [];
   const BATCH = 6;
   for (let i = 0; i < flyers.length; i += BATCH) {
     const batch = flyers.slice(i, i + BATCH);
     try {
-      const { data } = await getLlm().callStructured<{ images: { imageIndex: number; deals: { item: string; price?: string; terms?: string }[] }[] }>({
+      const { data } = await getLlm().callStructured<{ images: { imageIndex: number; context?: string[]; deals: { item: string; price?: string; terms?: string }[] }[] }>({
         system: VISION_SYSTEM,
-        text: `These are ${batch.length} flyer/promo images from local ${ws.vertical} businesses, in order [0..${batch.length - 1}]. For each image, extract the sale items + prices printed on it.`,
+        text: `These are ${batch.length} images from local ${ws.vertical} businesses' posts/pages, in order [0..${batch.length - 1}]. For each: extract any sale items + prices, AND fill context with what the image shows about the business.`,
         images: batch.map((f) => ({ base64: f.base64, mediaType: f.mediaType })),
-        schema: VISION_SCHEMA, tier: "extract", maxTokens: 2200,
+        schema: VISION_SCHEMA, tier: "extract", maxTokens: 2600,
       });
       for (const im of Array.isArray(data.images) ? data.images : []) {
         const src = batch[Number(im.imageIndex)];
@@ -260,10 +262,41 @@ async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<FlyerDe
           if (!item) continue;
           deals.push({ rival: src.rival, item, price: String(d.price ?? "").trim() || undefined, terms: String(d.terms ?? "").trim() || undefined, imageUrl: src.storedUrl, postUrl: src.postUrl, source: src.source, postedAt: src.postedAt });
         }
+        for (const c of Array.isArray(im.context) ? im.context : []) {
+          const note = String(c ?? "").replace(/\s+/g, " ").trim();
+          if (note.length > 3) visuals.push({ rival: src.rival, note });
+        }
       }
     } catch { /* skip this batch */ }
   }
-  return deals;
+  return { deals, visuals };
+}
+
+export interface VisualsReport { businesses: { name: string; isYou: boolean; notes: string[] }[]; at: string; empty?: boolean }
+
+/** Merge freshly-read visual notes into the cache: businesses seen THIS run get
+ *  their notes refreshed (deduped, newest first, capped); businesses not seen keep
+ *  their previous notes. Non-price context — "what their photos show". */
+function mergeVisuals(prev: VisualsReport | undefined, fresh: { rival: string; note: string }[], ownName: string, now: string): VisualsReport {
+  const freshByBiz = new Map<string, { name: string; notes: string[] }>();
+  for (const v of fresh) {
+    const k = v.rival.toLowerCase();
+    const e = freshByBiz.get(k) ?? { name: v.rival, notes: [] };
+    if (!e.notes.some((n) => n.toLowerCase() === v.note.toLowerCase())) e.notes.push(v.note);
+    freshByBiz.set(k, e);
+  }
+  const out = new Map<string, { name: string; isYou: boolean; notes: string[] }>();
+  for (const b of prev?.businesses ?? []) out.set(b.name.toLowerCase(), { ...b, notes: [...b.notes] });
+  for (const [k, e] of freshByBiz) out.set(k, { name: e.name, isYou: e.name.toLowerCase() === ownName.toLowerCase(), notes: e.notes.slice(0, 8) });
+  const businesses = [...out.values()].filter((b) => b.notes.length);
+  return { businesses, at: now, ...(businesses.length ? {} : { empty: true }) };
+}
+
+/** Read the cached visual signals (never scrapes). */
+export async function getVisuals(ws: WorkspaceRow): Promise<VisualsReport> {
+  const svc = createServiceClient();
+  const { data } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  return ((data?.goals as { visuals?: VisualsReport } | null)?.visuals) ?? { businesses: [], at: new Date().toISOString(), empty: true };
 }
 
 const HISTORY_CAP = 500;     // safety bound on stored items
@@ -336,8 +369,9 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
     costUsd += r.costUsd;
     done++;
   }
-  const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
-  const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
+  const rivalRes = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : { deals: [], visuals: [] };
+  const ownRes = ownFlyers.length ? await visionExtract(ws, ownFlyers) : { deals: [], visuals: [] };
+  const rivalFresh = rivalRes.deals, ownFresh = ownRes.deals;
 
   // merge into rivals' vs owner's caches separately + advance the job
   const now = new Date().toISOString();
@@ -345,6 +379,7 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: now };
   const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now, retentionDays);
   const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now, retentionDays);
+  const mergedVisuals = mergeVisuals(goals.visuals as VisualsReport | undefined, [...rivalRes.visuals, ...ownRes.visuals], ws.name, now);
   const cursor = job.cursor + done;
   const flyersRead = job.flyersRead + ownFlyers.length + rivalFlyers.length;
   const finished = cursor >= job.total || done === 0;
@@ -355,7 +390,7 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   // re-read goals just before writing so captureFollowers' socialTimeline isn't clobbered
   const { data: freshRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const writeGoals = ((freshRow?.goals as Record<string, unknown>) ?? goals);
-  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerJob: nextJob } }).eq("id", ws.id);
+  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, visuals: mergedVisuals, flyerJob: nextJob } }).eq("id", ws.id);
 
   // refund if the whole run turned up no flyer images at all
   if (finished && flyersRead === 0 && job.charged > 0) {
@@ -406,17 +441,19 @@ export async function refreshFlyers(
     (t.own ? ownFlyers : rivalFlyers).push(...r.flyers); costUsd += r.costUsd;
     if (!t.own) rivalScraped++;
   }
-  const rivalFresh = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : [];
-  const ownFresh = ownFlyers.length ? await visionExtract(ws, ownFlyers) : [];
+  const rivalRes = rivalFlyers.length ? await visionExtract(ws, rivalFlyers) : { deals: [], visuals: [] };
+  const ownRes = ownFlyers.length ? await visionExtract(ws, ownFlyers) : { deals: [], visuals: [] };
+  const rivalFresh = rivalRes.deals, ownFresh = ownRes.deals;
   const now = new Date().toISOString();
   const mergedRival = mergeDeals(prevRival.deals ?? [], rivalFresh, now, retentionDays);
   const mergedOwn = mergeDeals(prevOwn.deals ?? [], ownFresh, now, retentionDays);
+  const mergedVisuals = mergeVisuals(goals.visuals as VisualsReport | undefined, [...rivalRes.visuals, ...ownRes.visuals], ws.name, now);
   const nextCursor = rivalProfiles.length ? (start + rivalScraped) % rivalProfiles.length : 0;
   const rivalReport: FlyerReport = { deals: mergedRival, flyersRead: rivalFlyers.length, at: now, ...(mergedRival.length ? {} : { empty: true }) };
   const ownReport: FlyerReport = { deals: mergedOwn, flyersRead: (prevOwn.flyersRead ?? 0) + ownFlyers.length, at: now, ...(mergedOwn.length ? {} : { empty: true }) };
   // re-read goals so captureFollowers' socialTimeline (committed above) isn't clobbered
   const { data: freshRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const writeGoals = ((freshRow?.goals as Record<string, unknown>) ?? goals);
-  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, flyerCursor: nextCursor } }).eq("id", ws.id);
+  await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, visuals: mergedVisuals, flyerCursor: nextCursor } }).eq("id", ws.id);
   return { activated: true, flyers: rivalFlyers.length + ownFlyers.length, deals: rivalFresh.length + ownFresh.length, costUsd: Number(costUsd.toFixed(4)) };
 }
