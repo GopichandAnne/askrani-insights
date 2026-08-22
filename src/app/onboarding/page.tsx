@@ -49,7 +49,7 @@ export default async function OnboardingPage() {
                 <p className="text-sm text-ink-faint">Monitor a whole area instead — a zip or city + what you&apos;re watching. No business required.</p>
               </div>
             </div>
-            <Link href="/explore" className="btn btn-secondary shrink-0 px-4 py-2.5 text-sm">Monitor an area →</Link>
+            <Link href="/explore" className="btn btn-secondary shrink-0 px-4 py-2.5 text-sm">Watch a market →</Link>
           </div>
           <SearchFlow />
         </>

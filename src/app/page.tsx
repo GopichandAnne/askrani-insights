@@ -72,7 +72,7 @@ function SetUpCta() {
             Get started <RaniMark size={18} />
           </Link>
           <Link href="/explore" className="btn btn-secondary px-6 py-3.5 text-base">
-            📍 Monitor an area instead
+            📍 Watch a market instead
           </Link>
         </div>
         <p className="text-xs text-ink-faint">No business of your own? Watch a whole zip or city — no business required.</p>
@@ -346,7 +346,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/explore" className="btn btn-secondary px-3 py-1.5 text-sm">🔎 Explore an area</Link>
+          <Link href="/explore" className="btn btn-secondary px-3 py-1.5 text-sm">🔎 Watch a market</Link>
           <Link href="/onboarding" className="btn btn-secondary px-3 py-1.5 text-sm">+ Add business</Link>
           <Link href="/billing" className="btn btn-primary px-3 py-1.5 text-sm">Buy credits</Link>
         </div>
