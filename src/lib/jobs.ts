@@ -135,40 +135,39 @@ async function nudgeWarm(workspaceId: string): Promise<void> {
   }
 }
 
-/** Kick the deep-read finalize (competitor ads + flyer scans) in its OWN function
- *  invocation once a deep read's collection is done. Falls back to inline when
- *  there's no worker URL/secret (local worker). */
+/** Finalize a completed refresh: competitor ADS (fast → its own finalize invocation)
+ *  plus the FLYER/image + visual read. The flyer scrape is slow and only persists
+ *  at the very end, so a single 300s invocation gets killed mid-run before writing.
+ *  Instead we ENQUEUE the batched flyer job (writes after every batch) and let the
+ *  flyers/sweep cron drive it to completion — reliable for slow scrapes. Falls back
+ *  to inline when there's no worker URL/secret (local dev). */
 async function nudgeDeepReadFinalize(workspaceId: string): Promise<void> {
   const base = process.env.NEXT_PUBLIC_APP_URL;
   const secret = process.env.WORKER_SECRET;
-  if (!base || !secret) {
-    // inline fallback (local dev): run the scans directly
+  const svc = createServiceClient();
+  const { data: ws } = await svc.from("workspace").select("id,name,vertical,target_business_id,organization_id").eq("id", workspaceId).maybeSingle();
+  if (!ws) return;
+
+  // ads: fast — run in its own finalize invocation (or inline locally)
+  if (base && secret) {
     try {
-      const svc = createServiceClient();
-      const { data } = await svc.from("workspace").select("id,name,vertical,target_business_id").eq("id", workspaceId).maybeSingle();
-      if (data) {
-        const { refreshCompetitorAds } = await import("@/lib/ads");
-        const { refreshFlyers } = await import("@/lib/flyers");
-        await refreshCompetitorAds(data as any).catch(() => {});
-        await refreshFlyers(data as any).catch(() => {});
-      }
-    } catch { /* best-effort */ }
-    return;
-  }
-  // ads and flyers as SEPARATE invocations so each gets its own 300s budget — the
-  // flyer/image vision pass is heavy and was being starved when it shared with ads.
-  for (const only of ["ads", "flyers"] as const) {
-    try {
-      await fetch(`${base}/api/deep-read/finalize?only=${only}`, {
+      await fetch(`${base}/api/deep-read/finalize?only=ads`, {
         method: "POST",
         headers: { "x-worker-secret": secret, "content-type": "application/json" },
         body: JSON.stringify({ workspaceId }),
         signal: AbortSignal.timeout(4000),
       });
-    } catch {
-      // aborting our wait is expected — each finalize function continues on its own
-    }
+    } catch { /* continues on its own */ }
+  } else {
+    try { const { refreshCompetitorAds } = await import("@/lib/ads"); await refreshCompetitorAds(ws as any).catch(() => {}); } catch { /* best-effort */ }
   }
+
+  // flyers + visual read: enqueue the batched job; the flyers/sweep cron drains it
+  // batch-by-batch (persisting each batch), so a slow scrape can't lose everything.
+  try {
+    const { enqueueFlyerJob } = await import("@/lib/flyers");
+    await enqueueFlyerJob(ws as any, (ws as any).organization_id as string, 0);
+  } catch { /* best-effort — flyers just stay as-is if this didn't run */ }
 }
 
 /** Claim and process one job. Returns processed:false when the queue is empty. */
