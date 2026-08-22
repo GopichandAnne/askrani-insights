@@ -155,15 +155,19 @@ async function nudgeDeepReadFinalize(workspaceId: string): Promise<void> {
     } catch { /* best-effort */ }
     return;
   }
-  try {
-    await fetch(`${base}/api/deep-read/finalize`, {
-      method: "POST",
-      headers: { "x-worker-secret": secret, "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId }),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch {
-    // aborting our wait is expected — the finalize function continues on its own
+  // ads and flyers as SEPARATE invocations so each gets its own 300s budget — the
+  // flyer/image vision pass is heavy and was being starved when it shared with ads.
+  for (const only of ["ads", "flyers"] as const) {
+    try {
+      await fetch(`${base}/api/deep-read/finalize?only=${only}`, {
+        method: "POST",
+        headers: { "x-worker-secret": secret, "content-type": "application/json" },
+        body: JSON.stringify({ workspaceId }),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch {
+      // aborting our wait is expected — each finalize function continues on its own
+    }
   }
 }
 

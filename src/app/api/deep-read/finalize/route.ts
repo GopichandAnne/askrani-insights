@@ -36,8 +36,12 @@ export async function POST(req: Request) {
   if (!data) return NextResponse.json({ error: "not found" }, { status: 404 });
   const ws = data as WorkspaceRow;
 
-  const out: Record<string, unknown> = { workspaceId };
-  try { out.ads = await refreshCompetitorAds(ws); } catch (e) { out.adsError = (e as Error).message; }
-  try { out.flyers = await refreshFlyers(ws); } catch (e) { out.flyersError = (e as Error).message; }
+  // `only` lets the caller run ads and flyers in SEPARATE function invocations, so
+  // the heavy flyer/image vision pass gets its own 300s budget instead of being
+  // starved (and killed mid-write) by a slow ad scrape sharing the same invocation.
+  const only = new URL(req.url).searchParams.get("only");
+  const out: Record<string, unknown> = { workspaceId, only: only ?? "all" };
+  if (only !== "flyers") { try { out.ads = await refreshCompetitorAds(ws); } catch (e) { out.adsError = (e as Error).message; } }
+  if (only !== "ads") { try { out.flyers = await refreshFlyers(ws); } catch (e) { out.flyersError = (e as Error).message; } }
   return NextResponse.json(out);
 }
