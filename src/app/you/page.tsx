@@ -10,6 +10,7 @@ import type { ReviewPulse } from "@/lib/pulse";
 import { ActOnIt } from "@/components/ActOnIt";
 import { PulseColumns } from "@/components/PulseColumns";
 import { RatingRankChart } from "@/components/RatingRankChart";
+import { FindabilityMeter } from "@/components/FindabilityMeter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45; // room for the reviews LLM read on a cold cache
@@ -133,7 +134,14 @@ export default async function YouPage() {
   // stays fast; shows what's CHANGING in reviews week-over-week.
   const supabase = await createClient();
   const { data: pRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
-  const pulse = (pRow?.goals as any)?.pulse as ReviewPulse | undefined;
+  const yGoals = (pRow?.goals ?? {}) as Record<string, any>;
+  const pulse = yGoals.pulse as ReviewPulse | undefined;
+  // findability score (full report if built, else the lighter brief) — for the meter
+  const fbScore: number | null =
+    yGoals.findability && !yGoals.findability.empty && typeof yGoals.findability.score === "number" ? yGoals.findability.score
+    : yGoals.findabilityBrief && typeof yGoals.findabilityBrief.score === "number" ? yGoals.findabilityBrief.score
+    : null;
+  const fbCov = yGoals.findability?.coverage ?? yGoals.findabilityBrief?.coverage;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -264,7 +272,19 @@ export default async function YouPage() {
               Not yet on <span className="font-medium text-ink">{you.discoverability.missing.map(platformLabel).join(", ")}</span> — each is a listing customers check when they look for you.
             </p>
           )}
-          <a href="/findability" className="mt-3 inline-block text-xs font-medium text-brand hover:underline">Where you rank in Google search →</a>
+          {fbScore != null && (
+            <div className="mt-3 border-t border-line/60 pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">Google search rank</p>
+              <FindabilityMeter
+                score={fbScore}
+                size="sm"
+                sub={fbCov ? `Top-3 for ${fbCov.inTop3} of ${fbCov.total} customer searches` : "How you rank when customers search Google"}
+              />
+            </div>
+          )}
+          <a href="/findability" className="mt-3 inline-block text-xs font-medium text-brand hover:underline">
+            {fbScore != null ? "See your full search breakdown →" : "Where you rank in Google search →"}
+          </a>
         </section>
 
         <section className="card">

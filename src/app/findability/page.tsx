@@ -3,6 +3,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { getOrMakeFindabilityReport, type FindabilityReport } from "@/lib/findability";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
+import { FindabilityMeter } from "@/components/FindabilityMeter";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -53,16 +54,9 @@ export default async function FindabilityPage() {
           {/* Score + headline metrics */}
           <div className="card">
             <div className="flex flex-wrap items-start gap-x-12 gap-y-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Findability score</p>
-                <div className="mt-1 flex items-end gap-2">
-                  <span className="font-display text-5xl font-extrabold text-brand-deep">{report.score}</span>
-                  <span className="pb-1.5 text-lg text-ink-faint">/100</span>
-                  {report.scoreDelta != null && <span className="pb-2"><Trend delta={report.scoreDelta} /></span>}
-                </div>
-                <span className="mt-2 flex h-1.5 w-44 overflow-hidden rounded-full bg-surface-sunken">
-                  <span className="block h-full rounded-full bg-brand-gradient" style={{ width: `${report.score}%` }} />
-                </span>
+              <div className="min-w-[17rem]">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-faint">Findability score</p>
+                <FindabilityMeter score={report.score} delta={report.scoreDelta} size="lg" />
                 <p className="mt-1.5 text-xs text-ink-faint">
                   Position <b className="text-ink-soft">{report.breakdown.position}</b> · Coverage <b className="text-ink-soft">{report.breakdown.coverage}</b> · Momentum <b className="text-ink-soft">{report.breakdown.momentum}</b>
                 </p>

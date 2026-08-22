@@ -10,6 +10,8 @@ import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
 import { DraftButton } from "@/components/DraftButton";
 import { DigestFeed } from "@/components/DigestFeed";
+import { RatingRankChart } from "@/components/RatingRankChart";
+import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { buildDigest } from "@/lib/digest";
 import { RaniMark } from "@/components/RaniSpinner";
 import { creditsSummary, PLANS } from "@/lib/credits";
@@ -311,13 +313,19 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
     actions.push({ ...w, tip: true });
   }
 
-  // ── competitor leaderboard (rating + price, you highlighted) ──────────────
-  const priceByName = new Map(report.pricing.map((p) => [p.name, p.avgPrice]));
-  const leaderboard = report.reputation
-    .map((r) => ({ name: r.name, isTarget: r.isTarget, rating: r.rating, sources: r.sources, price: priceByName.get(r.name) ?? null }))
-    .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || (b.rating ?? 0) - (a.rating ?? 0))
-    .slice(0, 7);
-  const SRC_ABBR: Record<string, string> = { google: "G", yelp: "Y", facebook: "FB", tripadvisor: "TA", trustpilot: "TP" };
+  // ── rating rank dot-plot data (you vs the field) + price per business ──────
+  const ratingPeers = report.reputation
+    .filter((r) => r.rating != null)
+    .map((r) => ({ name: r.name, rating: r.rating as number, isTarget: r.isTarget }));
+  const rivalRatings = report.reputation.filter((r) => !r.isTarget && r.rating != null).map((r) => r.rating as number);
+  const marketAvgRating = rivalRatings.length ? Number((rivalRatings.reduce((a, b) => a + b, 0) / rivalRatings.length).toFixed(2)) : null;
+  const priceRecord: Record<string, number | null> = Object.fromEntries(report.pricing.map((p) => [p.name, p.avgPrice]));
+
+  // findability score for the Week meter (cached full report, else the brief)
+  const fbScore: number | null =
+    goals.findability && !goals.findability.empty && typeof goals.findability.score === "number" ? goals.findability.score
+    : goals.findabilityBrief && typeof goals.findabilityBrief.score === "number" ? goals.findabilityBrief.score
+    : null;
 
   return (
     <div className="space-y-6">
@@ -470,27 +478,32 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
           )}
         </section>
 
-        {/* 5 — competitors at a glance */}
-        <section className="card lg:col-span-2">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🧭</span>Competitors</h2>
-            <Link href="/competitors" className="text-xs font-medium text-brand hover:underline">manage →</Link>
-          </div>
-          <ul className="mt-3 space-y-1">
-            {leaderboard.map((b, i) => (
-              <li key={i} className={`flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-sm ${b.isTarget ? "bg-brand-soft/40" : ""}`}>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{b.isTarget && <span className="mr-1 text-xs font-semibold text-brand">You ·</span>}{b.name}</span>
-                  {b.sources.length > 1 && (
-                    <span className="text-[10px] text-ink-faint">{b.sources.map((s) => `${SRC_ABBR[s.source] ?? s.source} ${s.rating}★`).join(" · ")}</span>
-                  )}
-                </span>
-                <span className="shrink-0 font-medium">{b.rating != null ? `${b.rating}★` : "—"}</span>
-                <span className="w-12 shrink-0 text-right tabular-nums text-ink-faint">{b.price != null ? `$${Number(b.price).toFixed(0)}` : "—"}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        {/* 5 — right column: where you rank (dot-plot) + findability */}
+        <div className="space-y-6 lg:col-span-2">
+          <section className="card">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🧭</span>Where you rank</h2>
+              <Link href="/competitors" className="text-xs font-medium text-brand hover:underline">competitors →</Link>
+            </div>
+            {ratingPeers.length >= 2 ? (
+              <div className="mt-3">
+                <RatingRankChart peers={ratingPeers} marketAvg={marketAvgRating} prices={priceRecord} title={null} maxRows={7} />
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-ink-faint">Ratings across your market will show here once collected.</p>
+            )}
+          </section>
+
+          {fbScore != null && (
+            <section className="card">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-semibold"><span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-soft text-brand">🔎</span>Findability</h2>
+                <Link href="/findability" className="text-xs font-medium text-brand hover:underline">details →</Link>
+              </div>
+              <div className="mt-3"><FindabilityMeter score={fbScore} sub="Where customers find you in Google search" /></div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

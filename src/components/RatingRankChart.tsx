@@ -1,13 +1,27 @@
-import type { YouReputation } from "@/lib/you";
+type Peer = { name: string; rating: number; isTarget: boolean };
 
 /**
  * Where you rank on rating — a compact ranked dot-plot. One row per business
- * (best-first), a dot on a shared, zoomed rating axis, your row highlighted, and
- * the market average drawn as a vertical line across every row. Turns "#5 of 6"
+ * (best-first), a dot on a shared, data-zoomed rating axis, your row highlighted,
+ * and the market average drawn as a vertical line across every row. Turns "#5 of 6"
  * from a sentence into something you can see. Pure/server-rendered; direct labels
  * (name + value on every row) so identity never rests on color alone.
+ *
+ * `prices` (by business name) adds a right-hand price column — used on the Week
+ * home where this replaces the rating+price leaderboard. `title={null}` drops the
+ * header/divider so it can sit inside a card that already has its own heading.
+ * Rank numbers are the TRUE position in the full field, so truncating to `maxRows`
+ * (always keeping your row) never mislabels the ranking.
  */
-export function RatingRankChart({ peers, marketAvg }: { peers: YouReputation["peers"]; marketAvg: number | null }) {
+export function RatingRankChart({
+  peers, marketAvg, prices, title = "How you rank on rating", maxRows = 12,
+}: {
+  peers: Peer[];
+  marketAvg: number | null;
+  prices?: Record<string, number | null>;
+  title?: string | null;
+  maxRows?: number;
+}) {
   const rated = peers.filter((p) => typeof p.rating === "number");
   if (rated.length < 2) return null; // nothing to rank against
 
@@ -17,34 +31,46 @@ export function RatingRankChart({ peers, marketAvg }: { peers: YouReputation["pe
   const hi = 5;
   const span = hi - lo || 1;
   const pct = (v: number) => `${Math.max(0, Math.min(100, ((v - lo) / span) * 100))}%`;
-  const rows = [...rated].sort((a, b) => b.rating - a.rating);
+
+  // rank from the FULL sorted field, then truncate (always keeping the target)
+  const ranked = [...rated].sort((a, b) => b.rating - a.rating).map((p, i) => ({ ...p, rank: i + 1 }));
+  let rows = ranked;
+  if (ranked.length > maxRows) {
+    rows = ranked.slice(0, maxRows);
+    if (!rows.some((p) => p.isTarget)) {
+      const you = ranked.find((p) => p.isTarget);
+      if (you) rows[maxRows - 1] = you;
+    }
+  }
+  const showPrice = !!prices;
+  const bare = title === null;
 
   return (
-    <div className="mt-4 border-t border-line/60 pt-4">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">How you rank on rating</p>
-        {marketAvg != null && (
-          <p className="flex items-center gap-1.5 text-[11px] text-ink-faint">
-            <span className="inline-block h-3 w-0 border-l border-dashed border-ink-soft" aria-hidden /> market avg {marketAvg.toFixed(1)}★
-          </p>
-        )}
-      </div>
+    <div className={bare ? "" : "mt-4 border-t border-line/60 pt-4"}>
+      {!bare && (
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">{title}</p>
+          {marketAvg != null && (
+            <p className="flex items-center gap-1.5 text-[11px] text-ink-faint">
+              <span className="inline-block h-3 w-0 border-l border-dashed border-ink-soft" aria-hidden /> market avg {marketAvg.toFixed(1)}★
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="space-y-1.5">
         {rows.map((p, i) => (
           <div key={i} className="flex items-center gap-2.5">
             <span className={`w-5 shrink-0 text-right text-[11px] font-semibold tabular-nums ${p.isTarget ? "text-brand-deep" : "text-ink-faint"}`}>
-              {i + 1}
+              {p.rank}
             </span>
-            <span className={`w-28 shrink-0 truncate text-xs sm:w-40 ${p.isTarget ? "font-bold text-brand-deep" : "text-ink-soft"}`} title={p.name}>
+            <span className={`w-24 shrink-0 truncate text-xs sm:w-36 ${p.isTarget ? "font-bold text-brand-deep" : "text-ink-soft"}`} title={p.name}>
               {p.name}{p.isTarget ? " (you)" : ""}
             </span>
             <div className="relative h-5 flex-1 rounded-full bg-surface-sunken">
-              {/* market average line */}
               {marketAvg != null && (
                 <span className="absolute top-0 h-5 w-px border-l border-dashed border-ink-soft/70" style={{ left: pct(marketAvg) }} aria-hidden />
               )}
-              {/* the business's rating dot */}
               <span
                 className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${p.isTarget ? "h-3.5 w-3.5 bg-brand-gradient shadow-brand ring-2 ring-white" : "h-2.5 w-2.5 bg-ink-faint/60"}`}
                 style={{ left: pct(p.rating) }}
@@ -54,9 +80,19 @@ export function RatingRankChart({ peers, marketAvg }: { peers: YouReputation["pe
             <span className={`w-8 shrink-0 text-right text-xs tabular-nums ${p.isTarget ? "font-bold text-brand-deep" : "font-medium text-ink-soft"}`}>
               {p.rating.toFixed(1)}
             </span>
+            {showPrice && (
+              <span className="w-10 shrink-0 text-right text-xs tabular-nums text-ink-faint">
+                {prices![p.name] != null ? `$${Number(prices![p.name]).toFixed(0)}` : "—"}
+              </span>
+            )}
           </div>
         ))}
       </div>
+      {bare && marketAvg != null && (
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-ink-faint">
+          <span className="inline-block h-3 w-0 border-l border-dashed border-ink-soft" aria-hidden /> market avg {marketAvg.toFixed(1)}★{showPrice ? " · right column = avg item price" : ""}
+        </p>
+      )}
     </div>
   );
 }
