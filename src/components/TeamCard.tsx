@@ -10,13 +10,14 @@ import { useEffect, useState } from "react";
  */
 
 type Role = "owner" | "member";
-interface Member { userId: string; email: string | null; name: string | null; role: string; isSelf: boolean }
-
-const ROLE_LABEL: Record<string, string> = { owner: "Owner", member: "Member" };
+type Method = "email" | "phone";
+interface Member { userId: string; email: string | null; phone: string | null; name: string | null; role: string; isSelf: boolean }
 
 export function TeamCard() {
   const [members, setMembers] = useState<Member[] | null>(null);
+  const [method, setMethod] = useState<Method>("email");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [busy, setBusy] = useState(false);
@@ -47,9 +48,16 @@ export function TeamCard() {
   }
 
   async function add() {
-    if (busy || !email.trim()) return;
-    const ok = await post({ action: "add", email, name: name.trim() || undefined, role }, "Added — if they're new, we've emailed them a sign-in link.");
-    if (ok) { setEmail(""); setName(""); setRole("member"); }
+    if (busy) return;
+    if (method === "email") {
+      if (!email.trim()) return;
+      const ok = await post({ action: "add", method: "email", email, name: name.trim() || undefined, role }, "Added — if they're new, we've emailed them a sign-in link.");
+      if (ok) { setEmail(""); setName(""); setRole("member"); }
+    } else {
+      if (!phone.trim()) return;
+      const ok = await post({ action: "add", method: "phone", phone, name: name.trim() || undefined, role }, "Added — ask them to sign in with this number (Phone tab); they'll get an SMS code.");
+      if (ok) { setPhone(""); setName(""); setRole("member"); }
+    }
   }
 
   return (
@@ -72,11 +80,11 @@ export function TeamCard() {
               <div key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-ink">{m.name || m.email || "Pending invite"}</span>
+                    <span className="truncate text-sm font-medium text-ink">{m.name || m.email || m.phone || "Pending invite"}</span>
                     {m.isSelf && <span className="chip bg-brand-soft text-brand">You</span>}
                     {lastOwner && <span className="chip bg-surface-sunken text-ink-faint">Last owner</span>}
                   </div>
-                  {m.name && m.email && <div className="truncate text-xs text-ink-faint">{m.email}</div>}
+                  {(m.name && (m.email || m.phone)) && <div className="truncate text-xs text-ink-faint">{m.email || m.phone}</div>}
                 </div>
                 <select
                   value={m.role === "owner" ? "owner" : "member"}
@@ -102,14 +110,37 @@ export function TeamCard() {
 
       {/* add member */}
       <div className="mt-4 rounded-2xl bg-surface-sunken/60 p-3">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">Add a teammate</p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Add a teammate</p>
+          {/* how they'll sign in */}
+          <div className="flex rounded-lg bg-surface p-0.5 text-xs font-medium">
+            {(["email", "phone"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMethod(m); setMsg(null); }}
+                className={`rounded-md px-2.5 py-1 capitalize transition-colors ${method === m ? "bg-brand-gradient text-white shadow-brand" : "text-ink-soft hover:text-ink"}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && add()}
-            placeholder="teammate@email.com"
-            className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-          />
+          {method === "email" ? (
+            <input
+              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder="teammate@email.com"
+              className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+            />
+          ) : (
+            <input
+              type="tel" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder="+1 512 555 0142"
+              className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2 text-sm tabular-nums outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+            />
+          )}
           <input
             value={name} onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
@@ -123,10 +154,15 @@ export function TeamCard() {
             <option value="member">Member</option>
             <option value="owner">Owner</option>
           </select>
-          <button onClick={add} disabled={busy || !email.trim()} className="btn btn-primary px-5 py-2 text-sm disabled:opacity-50">
+          <button onClick={add} disabled={busy || (method === "email" ? !email.trim() : !phone.trim())} className="btn btn-primary px-5 py-2 text-sm disabled:opacity-50">
             {busy ? "…" : "Add"}
           </button>
         </div>
+        <p className="mt-2 text-[11px] text-ink-faint">
+          {method === "email"
+            ? "They sign in with this email — via a link, a password, or Google (same address)."
+            : "They sign in on the Phone tab with an SMS code. Include the country code (e.g. +1). Needs SMS sign-in enabled."}
+        </p>
         {msg && <p className={`mt-2 text-sm ${msg.ok ? "text-trust-direct" : "text-coral-dark"}`}>{msg.text}</p>}
       </div>
     </section>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { getUser, isSuperAdmin } from "@/lib/auth";
-import { listTeam, addTeamMember, changeRole, removeMember, type TeamRole } from "@/lib/team";
+import { listTeam, addTeamMember, addTeamMemberByPhone, changeRole, removeMember, type TeamRole } from "@/lib/team";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,13 @@ export async function POST(req: Request) {
   if (action === "add") {
     const role = asRole(body.role);
     if (!role) return badRequest("role must be owner or member");
+    const name = body.name ? String(body.name) : undefined;
+    if (body.method === "phone") {
+      const res = await addTeamMemberByPhone(g.orgId, String(body.phone ?? ""), role, name);
+      return NextResponse.json(res, { status: res.ok ? 200 : 400 });
+    }
     const origin = new URL(req.url).origin;
-    const res = await addTeamMember(g.orgId, String(body.email ?? ""), role, origin, body.name ? String(body.name) : undefined);
+    const res = await addTeamMember(g.orgId, String(body.email ?? ""), role, origin, name);
     return NextResponse.json(res, { status: res.ok ? 200 : 400 });
   }
 

@@ -16,21 +16,28 @@ export type TeamRole = "owner" | "member";
 export interface TeamMember {
   userId: string;
   email: string | null;
+  phone: string | null;
   name: string | null;
   role: string;
   isSelf: boolean;
 }
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+/** digits only, country code included, no leading + (how Supabase stores phone). */
+const normPhone = (s: string) => s.replace(/[^\d+]/g, "").replace(/^\+/, "");
 
-/** Auth users are keyed by id; resolve email/name from the admin API. */
-async function resolveUser(svc: ReturnType<typeof createServiceClient>, userId: string): Promise<{ email: string | null; name: string | null }> {
+/** Auth users are keyed by id; resolve email/phone/name from the admin API. */
+async function resolveUser(svc: ReturnType<typeof createServiceClient>, userId: string): Promise<{ email: string | null; phone: string | null; name: string | null }> {
   try {
     const { data } = await (svc as any).auth.admin.getUserById(userId);
     const u = data?.user;
-    return { email: u?.email ?? null, name: (u?.user_metadata?.full_name as string) ?? null };
+    return {
+      email: u?.email ?? null,
+      phone: u?.phone ? `+${u.phone}` : null,
+      name: (u?.user_metadata?.full_name as string) ?? null,
+    };
   } catch {
-    return { email: null, name: null };
+    return { email: null, phone: null, name: null };
   }
 }
 
@@ -50,6 +57,7 @@ export async function listTeam(orgId: string): Promise<TeamMember[]> {
     out.push({
       userId: r.user_id as string,
       email: u.email,
+      phone: u.phone,
       name: u.name,
       role: r.role as string,
       isSelf: me?.id === r.user_id,
@@ -78,6 +86,58 @@ async function findUserByEmail(svc: ReturnType<typeof createServiceClient>, emai
     }
   }
   return null;
+}
+
+/** Find an existing auth user by phone (digits, no +). Pages like findUserByEmail. */
+async function findUserByPhone(svc: ReturnType<typeof createServiceClient>, digits: string): Promise<string | null> {
+  for (let page = 1; page <= 10; page++) {
+    try {
+      const { data } = await (svc as any).auth.admin.listUsers({ page, perPage: 200 });
+      const hit = (data?.users ?? []).find((u: { phone?: string }) => normPhone(u.phone ?? "") === digits);
+      if (hit) return hit.id as string;
+      if (!data?.users || data.users.length < 200) break;
+    } catch {
+      break;
+    }
+  }
+  return null;
+}
+
+/**
+ * Add (or update) a team member by PHONE. There's no SMS "invite link" — we
+ * find-or-create the phone account and add the membership; the teammate then
+ * signs in via the phone / SMS-code tab and lands in this org. Needs a Supabase
+ * SMS provider configured for brand-new numbers.
+ */
+export async function addTeamMemberByPhone(
+  orgId: string, phone: string, role: TeamRole, name?: string,
+): Promise<{ ok: true; created: boolean } | { ok: false; error: string }> {
+  const digits = normPhone(phone);
+  if (!/^\d{8,15}$/.test(digits)) return { ok: false, error: "Enter a valid phone number with country code, e.g. +1 512 555 0142." };
+  const svc = createServiceClient();
+
+  let userId = await findUserByPhone(svc, digits);
+  let created = false;
+  if (!userId) {
+    try {
+      const { data, error } = await (svc as any).auth.admin.createUser({
+        phone: `+${digits}`,
+        phone_confirm: true,
+        user_metadata: name ? { full_name: name } : {},
+      });
+      if (error || !data?.user) return { ok: false, error: "Couldn't add that number — check it's valid and SMS sign-in is enabled." };
+      userId = data.user.id as string;
+      created = true;
+    } catch {
+      return { ok: false, error: "Couldn't add that number — check it's valid and SMS sign-in is enabled." };
+    }
+  }
+
+  const { error } = await svc
+    .from("org_membership")
+    .upsert({ organization_id: orgId, user_id: userId, role }, { onConflict: "organization_id,user_id" });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, created };
 }
 
 /** Add (or update) a team member by email. `origin` is the invite link's base. */
