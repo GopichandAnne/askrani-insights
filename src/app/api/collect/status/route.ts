@@ -19,5 +19,9 @@ export async function GET(req: Request) {
   const ephemeral = !!(data?.goals as any)?.ephemeral;
   const targetId = data?.target_business_id ?? null;
   const withTarget = jobs.map((j: any) => ({ ...j, isTarget: j.business_id === targetId }));
-  return NextResponse.json({ jobs: withTarget, ephemeral });
+  // the flyer/image read runs as its own batched stage AFTER collection — surface
+  // its progress so the "scraping" isn't invisible while it drains.
+  const fj = (data?.goals as any)?.flyerJob;
+  const flyers = fj && fj.status === "running" ? { processed: Number(fj.cursor ?? 0), total: Number(fj.total ?? 0) } : null;
+  return NextResponse.json({ jobs: withTarget, ephemeral, flyers });
 }

@@ -17,6 +17,7 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const pathname = usePathname();
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [ephemeral, setEphemeral] = useState(false);
+  const [flyers, setFlyers] = useState<{ processed: number; total: number } | null>(null);
   const [visible, setVisible] = useState(false);
   const wasActive = useRef(false);
 
@@ -34,7 +35,9 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
         const d = await r.json();
         const js = (d.jobs ?? []) as Job[];
         setEphemeral(!!d.ephemeral);
-        const active = js.some((j) => j.status === "pending" || j.status === "running");
+        setFlyers(d.flyers ?? null);
+        // stay live through BOTH stages: per-business collection AND the flyer/image read
+        const active = js.some((j) => j.status === "pending" || j.status === "running") || !!d.flyers;
         if (active) { wasActive.current = true; setJobs(js); setVisible(true); }
         else if (wasActive.current) {
           // just finished → show the "done" flourish briefly, then hide
@@ -68,6 +71,12 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
         <RaniRadar businesses={businesses} done={done} total={total} allDone={done >= total} />
       ) : (
         <RaniCollecting businesses={businesses} done={done} total={total} allDone={done >= total} />
+      )}
+      {flyers && (
+        <div className="mt-2 flex items-center gap-2 border-t border-line/50 pt-2 text-xs text-ink-soft">
+          <span className="rani-dots" aria-hidden><span /><span /><span /></span>
+          Reading flyers &amp; images{flyers.total ? <> · {flyers.processed}/{flyers.total} pages</> : "…"}
+        </div>
       )}
     </section>
   );

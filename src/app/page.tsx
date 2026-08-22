@@ -10,6 +10,7 @@ import { buildWorkspaceReport } from "@/lib/report";
 import { Landing } from "@/components/Landing";
 import { DraftButton } from "@/components/DraftButton";
 import { DigestFeed } from "@/components/DigestFeed";
+import { RefreshButton } from "@/components/RefreshButton";
 import { RatingRankChart } from "@/components/RatingRankChart";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { buildDigest } from "@/lib/digest";
@@ -358,7 +359,8 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
             <div className="text-xs text-ink-faint">Current plan</div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <RefreshButton workspaceId={workspace.id} />
           <Link href="/explore" className="btn btn-secondary px-3 py-1.5 text-sm">🔎 Watch a market</Link>
           <Link href="/onboarding" className="btn btn-secondary px-3 py-1.5 text-sm">+ Add business</Link>
           <Link href="/billing" className="btn btn-primary px-3 py-1.5 text-sm">Buy credits</Link>
