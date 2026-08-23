@@ -64,9 +64,11 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
 
   // rating (0–5)
   for (const x of report.reputation) if (x.rating != null) get(x.name, x.isTarget).rating = x.rating;
-  // findability = share of local top-3
+  // findability = share of local top-3. NB: the findability report labels the target
+  // as "You" (not its canonical name), so route the isYou row onto the target itself
+  // — otherwise it spawns a phantom business and the target's findability goes missing.
   for (const s of (goals.findability?.share ?? []) as { name: string; isYou: boolean; topThree: number; total: number }[]) {
-    if (s.total > 0) get(s.name, s.isYou).findPct = (s.topThree / s.total) * 100;
+    if (s.total > 0) get(s.isYou ? ws.name : s.name, s.isYou).findPct = (s.topThree / s.total) * 100;
   }
   // price: report offers first, then flyer fallback (your own + rivals')
   for (const p of report.pricing) if (p.avgPrice != null) get(p.name, p.isTarget).avgPrice = p.avgPrice;
