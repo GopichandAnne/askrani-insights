@@ -15,6 +15,7 @@ export default async function ScorecardPage() {
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You vs Your Market" />;
   if (await collectionActive(state.workspace.id)) return <CollectingScreen workspaceId={state.workspace.id} title="You vs Your Market" />;
   const sc = await buildScorecard(state.workspace);
+  const ephemeral = !!(state.workspace.goals as { ephemeral?: boolean } | null)?.ephemeral;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -26,6 +27,12 @@ export default async function ScorecardPage() {
         </div>
         {!sc.empty && <ShareReadButton />}
       </header>
+
+      {ephemeral && !sc.empty && (
+        <div className="rounded-2xl border border-brand/25 bg-brand-soft/40 p-3.5 text-sm">
+          <b className="text-ink">One-time read for {state.workspace.name}.</b> <span className="text-ink-soft">Hit <b>🔗 Share this read</b> above to get a link you can send them — they claim it to start monitoring.</span>
+        </div>
+      )}
 
       {sc.empty ? (
         <div className="card border-dashed">

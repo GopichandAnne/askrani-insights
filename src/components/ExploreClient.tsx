@@ -357,10 +357,11 @@ function DeepReadModal({
       if (!r.ok) { setErr(d.error ?? "Couldn't start the deep read"); setPhase("quoted"); return; }
       if (d.needsCredits) { setErr("Not enough credits."); setPhase("quoted"); return; }
       track("deep_read_confirmed", { scope, quote: quote.quote });
-      // make the fresh snapshot the active workspace, then open its report (it
-      // fills in as collection runs).
+      // make the fresh snapshot the active workspace. A single-business deep read
+      // (e.g. a prospect you're about to send a read to) lands on the scorecard,
+      // where you can share it; an area read opens the market home.
       await fetch("/api/workspace/active", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: quote.workspaceId }) });
-      window.location.href = "/";
+      window.location.href = scope === "single" ? "/scorecard" : "/";
     } catch (e) { setErr((e as Error).message); setPhase("quoted"); }
   }
 
