@@ -52,6 +52,58 @@ function weight(pos: number): number {
   return 0.45;
 }
 
+// generic tokens that must NOT be used to detect a business in an answer
+const GENERIC = new Set(["foods", "market", "bazaar", "grocery", "store", "supermarket", "international", "indian", "farmers", "cedar", "world", "austin", "halal", "durga", "grocers"]);
+
+/** First character index a business is named at in an answer (−1 if absent). Tries
+ *  the first two words as a phrase, then distinctive ≥5-char tokens. */
+function bizIndex(textLower: string, name: string): number {
+  const full = name.toLowerCase();
+  const phrase = full.split(/\s+/).slice(0, 2).join(" ");
+  if (phrase.length >= 5) { const i = textLower.indexOf(phrase); if (i >= 0) return i; }
+  for (const t of full.split(/\W+/)) if (t.length >= 5 && !GENERIC.has(t)) { const j = textLower.indexOf(t); if (j >= 0) return j; }
+  return -1;
+}
+
+/**
+ * Ask ONE answer engine the customer's question and return its answer text.
+ * Search-grounded PERPLEXITY when PERPLEXITY_API_KEY is set (this is what makes the
+ * scores real — it reflects live local results, like a customer sees); otherwise the
+ * knowledge-only default LLM (Claude), which won't know small local shops.
+ * Add ChatGPT-search / Google-AI-Overview here the same way for multi-engine reads.
+ */
+async function askEngine(q: string): Promise<{ engine: string; text: string }> {
+  const pk = process.env.PERPLEXITY_API_KEY;
+  if (pk) {
+    try {
+      const r = await fetch("https://api.perplexity.ai/chat/completions", {
+        method: "POST",
+        headers: { authorization: `Bearer ${pk}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: process.env.PERPLEXITY_MODEL || "sonar",
+          max_tokens: 500,
+          messages: [
+            { role: "system", content: "You are a local-recommendations assistant. For the user's search, recommend the specific real local businesses you'd suggest, best first, naming each one explicitly." },
+            { role: "user", content: q },
+          ],
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (r.ok) { const d = await r.json(); return { engine: "Perplexity", text: String(d?.choices?.[0]?.message?.content ?? "") }; }
+    } catch { /* fall through to the knowledge-only engine */ }
+  }
+  // knowledge-only fallback: structured name list → joined text to scan
+  try {
+    const { data } = await getLlm().callStructured<{ businesses: { name: string }[] }>({
+      system: SYSTEM, text: `Customer search: "${q}". List the specific local businesses you'd recommend, best first.`,
+      schema: SCHEMA, tier: "extract", maxTokens: 400,
+    });
+    return { engine: getLlm().provider === "anthropic" ? "Claude" : getLlm().provider, text: (Array.isArray(data.businesses) ? data.businesses : []).map((b) => String(b.name ?? "")).join("\n") };
+  } catch {
+    return { engine: getLlm().provider === "anthropic" ? "Claude" : getLlm().provider, text: "" };
+  }
+}
+
 /** Run the AI-findability scan and persist goals.aiFindability. */
 export async function refreshAiFindability(ws: WorkspaceRow, opts: { maxQueries?: number } = {}): Promise<AiFindabilityReport> {
   const at = new Date().toISOString();
@@ -75,50 +127,29 @@ export async function refreshAiFindability(ws: WorkspaceRow, opts: { maxQueries?
   known.set(normName(ws.name), ws.name);
   for (const e of edges ?? []) { const n = (e.competitor as any)?.canonical_name; if (n) known.set(normName(n), n); }
 
-  // ask each query
+  // ask each query, scan each answer for the businesses we track (order = prominence)
   const contrib = new Map<string, number[]>(); // normName → per-query weights
-  const otherMentions = new Map<string, { name: string; mentions: number }>();
+  let engineUsed = "";
   for (const q of queries) {
-    let names: string[] = [];
-    try {
-      const { data } = await getLlm().callStructured<{ businesses: { name: string }[] }>({
-        system: SYSTEM,
-        text: `Customer search: "${q}". List the specific local businesses you'd recommend, best first.`,
-        schema: SCHEMA, tier: "extract", maxTokens: 500,
-      });
-      names = (Array.isArray(data.businesses) ? data.businesses : []).map((b) => String(b.name ?? "").trim()).filter(Boolean);
-    } catch { /* skip this query */ }
-
+    const { engine, text } = await askEngine(q);
+    if (text) engineUsed = engine;
+    const lower = text.toLowerCase();
+    const found = [...known].map(([k, name]) => ({ k, idx: bizIndex(lower, name) })).filter((f) => f.idx >= 0).sort((a, b) => a.idx - b.idx);
     const seen = new Set<string>();
-    names.forEach((raw, pos) => {
-      const key = normName(raw);
-      // match to a known business (exact, or contained either way for name variants)
-      let matched: string | null = null;
-      for (const k of known.keys()) { if (k === key || k.includes(key) || key.includes(k)) { matched = k; break; } }
-      if (matched) {
-        if (!seen.has(matched)) { (contrib.get(matched) ?? contrib.set(matched, []).get(matched)!).push(weight(pos)); seen.add(matched); }
-      } else {
-        // a business the AI recommends that isn't in the tracked set
-        const e = otherMentions.get(key) ?? { name: raw, mentions: 0 };
-        e.mentions++; otherMentions.set(key, e);
-      }
-    });
-    // businesses not mentioned this query score 0 for it
+    found.forEach((f, pos) => { (contrib.get(f.k) ?? contrib.set(f.k, []).get(f.k)!).push(weight(pos)); seen.add(f.k); });
     for (const k of known.keys()) if (!seen.has(k)) (contrib.get(k) ?? contrib.set(k, []).get(k)!).push(0);
   }
 
   const byBiz: Record<string, AiBiz> = {};
   for (const [k, name] of known) {
     const arr = contrib.get(k) ?? [];
-    const score = arr.length ? round((arr.reduce((a, b) => a + b, 0) / arr.length) * 100) : 0;
-    byBiz[k] = { name, score };
+    byBiz[k] = { name, score: arr.length ? round((arr.reduce((a, b) => a + b, 0) / arr.length) * 100) : 0 };
   }
   const targetScore = byBiz[normName(ws.name)]?.score ?? 0;
 
-  const competitorsRecommended = [
-    ...[...known].filter(([k]) => k !== normName(ws.name)).map(([k, name]) => ({ name, mentions: (contrib.get(k) ?? []).filter((w) => w > 0).length })).filter((c) => c.mentions > 0),
-    ...[...otherMentions.values()],
-  ].sort((a, b) => b.mentions - a.mentions).slice(0, 6);
+  const competitorsRecommended = [...known].filter(([k]) => k !== normName(ws.name))
+    .map(([k, name]) => ({ name, mentions: (contrib.get(k) ?? []).filter((w) => w > 0).length }))
+    .filter((c) => c.mentions > 0).sort((a, b) => b.mentions - a.mentions).slice(0, 6);
 
   // No signal = the engine named no local businesses at all (a knowledge-only model
   // that can't browse won't know small local shops). Mark empty so the scorecard
@@ -127,7 +158,7 @@ export async function refreshAiFindability(ws: WorkspaceRow, opts: { maxQueries?
   const anyHit = Object.values(byBiz).some((b) => b.score > 0) || competitorsRecommended.length > 0;
   const report: AiFindabilityReport = {
     score: targetScore, byBiz, competitorsRecommended,
-    engines: [getLlm().provider === "anthropic" ? "Claude" : getLlm().provider],
+    engines: [engineUsed || (getLlm().provider === "anthropic" ? "Claude" : getLlm().provider)],
     queries: queries.length, at,
     ...(anyHit ? {} : { empty: true }),
   };
