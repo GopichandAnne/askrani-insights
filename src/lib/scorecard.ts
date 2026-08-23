@@ -42,11 +42,14 @@ const METRICS: { key: MetricKey; label: string; color: MetricScore["color"] }[] 
 
 interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null; ai?: number | null }
 
-export async function buildScorecard(ws: WorkspaceRow): Promise<Scorecard> {
-  const supabase = await createClient();
+// `db` override lets this run outside a request (worker / snapshot script) with a
+// service-role client — `any` because SSR and service clients have distinct generic
+// types but identical query APIs (mirrors buildWorkspaceReport).
+export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorecard> {
+  const supabase = db ?? (await createClient());
   const [{ data: wRow }, report] = await Promise.all([
     supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle(),
-    buildWorkspaceReport(ws),
+    buildWorkspaceReport(ws, 30, db),
   ]);
   const goals = (wRow?.goals ?? {}) as Record<string, any>;
 
