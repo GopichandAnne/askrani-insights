@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 45;
 export const metadata = { title: "You vs Your Market — Ask Rani Insights" };
 
-const COLOR: Record<MetricScore["color"], string> = { amber: "#d9930a", green: "#12a06f", violet: "#6366f1", teal: "#0d9488" };
+const COLOR: Record<MetricScore["color"], string> = { amber: "#d9930a", green: "#12a06f", violet: "#6366f1", coral: "#e2560b", teal: "#0d9488" };
 
 function Bullet({ m }: { m: MetricScore }) {
   const { you, avg } = m;
@@ -60,6 +60,7 @@ function Heatmap({ businesses, metrics }: { businesses: BizScore[]; metrics: Met
 }
 
 const MOVE: Record<MetricScore["key"], (avg: number) => { title: string; why: string; context: string }> = {
+  ai: (a) => ({ title: "Get recommended by AI", why: `When customers ask ChatGPT or Perplexity, rivals get named and you don't (market avg ${a}) — fix your Google profile + get fresh reviews; AI pulls from both.`, context: "AI-search visibility gap vs market" }),
   findability: (a) => ({ title: "Climb Google search", why: `You're behind the market (avg ${a}) on findability — post weekly and add the categories the leaders rank on.`, context: "Findability gap vs market" }),
   social: (a) => ({ title: "Show up on social", why: `Rivals average ${a} on social reach and you're below — post 2–3× a week and lead with your wins.`, context: "Social reach gap vs market" }),
   rating: (a) => ({ title: "Lift your rating", why: `Your rating trails the market (avg ${a}) — ask your happiest regulars for a Google review this week.`, context: "Rating gap vs market" }),

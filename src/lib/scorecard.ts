@@ -17,9 +17,9 @@ const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const priceNum = (s?: string) => { const m = String(s ?? "").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
 const round = (n: number) => Math.round(n);
 
-export type MetricKey = "rating" | "price" | "social" | "findability";
+export type MetricKey = "rating" | "price" | "social" | "ai" | "findability";
 export interface MetricScore {
-  key: MetricKey; label: string; color: "amber" | "green" | "violet" | "teal";
+  key: MetricKey; label: string; color: "amber" | "green" | "violet" | "coral" | "teal";
   you: number | null; avg: number | null; best: number | null; bestName: string | null;
 }
 export interface BizScore { name: string; isYou: boolean; scores: Record<MetricKey, number | null>; composite: number | null }
@@ -36,10 +36,11 @@ const METRICS: { key: MetricKey; label: string; color: MetricScore["color"] }[] 
   { key: "rating", label: "Rating", color: "amber" },
   { key: "price", label: "Price", color: "green" },
   { key: "social", label: "Social reach", color: "violet" },
+  { key: "ai", label: "AI search", color: "coral" },
   { key: "findability", label: "Findability", color: "teal" },
 ];
 
-interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null }
+interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null; ai?: number | null }
 
 export async function buildScorecard(ws: WorkspaceRow): Promise<Scorecard> {
   const supabase = await createClient();
@@ -85,6 +86,10 @@ export async function buildScorecard(ws: WorkspaceRow): Promise<Scorecard> {
     let total = 0; for (const v of latest.values()) total += v.f;
     if (total > 0) get(name, false).followers = total;
   }
+  // AI search visibility (0–100 per business, from the ai-findability engine) — only
+  // when the scan produced a real signal (needs a search-grounded engine).
+  const aiBy = (goals.aiFindability && !goals.aiFindability.empty ? goals.aiFindability.byBiz ?? {} : {}) as Record<string, { name: string; score: number }>;
+  for (const k of Object.keys(aiBy)) get(aiBy[k].name, false).ai = aiBy[k].score;
   get(ws.name, true); // ensure target present
 
   const all = [...byKey.values()];
@@ -100,6 +105,7 @@ export async function buildScorecard(ws: WorkspaceRow): Promise<Scorecard> {
       rating: r.rating != null ? round((r.rating / 5) * 100) : null,
       price: priceScore(r.avgPrice),
       social: socialScore(r.followers),
+      ai: r.ai != null ? r.ai : null,
       findability: r.findPct != null ? round(r.findPct) : null,
     };
     const vals = Object.values(scores).filter((n): n is number => n != null);
