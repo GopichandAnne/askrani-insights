@@ -69,6 +69,17 @@ function VerticalTag({ v, subtype }: { v?: Vertical; subtype?: string[] }) {
   );
 }
 
+// The owner's own online profiles, confirmed before the scan runs. `food` rows
+// (delivery apps) only show for restaurants/grocers.
+const PROFILE_META: { key: string; label: string; icon: string; placeholder: string; food?: boolean }[] = [
+  { key: "website", label: "Website", icon: "🌐", placeholder: "yourbusiness.com" },
+  { key: "instagram", label: "Instagram", icon: "📸", placeholder: "@yourhandle" },
+  { key: "facebook", label: "Facebook", icon: "👍", placeholder: "facebook.com/yourpage" },
+  { key: "tiktok", label: "TikTok", icon: "🎵", placeholder: "@yourhandle" },
+  { key: "doordash", label: "DoorDash", icon: "🛵", placeholder: "doordash.com/store/…", food: true },
+  { key: "ubereats", label: "Uber Eats", icon: "🍔", placeholder: "ubereats.com/store/…", food: true },
+];
+
 const STEPS = ["Find your business", "Review competitors", "Collect"];
 function StepBar({ current }: { current: number }) {
   return (
@@ -329,6 +340,38 @@ function WorkspacePhase({
   const anyActive = businesses.some((b: any) => ["pending", "running"].includes(jobs[b.id]?.status));
   const allDone = started && !anyActive && done > 0;
 
+  // ── confirm-your-profiles: discover the owner's own accounts up front so they
+  //    can validate/correct them before the scan (no more silent wrong attaches).
+  const [profiles, setProfiles] = useState<Record<string, string>>({});
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [foodVertical, setFoodVertical] = useState(false);
+
+  useEffect(() => {
+    if (!workspaceId || started) return;
+    let cancel = false;
+    setProfilesLoading(true);
+    fetch("/api/workspace/handles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancel || !d?.profiles) return;
+        const p: Record<string, string> = {};
+        for (const k of Object.keys(d.profiles)) p[k] = d.profiles[k]?.url ?? "";
+        setProfiles(p);
+        setFoodVertical(!!d.foodVertical);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancel) setProfilesLoading(false); });
+    return () => { cancel = true; };
+  }, [workspaceId, started]);
+
+  // Persist the confirmed profiles, THEN kick off collection.
+  async function handleStart() {
+    try {
+      await fetch("/api/workspace/handles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId, mode: "save", profiles }) });
+    } catch { /* non-blocking — start anyway */ }
+    startCollection();
+  }
+
   // inline competitor add-by-search, shared between the map pins and the list
   const [addQuery, setAddQuery] = useState("");
   const [addResults, setAddResults] = useState<Candidate[]>([]);
@@ -402,6 +445,38 @@ function WorkspacePhase({
         </div>
         {started && target && <div className="relative mt-3"><StatusPill j={jobs[target.businessId]} /></div>}
       </div>
+
+      {/* confirm your own profiles (validate before we attach + scan) */}
+      {!started && (
+        <div className="card">
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Confirm your profiles</h2>
+            {profilesLoading && <span className="flex items-center gap-1.5 text-xs text-ink-faint"><RaniMark size={13} /> Finding your accounts…</span>}
+          </div>
+          <p className="mb-3 text-xs text-ink-faint">
+            These are the accounts we&apos;ll watch as <b>yours</b> — your prices, posts and reviews. We found what we could; please
+            check each one is really <i>your</i> business and fix anything that isn&apos;t before we start. Leave a box empty if you&apos;re not on that platform.
+          </p>
+          <div className="space-y-2">
+            {PROFILE_META.filter((m) => !m.food || foodVertical).map((m) => (
+              <div key={m.key} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 text-sm text-ink-soft"><span className="mr-1.5">{m.icon}</span>{m.label}</span>
+                <input
+                  value={profiles[m.key] ?? ""}
+                  onChange={(e) => setProfiles((p) => ({ ...p, [m.key]: e.target.value }))}
+                  placeholder={m.placeholder}
+                  className="field flex-1 py-2 text-sm"
+                />
+                {profiles[m.key] ? (
+                  <button onClick={() => setProfiles((p) => ({ ...p, [m.key]: "" }))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-trust-low/10 hover:text-trust-low" title="Clear">✕</button>
+                ) : (
+                  <span className="w-6 shrink-0" aria-hidden />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* competitors */}
       <div className="card">
@@ -480,8 +555,8 @@ function WorkspacePhase({
                 We&apos;ll gather websites, listings, offers, reviews and social for you and the {competitors.length} competitor{competitors.length === 1 ? "" : "s"} above.
               </p>
             </div>
-            <button onClick={startCollection} disabled={starting} className="btn btn-primary px-7 py-3 text-base disabled:opacity-60">
-              {starting ? "Starting…" : "Start collecting"} <RaniMark size={18} />
+            <button onClick={handleStart} disabled={starting || profilesLoading} className="btn btn-primary px-7 py-3 text-base disabled:opacity-60">
+              {starting ? "Starting…" : profilesLoading ? "Finding your profiles…" : "Start collecting"} <RaniMark size={18} />
             </button>
           </div>
           {needsCredits && (

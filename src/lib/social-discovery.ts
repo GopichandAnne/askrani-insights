@@ -97,18 +97,22 @@ function candidatesFor(results: SearchResult[], host: SocialHost): { handle: str
   return out;
 }
 
-/** Heuristic fallback pick (no LLM): prefer a handle containing the city token,
- *  else one sharing a distinctive name token, else the first candidate. */
+/** Heuristic fallback pick (no LLM / LLM errored): require a REAL match — the
+ *  handle must contain a distinctive token of the business name. Prefer one that
+ *  also matches the city. NEVER returns "the first search result": attaching an
+ *  unrelated same-name/aggregator account is worse than attaching nothing (the
+ *  owner can add it in the confirm step). Returns undefined when nothing matches. */
 function pickHeuristic(cands: { handle: string }[], name: string, cityToken: string): string | undefined {
   if (!cands.length) return undefined;
   const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const toks = nameTokens(name);
+  const nameHits = cands.filter((c) => toks.some((t) => norm(c.handle).includes(t)));
+  if (!nameHits.length) return undefined; // no confident name match → attach nothing
   if (cityToken.length >= 3) {
-    const cityHit = cands.find((c) => norm(c.handle).includes(cityToken));
+    const cityHit = nameHits.find((c) => norm(c.handle).includes(cityToken));
     if (cityHit) return cityHit.handle;
   }
-  const toks = nameTokens(name);
-  const nameHit = cands.find((c) => toks.some((t) => norm(c.handle).includes(t)));
-  return (nameHit ?? cands[0]).handle;
+  return nameHits[0].handle;
 }
 
 const PICK_SCHEMA = {
@@ -131,7 +135,8 @@ async function pickIntelligent(
   cityToken: string,
 ): Promise<string | undefined> {
   if (!cands.length) return undefined;
-  if (cands.length === 1 && !isLlmConfigured()) return cands[0].handle;
+  // No lone-candidate shortcut: even a single result must pass the name check in
+  // pickHeuristic, so a same-name account for a different business isn't attached.
   if (!isLlmConfigured()) return pickHeuristic(cands, name, cityToken);
   try {
     const list = cands.map((c, i) => `${i + 1}. @${c.handle} — ${c.context || "(no description)"}`).join("\n");
@@ -232,9 +237,18 @@ const DURL_SCHEMA = {
   required: ["url", "confident"],
 };
 
+/** Fallback delivery pick: require a distinctive name token in the store URL/slug
+ *  (e.g. "/store/desi-circle-…"), never blindly the first result. */
+function pickDeliveryHeuristic(cands: { url: string; context: string }[], name: string): string | undefined {
+  const toks = nameTokens(name);
+  if (!toks.length) return undefined;
+  const hit = cands.find((c) => { const u = c.url.toLowerCase().replace(/[^a-z0-9]/g, ""); return toks.some((t) => u.includes(t)); });
+  return hit?.url;
+}
+
 async function pickDeliveryUrl(cands: { url: string; context: string }[], name: string, city: string, platform: string): Promise<string | undefined> {
   if (!cands.length) return undefined;
-  if (!isLlmConfigured()) return cands[0].url;
+  if (!isLlmConfigured()) return pickDeliveryHeuristic(cands, name);
   try {
     const list = cands.map((c, i) => `${i + 1}. ${c.url} — ${c.context || "(no description)"}`).join("\n");
     const { data } = await getLlm().callStructured<{ url: string; confident: boolean }>({
@@ -248,7 +262,7 @@ async function pickDeliveryUrl(cands: { url: string; context: string }[], name: 
     if (chosen && data.confident && cands.some((c) => c.url === chosen)) return chosen;
     return undefined;
   } catch {
-    return cands[0].url;
+    return pickDeliveryHeuristic(cands, name);
   }
 }
 

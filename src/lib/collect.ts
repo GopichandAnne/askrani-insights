@@ -79,6 +79,15 @@ async function insertOffers(
     observed_at: nowIso,
     valid_from: nowIso,
   }));
+  // Replace-per-source: each scan re-extracts the FULL offer set for this content
+  // item (a menu page, a flyer, a delivery store), so clear this content item's
+  // prior offers before inserting the fresh set. Appending instead — the old
+  // behaviour — duplicated the whole menu every scan (one restaurant reached
+  // 13k+ rows), which poisoned price analysis and bloated the table. Scoped to
+  // (business_id, content_item_id) so other sources' offers are untouched, and
+  // only runs when this extraction actually produced offers (a transient empty
+  // extraction keeps the last good set rather than wiping it).
+  await svc.from("offer").delete().eq("business_id", businessId).eq("content_item_id", contentItemId);
   const { error } = await svc.from("offer").insert(rows);
   if (error) throw new Error(`offers insert: ${error.message}`);
   return rows.length;
