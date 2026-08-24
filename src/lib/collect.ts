@@ -111,6 +111,18 @@ async function insertOffers(
   return rows.length;
 }
 
+/** Stable content_item ref from a URL: lowercased host, no trailing slash, no
+ *  fragment — so the same page never spawns a fresh content_item (orphaning the
+ *  old one's offers) just because a scan saw "site.com" vs "site.com/". */
+function normalizeRef(u: string): string {
+  try {
+    const x = new URL(u);
+    return `${x.protocol}//${x.host.toLowerCase()}${x.pathname.replace(/\/+$/, "")}${x.search}`;
+  } catch {
+    return u;
+  }
+}
+
 /** Upsert a content_item from any RawObservation (website page, review, post). */
 async function upsertObsContentItem(
   svc: Svc,
@@ -118,7 +130,7 @@ async function upsertObsContentItem(
   obs: RawObservation,
   nowIso: string,
 ): Promise<string> {
-  const externalRef = obs.externalRef ?? obs.sourceUrl ?? `${obs.platform}:${obs.contentHash}`;
+  const externalRef = obs.externalRef ?? (obs.sourceUrl ? normalizeRef(obs.sourceUrl) : `${obs.platform}:${obs.contentHash}`);
   const { data, error } = await svc
     .from("content_item")
     .upsert(
@@ -589,6 +601,30 @@ export async function collectBusiness(
   if (aiItems > 0) {
     const aiRun = await startRun(svc, "ai", businessId);
     await finishRun(svc, aiRun, aiItems, undefined, aiItems * AI_PER_ITEM_USD);
+  }
+
+  // ── Auto-prune stale offers: for each OFFER-bearing platform that refreshed
+  //    this pass, drop offers whose content_item wasn't re-observed. The
+  //    per-content-item replace only ever touches what it re-scraped, so if a
+  //    page/store's ref changes (or the page goes away) its old content_item —
+  //    and its offers — would linger forever. Because offer→content_item is ON
+  //    DELETE SET NULL, we delete the stale OFFERS first, then the empty shells.
+  //    Gated on the platform being in result.sources so a skipped/failed source
+  //    is never mistaken for "gone". Fast thanks to the offer.content_item_id
+  //    index (0073). This is what keeps dedup automatic — no manual cleanup.
+  for (const platform of ["website", "doordash", "ubereats"] as const) {
+    if (!result.sources.includes(platform)) continue;
+    const { data: stale } = await svc
+      .from("content_item")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("platform", platform)
+      .lt("observed_at", nowIso);
+    const staleIds = (stale ?? []).map((r: any) => r.id as string);
+    if (staleIds.length) {
+      await svc.from("offer").delete().in("content_item_id", staleIds);
+      await svc.from("content_item").delete().in("id", staleIds);
+    }
   }
 
   // stamp last_collected_at (+ any resolved ids)
