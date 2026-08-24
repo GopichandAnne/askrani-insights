@@ -90,16 +90,16 @@ export async function POST(req: Request) {
   //    the owner can confirm/correct each channel before anything is scanned.
   const { data: identRows } = await svc
     .from("external_identity")
-    .select("platform,url,handle")
+    .select("platform,url,handle,verification_state")
     .eq("business_id", biz.id);
-  const attached = new Map<string, string>();
+  const attached = new Map<string, { url: string; state: string }>();
   for (const r of identRows ?? []) {
     const p = (r as any).platform as string;
     const u = (r as any).url ?? (r as any).handle;
-    if (CONFIRMABLE.includes(p as Platform) && u && !attached.has(p)) attached.set(p, u);
+    if (CONFIRMABLE.includes(p as Platform) && u && !attached.has(p)) attached.set(p, { url: u, state: (r as any).verification_state ?? "observed" });
   }
   const knownWebsite = (biz.website as string | null) || (attrs.website as string | undefined);
-  if (knownWebsite && !attached.has("website")) attached.set("website", knownWebsite);
+  if (knownWebsite && !attached.has("website")) attached.set("website", { url: knownWebsite, state: "auto_verified" });
 
   // City signal for location-aware matching (same guard the scan uses).
   let city = extractCity(attrs.address as string | undefined) || "";
@@ -115,17 +115,24 @@ export async function POST(req: Request) {
   const anyDelivery = foodVertical && Object.values(wantDelivery).some(Boolean);
 
   const [social, delivery] = await Promise.all([
-    city && anySocial ? findSocialHandles(biz.canonical_name, city, wantSocial).catch(() => null) : Promise.resolve(null),
+    city && anySocial ? findSocialHandles(biz.canonical_name, city, wantSocial, { website: knownWebsite, city }).catch(() => null) : Promise.resolve(null),
     city && anyDelivery ? findDeliveryUrls(biz.canonical_name, city, wantDelivery).catch(() => null) : Promise.resolve(null),
   ]);
 
-  const profiles: Record<Platform, { url: string; source: "attached" | "found" | "" }> = {} as any;
+  // confidence: "high" = backlink/owner-verified (trust); "medium" = name+geo match
+  // (owner should confirm). Drives the ✓/"check this" hint in the confirm card.
+  type Conf = "high" | "medium";
+  const profiles: Record<Platform, { url: string; source: "attached" | "found" | ""; confidence?: Conf }> = {} as any;
   for (const p of CONFIRMABLE) {
-    if (attached.has(p)) { profiles[p] = { url: attached.get(p)!, source: "attached" }; continue; }
-    let url = "";
-    if (SOCIAL.includes(p)) { const u = (social as any)?.[p]; if (u && !isGenericHandle(u)) url = u; }
-    else if (DELIVERY.includes(p)) { const u = (delivery as any)?.[p]; if (u) url = u; }
-    profiles[p] = { url, source: url ? "found" : "" };
+    if (attached.has(p)) {
+      const a = attached.get(p)!;
+      profiles[p] = { url: a.url, source: "attached", confidence: a.state === "owner_verified" || a.state === "auto_verified" ? "high" : "medium" };
+      continue;
+    }
+    let url = ""; let confidence: Conf | undefined;
+    if (SOCIAL.includes(p)) { const u = (social as any)?.[p]; if (u && !isGenericHandle(u)) { url = u; confidence = (social as any)?.confidence?.[p] ?? "medium"; } }
+    else if (DELIVERY.includes(p)) { const u = (delivery as any)?.[p]; if (u) { url = u; confidence = "medium"; } }
+    profiles[p] = { url, source: url ? "found" : "", ...(url ? { confidence } : {}) };
   }
 
   return NextResponse.json({ profiles, foodVertical, city });

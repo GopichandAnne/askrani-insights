@@ -31,7 +31,8 @@ export interface CollectResult {
   offersWritten: number;
   reviews: number;
   socialPosts: number;
-  sources: string[]; // which sources actually contributed this run
+  sources: string[]; // which sources actually contributed this run ("reused" = skipped as fresh)
+  reused?: boolean;  // true when the scrape was skipped because the business was collected recently
   error?: string;
 }
 
@@ -192,9 +193,16 @@ async function pollJob(provider: any, jobId: string, maxMs: number) {
   return provider.getJob(jobId);
 }
 
+// A business's collected data is shared across EVERY workspace that watches it
+// (content_items/offers are keyed by business, not workspace), so a business
+// scraped within this window is reused rather than re-scraped for another
+// workspace — big cost saver. A manual/on-demand refresh (force) or a scoped
+// single-source refresh (only) always bypasses it.
+const COLLECT_FRESH_MS = 6 * 60 * 60 * 1000;
+
 export async function collectBusiness(
   businessId: string,
-  opts: { budgetMs?: number; only?: string[] } = {},
+  opts: { budgetMs?: number; only?: string[]; force?: boolean } = {},
 ): Promise<CollectResult> {
   const svc = createServiceClient();
   const nowIso = new Date().toISOString();
@@ -221,6 +229,19 @@ export async function collectBusiness(
   const foodVertical = vertical === "restaurant" || vertical === "grocery";
   const attrs = (biz.attributes as any) ?? {};
   const geo = attrs.geo as { lat: number; lng: number } | undefined;
+
+  // Freshness reuse: skip re-scraping a business collected recently (its data is
+  // already shared by every workspace watching it). `force` / `only` bypass it.
+  if (!opts.force && !opts.only && attrs.last_collected_at) {
+    const ageMs = Date.now() - new Date(attrs.last_collected_at as string).getTime();
+    if (ageMs >= 0 && ageMs < COLLECT_FRESH_MS) {
+      return {
+        businessId, name: biz.canonical_name, website: biz.website ?? undefined,
+        ok: true, pagesFetched: 0, offersWritten: 0, reviews: 0, socialPosts: 0,
+        sources: ["reused"], reused: true,
+      };
+    }
+  }
 
   const result: CollectResult = {
     businessId,
@@ -309,9 +330,11 @@ export async function collectBusiness(
       .limit(1)
       .maybeSingle();
     if (!exists) {
+      // A link on the business's OWN website is the strongest possible signal that
+      // the handle is really theirs — mark it auto_verified, not just observed.
       await svc
         .from("external_identity")
-        .insert({ business_id: businessId, platform: pl.platform, url: pl.url, verification_state: "observed" })
+        .insert({ business_id: businessId, platform: pl.platform, url: pl.url, verification_state: "auto_verified" })
         .then(() => {}, () => {});
     }
   }
@@ -343,16 +366,19 @@ export async function collectBusiness(
         attrs.social_resolved = true; // no location signal → skip name discovery
         attrsDirty = true;
       } else try {
-        const found = await findSocialHandles(biz.canonical_name, socialCity, {
-          instagram: !haveIg,
-          facebook: !haveFb,
-          tiktok: !haveTt,
-        });
+        const found = await findSocialHandles(
+          biz.canonical_name, socialCity,
+          { instagram: !haveIg, facebook: !haveFb, tiktok: !haveTt },
+          { website: biz.website ?? undefined, city: socialCity },
+        );
         for (const [platform, url] of Object.entries(found)) {
-          if (platform === "searched" || !url || typeof url !== "string") continue;
+          if (platform === "searched" || platform === "confidence" || !url || typeof url !== "string") continue;
+          // Backlink-verified handles are trusted; name+geo matches are attached as
+          // "observed" so the owner confirms them in the profiles step.
+          const conf = found.confidence?.[platform as "instagram" | "facebook" | "tiktok"];
           await svc
             .from("external_identity")
-            .insert({ business_id: businessId, platform, url, verification_state: "observed" })
+            .insert({ business_id: businessId, platform, url, verification_state: conf === "high" ? "auto_verified" : "observed" })
             .then(() => {}, () => {});
           (identRows ?? []).push({ platform, url, handle: null } as any);
         }

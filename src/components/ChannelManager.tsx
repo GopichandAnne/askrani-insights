@@ -170,6 +170,7 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
 
 function VerifyBadge({ state }: { state: string }) {
   if (state === "owner_verified") return <span className="chip bg-trust-direct/10 text-trust-direct">✓ You added</span>;
+  if (state === "auto_verified") return <span className="chip bg-trust-direct/10 text-trust-direct" title="Confirmed — links back to this business">✓ Verified</span>;
   if (state === "observed") return <span className="chip bg-brand-soft text-brand-deep">auto-found</span>;
   return <span className="chip bg-surface-sunken text-ink-faint">unverified</span>;
 }

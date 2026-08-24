@@ -343,6 +343,7 @@ function WorkspacePhase({
   // ── confirm-your-profiles: discover the owner's own accounts up front so they
   //    can validate/correct them before the scan (no more silent wrong attaches).
   const [profiles, setProfiles] = useState<Record<string, string>>({});
+  const [profileConf, setProfileConf] = useState<Record<string, "high" | "medium" | undefined>>({});
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [foodVertical, setFoodVertical] = useState(false);
 
@@ -355,8 +356,10 @@ function WorkspacePhase({
       .then((d) => {
         if (cancel || !d?.profiles) return;
         const p: Record<string, string> = {};
-        for (const k of Object.keys(d.profiles)) p[k] = d.profiles[k]?.url ?? "";
+        const c: Record<string, "high" | "medium" | undefined> = {};
+        for (const k of Object.keys(d.profiles)) { p[k] = d.profiles[k]?.url ?? ""; c[k] = d.profiles[k]?.confidence; }
         setProfiles(p);
+        setProfileConf(c);
         setFoodVertical(!!d.foodVertical);
       })
       .catch(() => {})
@@ -463,12 +466,18 @@ function WorkspacePhase({
                 <span className="w-24 shrink-0 text-sm text-ink-soft"><span className="mr-1.5">{m.icon}</span>{m.label}</span>
                 <input
                   value={profiles[m.key] ?? ""}
-                  onChange={(e) => setProfiles((p) => ({ ...p, [m.key]: e.target.value }))}
+                  onChange={(e) => { setProfiles((p) => ({ ...p, [m.key]: e.target.value })); setProfileConf((c) => ({ ...c, [m.key]: undefined })); }}
                   placeholder={m.placeholder}
                   className="field flex-1 py-2 text-sm"
                 />
+                {profiles[m.key] && profileConf[m.key] === "high" && (
+                  <span className="chip shrink-0 bg-trust-direct/10 text-[11px] text-trust-direct" title="We confirmed this links back to your business">✓ verified</span>
+                )}
+                {profiles[m.key] && profileConf[m.key] === "medium" && (
+                  <span className="chip shrink-0 bg-amber-100 text-[11px] text-amber-700" title="A likely match by name & location — please double-check it's really yours">check this</span>
+                )}
                 {profiles[m.key] ? (
-                  <button onClick={() => setProfiles((p) => ({ ...p, [m.key]: "" }))} className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-trust-low/10 hover:text-trust-low" title="Clear">✕</button>
+                  <button onClick={() => { setProfiles((p) => ({ ...p, [m.key]: "" })); setProfileConf((c) => ({ ...c, [m.key]: undefined })); }} className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-trust-low/10 hover:text-trust-low" title="Clear">✕</button>
                 ) : (
                   <span className="w-6 shrink-0" aria-hidden />
                 )}

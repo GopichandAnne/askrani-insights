@@ -16,9 +16,10 @@ export async function POST(req: Request) {
   if (!ALLOWED.has(platform)) return NextResponse.json({ error: "unsupported channel" }, { status: 400 });
   if (!(await canManageBusiness(businessId))) return NextResponse.json({ error: "not allowed" }, { status: 403 });
 
-  // Scrape just this one source (dedup + auto-prune still apply). budgetMs keeps
-  // us inside the function limit for a slow crawl.
-  const res = await collectBusiness(businessId, { only: [platform], budgetMs: 150_000 });
+  // Scrape just this one source (dedup + auto-prune still apply). force bypasses
+  // the freshness-reuse guard — an on-demand refresh should always re-scrape.
+  // budgetMs keeps us inside the function limit for a slow crawl.
+  const res = await collectBusiness(businessId, { only: [platform], force: true, budgetMs: 150_000 });
   return NextResponse.json({
     ok: res.ok,
     platform,

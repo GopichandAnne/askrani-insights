@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!(await canManageBusiness(businessId))) return NextResponse.json({ error: "not allowed" }, { status: 403 });
 
   const supabase = await createClient();
-  const { data: biz } = await supabase.from("business").select("canonical_name,attributes").eq("id", businessId).maybeSingle();
+  const { data: biz } = await supabase.from("business").select("canonical_name,website,attributes").eq("id", businessId).maybeSingle();
   if (!biz) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const { data: existing } = await supabase.from("external_identity").select("platform").eq("business_id", businessId);
@@ -36,16 +36,19 @@ export async function POST(req: Request) {
   }
 
   const name = (biz as any).canonical_name as string;
+  const website = ((biz as any).website as string | null) || (attrs as any).website;
   const [social, delivery] = await Promise.all([
-    (wantIg || wantFb || wantTt) ? findSocialHandles(name, city, { instagram: wantIg, facebook: wantFb, tiktok: wantTt }) : Promise.resolve({ searched: false } as any),
+    (wantIg || wantFb || wantTt) ? findSocialHandles(name, city, { instagram: wantIg, facebook: wantFb, tiktok: wantTt }, { website, city }) : Promise.resolve({ searched: false } as any),
     (wantDd || wantUe) ? findDeliveryUrls(name, city, { doordash: wantDd, ubereats: wantUe }) : Promise.resolve({ searched: false } as any),
   ]);
   const svc = createServiceClient();
   const added: { platform: string; url: string }[] = [];
   for (const src of [social, delivery]) {
     for (const [platform, url] of Object.entries(src)) {
-      if (platform === "searched" || !url || typeof url !== "string") continue;
-      await svc.from("external_identity").insert({ business_id: businessId, platform, url, verification_state: "observed" }).then(() => {}, () => {});
+      if (platform === "searched" || platform === "confidence" || !url || typeof url !== "string") continue;
+      // backlink-verified → auto_verified; name+geo match → observed (owner confirms)
+      const conf = (social as any)?.confidence?.[platform];
+      await svc.from("external_identity").insert({ business_id: businessId, platform, url, verification_state: conf === "high" ? "auto_verified" : "observed" }).then(() => {}, () => {});
       added.push({ platform, url });
     }
   }

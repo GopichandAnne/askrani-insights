@@ -182,7 +182,46 @@ function cleanName(name: string): string {
 const WORD: Record<SocialHost, string> = { "instagram.com": "instagram", "facebook.com": "facebook", "tiktok.com": "tiktok" };
 const PREFIX: Record<SocialHost, string> = { "instagram.com": "https://www.instagram.com/", "facebook.com": "https://www.facebook.com/", "tiktok.com": "https://www.tiktok.com/@" };
 
-async function findHandle(name: string, city: string, host: SocialHost, state: { searched: boolean }): Promise<string | undefined> {
+export type HandleConfidence = "high" | "medium";
+/** Context used to VERIFY a candidate actually belongs to this business. */
+export interface VerifyCtx { website?: string; city?: string }
+
+function domainOf(website?: string): string {
+  if (!website) return "";
+  try {
+    return new URL(/^https?:\/\//i.test(website) ? website : `https://${website}`).host.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return website.replace(/^https?:\/\//i, "").replace(/^www\./, "").split(/[/?#]/)[0].toLowerCase();
+  }
+}
+
+/** Human-style verification: fetch the candidate profile and check it actually
+ *  belongs to THIS business. A link back to the business's own website is
+ *  definitive ("high"); the city or a distinctive name token in the page is
+ *  corroborating. Best-effort — a blocked/empty fetch yields no signal (we do NOT
+ *  treat that as disproof; the LLM geo-judge already gated the pick). */
+async function verifyProfile(url: string, name: string, ctx: VerifyCtx): Promise<{ backlink: boolean; geoOrName: boolean }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(url, { headers: { "user-agent": UA, accept: "text/html" }, signal: ctrl.signal });
+    if (!res.ok) return { backlink: false, geoOrName: false };
+    const html = (await res.text()).toLowerCase();
+    const flat = html.replace(/[^a-z0-9]/g, "");
+    const dom = domainOf(ctx.website);
+    const backlink = !!dom && html.includes(dom);
+    const cityTok = (ctx.city ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const hasCity = cityTok.length >= 3 && flat.includes(cityTok);
+    const hasName = nameTokens(name).some((tk) => flat.includes(tk));
+    return { backlink, geoOrName: hasCity || hasName };
+  } catch {
+    return { backlink: false, geoOrName: false };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function findHandle(name: string, city: string, host: SocialHost, state: { searched: boolean }, ctx: VerifyCtx): Promise<{ handle: string; confidence: HandleConfidence } | undefined> {
   const clean = cleanName(name);
   const loc = city ? ` ${city}` : "";
   const cityToken = city.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -201,7 +240,12 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
     if (all.length >= 6) break; // enough to reason over
     await new Promise((r) => setTimeout(r, 350));
   }
-  return pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
+  const chosen = await pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
+  if (!chosen) return undefined;
+  // Verify the pick like a human would: open the profile, look for a link back to
+  // the business site (definitive) or its city/name. Backlink → high confidence.
+  const v = await verifyProfile(`${PREFIX[host]}${chosen}`, name, ctx);
+  return { handle: chosen, confidence: v.backlink ? "high" : "medium" };
 }
 
 // ── Intelligent delivery store-URL discovery ────────────────────────────────
@@ -296,7 +340,12 @@ export async function findDeliveryUrls(name: string, city: string, want: Deliver
 }
 
 export interface SocialWant { instagram?: boolean; facebook?: boolean; tiktok?: boolean }
-export interface SocialFound { instagram?: string; facebook?: string; tiktok?: string; searched: boolean }
+export interface SocialFound {
+  instagram?: string; facebook?: string; tiktok?: string; searched: boolean;
+  // per-platform verification confidence: "high" = profile links back to the
+  // business site; "medium" = name+geo match only (surface for owner to confirm).
+  confidence?: Partial<Record<"instagram" | "facebook" | "tiktok", HandleConfidence>>;
+}
 
 // Platform / aggregator accounts that get mis-attributed as a business's "own"
 // handle when its listing lives on a platform site (Clover/DoorDash/Square/etc.) —
@@ -321,6 +370,7 @@ export async function findSocialHandles(
   name: string,
   city: string,
   want: SocialWant = { instagram: true, facebook: true, tiktok: true },
+  ctx: VerifyCtx = {},
 ): Promise<SocialFound> {
   const state = { searched: false };
   const out: SocialFound = { searched: false };
@@ -331,8 +381,11 @@ export async function findSocialHandles(
   ];
   for (const [key, host] of hosts) {
     if (!want[key]) continue;
-    const h = await findHandle(name, city, host, state);
-    if (h && !isGenericHandle(h)) out[key] = `${PREFIX[host]}${h}`;
+    const r = await findHandle(name, city, host, state, { website: ctx.website, city });
+    if (r && !isGenericHandle(r.handle)) {
+      out[key] = `${PREFIX[host]}${r.handle}`;
+      (out.confidence ??= {})[key] = r.confidence;
+    }
   }
   out.searched = state.searched;
   return out;
