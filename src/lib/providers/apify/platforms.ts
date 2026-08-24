@@ -111,11 +111,19 @@ function mapDoorDashStore(r: any): RawObservation {
   const menuItems: any[] = [];
   const offers: any[] = [];
   const currency = r.currency ?? "USD";
-  for (const cat of r.menu_categories ?? []) {
-    for (const it of cat.items ?? []) {
-      const current = parsePrice(it.price_display) ?? (it.price_cents != null ? it.price_cents / 100 : undefined);
-      if (!it.name) continue;
-      const entry = { name: it.name, price: current, currency, section: cat.category_name };
+  // Menu container + item field names vary by actor build, so read them
+  // defensively (same as UberEats). Reading only price_display/price_cents left
+  // every item price-less on actors that name the field differently → the items
+  // were counted but produced 0 priced offers ("DoorDash attached, nothing came up").
+  const categories = r.menu_categories ?? r.menuCategories ?? r.categories ?? r.menu ?? r.menus ?? [];
+  for (const cat of categories) {
+    for (const it of cat.items ?? cat.menuItems ?? cat.products ?? []) {
+      const name = it.name ?? it.title ?? it.itemName ?? it.item_name;
+      if (!name) continue;
+      const current =
+        parsePrice(it.price_display ?? it.priceDisplay ?? it.price ?? it.displayPrice ?? it.priceString ?? it.price_string ?? it.unitPrice ?? it.unit_price ?? it.priceText) ??
+        (it.price_cents != null ? it.price_cents / 100 : it.priceCents != null ? it.priceCents / 100 : it.priceInCents != null ? it.priceInCents / 100 : undefined);
+      const entry = { name, price: current, currency, section: cat.category_name ?? cat.categoryName ?? cat.name };
       const hasPromo = Array.isArray(it.badges) && it.badges.length > 0;
       if (hasPromo) offers.push(entry);
       else menuItems.push(entry);
