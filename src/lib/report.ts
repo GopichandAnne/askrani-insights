@@ -83,11 +83,19 @@ export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30, db?: DbO
   const [{ data: bizRows }, { data: offers }, { data: reviews }, { data: events }, { data: recs }, cost] =
     await Promise.all([
       supabase.from("business").select("id, canonical_name").in("id", scope),
-      supabase
-        .from("offer")
-        .select("business_id, entity_text, pricing")
-        .in("business_id", scope)
-        .limit(4000),
+      // Fetch offers PER business, not one global .limit(4000): a workspace can
+      // hold 17k+ offers across its market, and a single capped query (with no
+      // ordering) silently drops whole businesses — including the target, which
+      // usually has the most offers — so its prices vanish ("—"). Per-business
+      // caps keep every business fairly represented.
+      (async () => {
+        const lists = await Promise.all(
+          scope.map((id) =>
+            supabase.from("offer").select("business_id, entity_text, pricing").eq("business_id", id).limit(4000),
+          ),
+        );
+        return { data: lists.flatMap((r) => (r.data as any[]) ?? []) };
+      })(),
       supabase
         .from("content_item")
         .select("business_id, platform, text, observed_at")

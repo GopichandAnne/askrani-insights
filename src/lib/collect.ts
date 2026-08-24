@@ -65,7 +65,19 @@ async function insertOffers(
   nowIso: string,
 ): Promise<number> {
   if (!offers.length) return 0;
-  const rows = offers.map((o) => ({
+  // Dedup WITHIN this extraction: delivery actors and menu pages return the same
+  // item many times (once per section / customization / size), so a single scrape
+  // can carry 4000 rows for a 260-item menu. Collapse to one row per
+  // (item, price) before writing — otherwise the offer table balloons and price
+  // stats are computed over massive duplication.
+  const seenKey = new Set<string>();
+  const deduped = offers.filter((o) => {
+    const k = `${String(o.entity_text ?? "").toLowerCase().trim()}|${(o.pricing as any)?.amount ?? ""}`;
+    if (seenKey.has(k)) return false;
+    seenKey.add(k);
+    return true;
+  });
+  const rows = deduped.map((o) => ({
     business_id: businessId,
     content_item_id: contentItemId,
     entity_text: o.entity_text,
