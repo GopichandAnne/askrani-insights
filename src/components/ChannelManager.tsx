@@ -13,6 +13,7 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
 
   const socialCount = identities.filter((i) => PLATFORM_META[i.platform]?.social).length;
 
@@ -41,6 +42,29 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
     await fetch("/api/channels/remove", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identityId: id }),
     });
+  }
+
+  // Re-scrape ONE channel on demand — e.g. right after updating your Instagram —
+  // without waiting for the next full workspace scan.
+  async function refresh(it: ChannelIdentity) {
+    if (refreshing) return;
+    setRefreshing(it.id); setMsg(null);
+    try {
+      const res = await fetch("/api/channels/refresh", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ businessId: business.businessId, platform: it.platform }),
+      });
+      const data = await res.json();
+      setMsg(data.message ?? (res.ok ? "Refreshed." : data.error ?? "Couldn’t refresh."));
+      if (res.ok && data.collected) {
+        const n = (data.collected.posts || 0) + (data.collected.offers || 0);
+        if (n > 0) setIdentities((xs) => xs.map((x) => (x.id === it.id ? { ...x, posts: n } : x)));
+      }
+    } catch {
+      setMsg("Couldn’t refresh right now — try again in a moment.");
+    } finally {
+      setRefreshing(null);
+    }
   }
 
   async function detect() {
@@ -95,6 +119,16 @@ export function ChannelManager({ business }: { business: BusinessChannels }) {
                 <span className="hidden shrink-0 text-[11px] text-ink-faint sm:block" title={it.platform === "facebook" && it.posts === 0 ? "Facebook (Meta) blocks scraping — most scans return no posts. Instagram/TikTok are the reliable social sources." : undefined}>
                   {it.posts > 0 ? `${it.posts} collected` : it.platform === "facebook" ? "Meta limits scraping" : "awaiting scan"}
                 </span>
+                {it.url && (
+                  <button
+                    onClick={() => refresh(it)}
+                    disabled={refreshing === it.id}
+                    title="Refresh this channel now"
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-brand-soft hover:text-brand disabled:opacity-50"
+                  >
+                    <span className={refreshing === it.id ? "inline-block animate-spin" : ""} aria-hidden>↻</span>
+                  </button>
+                )}
                 <button onClick={() => remove(it.id)} title="Stop monitoring" className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-ink-faint hover:bg-trust-low/10 hover:text-trust-low">✕</button>
               </li>
             );
