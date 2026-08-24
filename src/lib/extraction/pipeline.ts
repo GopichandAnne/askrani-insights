@@ -131,7 +131,18 @@ export async function runExtraction(
   const module = moduleFor(ctx.vertical);
   const jsonLdOffers = offersFromJsonLd(obs);
 
-  const modelOut = await extractWithModel(obs, ctx);
+  // The model pass is a best-effort ADDITION on top of high-trust structured
+  // facts. If it throws (vision-image fetch failure, rate limit, timeout), degrade
+  // to the jsonLd offers we already have — never let it escape, or a single bad
+  // store cover-image discards the entire 400+ item menu it was attached to (this
+  // is exactly why DoorDash menus with 457 parsed items were persisting 0 offers).
+  let modelOut: Awaited<ReturnType<typeof extractWithModel>> = null;
+  let modelError: string | undefined;
+  try {
+    modelOut = await extractWithModel(obs, ctx);
+  } catch (e) {
+    modelError = `model extraction failed: ${(e as Error).message}`;
+  }
 
   // No model available and no structured markup → nothing to extract.
   if (!modelOut && jsonLdOffers.length === 0) {
@@ -148,7 +159,7 @@ export async function runExtraction(
     };
   }
 
-  let warnings: string[] = [];
+  let warnings: string[] = modelError ? [modelError] : [];
   let intent = "regular_menu";
   let intentConfidence = 0;
   let modelVersion = "none";
