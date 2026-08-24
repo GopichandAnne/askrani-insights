@@ -99,7 +99,13 @@ async function insertOffers(
   // (business_id, content_item_id) so other sources' offers are untouched, and
   // only runs when this extraction actually produced offers (a transient empty
   // extraction keeps the last good set rather than wiping it).
-  await svc.from("offer").delete().eq("business_id", businessId).eq("content_item_id", contentItemId);
+  // NB: needs the offer(content_item_id) index (migration 0073). Without it, on a
+  // business with thousands of offers this delete scans the whole business
+  // partition and trips the 8s statement timeout — silently deleting 0 rows and
+  // letting every scan re-append the menu. We now surface that error instead of
+  // ignoring it, so the failure is visible rather than becoming silent bloat.
+  const { error: delErr } = await svc.from("offer").delete().eq("business_id", businessId).eq("content_item_id", contentItemId);
+  if (delErr) throw new Error(`offers dedup-delete failed (add offer.content_item_id index): ${delErr.message}`);
   const { error } = await svc.from("offer").insert(rows);
   if (error) throw new Error(`offers insert: ${error.message}`);
   return rows.length;
