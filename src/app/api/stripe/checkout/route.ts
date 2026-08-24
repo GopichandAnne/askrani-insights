@@ -29,6 +29,7 @@ export async function POST(req: Request) {
       customer = created.id;
       await setStripeCustomer(auth.orgId, customer);
     }
+    const isPayment = item.mode === "payment";
     const session = await s.checkout.sessions.create({
       mode: item.mode,
       customer,
@@ -38,6 +39,25 @@ export async function POST(req: Request) {
       success_url: `${origin}/billing?purchase=success`,
       cancel_url: `${origin}/billing?purchase=cancelled`,
       allow_promotion_codes: true,
+      // Proper invoices: collect a billing address + optional tax id and save them
+      // back to the customer, so every invoice/receipt carries the buyer's details.
+      billing_address_collection: "required",
+      customer_update: { name: "auto", address: "auto" },
+      tax_id_collection: { enabled: true },
+      // Subscriptions invoice automatically each cycle; one-time top-ups only emit
+      // a receipt UNLESS we ask for an invoice — so enable it for payment mode.
+      // Stripe then finalizes a real invoice (hosted page + PDF) for the purchase.
+      ...(isPayment
+        ? {
+            invoice_creation: {
+              enabled: true,
+              invoice_data: {
+                metadata: { orgId: auth.orgId, key: String(key) },
+                footer: "Thank you for your purchase — Ask Rani Insights.",
+              },
+            },
+          }
+        : {}),
     });
     return NextResponse.json({ url: session.url });
   } catch (e) {
