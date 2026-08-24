@@ -492,9 +492,11 @@ export async function collectBusiness(
     let posts = 0;
     let offers = 0;
     let apifyCost = 0;
+    let apifyRunErr: string | undefined;
     try {
       const res = await collectApifyPlatform(platform, target, { maxMs: 150000, address: attrs.address, searchQuery });
       apifyCost = res.costUsd;
+      if (res.error) errors.push(`apify:${platform}: ${res.error}`);
       for (const post of res.items) {
         // guard the search fallback: don't attach a store that isn't this business
         if (isDelivery && searchQuery) {
@@ -512,12 +514,14 @@ export async function collectBusiness(
         }
       }
       if (posts > 0) result.sources.push(platform);
+      apifyRunErr = res.error;
     } catch (e) {
-      errors.push(`apify:${platform}: ${(e as Error).message}`);
+      apifyRunErr = (e as Error).message;
+      errors.push(`apify:${platform}: ${apifyRunErr}`);
     }
     result.socialPosts += posts;
     result.offersWritten += offers;
-    await finishRun(svc, run, posts + offers, undefined, apifyCost);
+    await finishRun(svc, run, posts + offers, apifyRunErr, apifyCost);
   }
 
   // ── 6) LOCAL MARKET RADAR (target only): industry trends, local news, nearby

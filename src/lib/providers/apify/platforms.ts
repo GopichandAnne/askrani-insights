@@ -252,6 +252,7 @@ function mapUberEatsStore(r: any): RawObservation {
 export interface ApifyResult {
   items: RawObservation[];
   costUsd: number; // the Actor run's real usage cost (guide §16.1)
+  error?: string;  // set when the run failed to start/finish (out of credits, bad token, timeout) — surfaced to provider_run instead of being swallowed as "succeeded n=0"
 }
 
 export async function collectApifyPlatform(
@@ -278,10 +279,13 @@ export async function collectApifyPlatform(
       headers: { "content-type": "application/json" },
       body: JSON.stringify(cfg.input(target, { address: opts.address, searchQuery: opts.searchQuery })),
     });
-    if (!runRes.ok) return empty;
+    // A rejected run-start is the tell-tale of an account problem (402 out of
+    // credits, 401 bad token, 429 rate-limited). Capture it so it's visible in
+    // provider_run rather than looking like an empty-but-successful scrape.
+    if (!runRes.ok) return { items: [], costUsd: 0, error: `run start ${runRes.status}: ${(await runRes.text().catch(() => "")).slice(0, 140)}` };
     const run = (await runRes.json()) as any;
     const runId = run.data?.id;
-    if (!runId) return empty;
+    if (!runId) return { items: [], costUsd: 0, error: "run start: no run id in response" };
 
     const deadline = Date.now() + maxMs;
     let datasetId: string | undefined;
@@ -294,10 +298,10 @@ export async function collectApifyPlatform(
         datasetId = st.data?.defaultDatasetId;
         break;
       }
-      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd, error: `run ${s}` };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { items: [], costUsd }; // still running past our budget
+    if (!datasetId) return { items: [], costUsd, error: "run still going past time budget" }; // still running past our budget
 
     const raw = (await fetch(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`,
@@ -311,8 +315,8 @@ export async function collectApifyPlatform(
       items = raw.map((it) => mapItem(cfg, it));
     }
     return { items, costUsd };
-  } catch {
-    return empty;
+  } catch (e) {
+    return { items: [], costUsd: 0, error: (e as Error).message };
   }
 }
 
