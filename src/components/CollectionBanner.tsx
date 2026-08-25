@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { RaniCollecting, type CollectNode } from "@/components/RaniCollecting";
 import { RaniRadar } from "@/components/RaniRadar";
+import { collectingPhrases } from "@/lib/vertical-vocab";
 
 /**
  * App-wide "collection in progress" surface. Polls the active workspace's scan
@@ -13,32 +14,25 @@ import { RaniRadar } from "@/components/RaniRadar";
  */
 type Job = { name?: string; status: string; lat?: number | null; lng?: number | null; isTarget?: boolean };
 
-// Catchy, rotating "what Rani's up to" lines — personality over raw stats.
-const PHRASES = [
-  "Rani's peeking at the competition 👀",
-  "Reading the neighbours' sale flyers 🧾",
-  "Spotting who just dropped their prices 💸",
-  "Scanning fresh posts & photos 📸",
-  "Sizing up this week's deals 🛒",
-  "Seeing what your rivals are promoting 📣",
-  "Catching the local buzz 🔍",
-  "Peeking at the shelves next door 🫣",
-];
-
 export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
   const pathname = usePathname();
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [ephemeral, setEphemeral] = useState(false);
   const [visible, setVisible] = useState(false);
   const [phrase, setPhrase] = useState(0);
+  const [vertical, setVertical] = useState<string | undefined>(undefined);
   const wasActive = useRef(false);
+
+  // rotating "what Rani's up to" lines — tuned to the business type (no
+  // grocery-specific "shelves/flyers" wording for a salon or dental office).
+  const phrases = collectingPhrases(vertical);
 
   // rotate the catchy line while the banner is up
   useEffect(() => {
     if (!visible) return;
-    const t = setInterval(() => setPhrase((p) => (p + 1) % PHRASES.length), 3200);
+    const t = setInterval(() => setPhrase((p) => (p + 1) % phrases.length), 3200);
     return () => clearInterval(t);
-  }, [visible]);
+  }, [visible, phrases.length]);
 
   useEffect(() => {
     if (!workspaceId || pathname?.startsWith("/onboarding")) return;
@@ -54,6 +48,7 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
         const d = await r.json();
         const js = (d.jobs ?? []) as Job[];
         setEphemeral(!!d.ephemeral);
+        if (d.vertical) setVertical(d.vertical as string);
         // stay live through BOTH stages: per-business collection AND the flyer/image read
         const active = js.some((j) => j.status === "pending" || j.status === "running") || !!d.flyers;
         if (active) { wasActive.current = true; setJobs(js); setVisible(true); }
@@ -93,7 +88,7 @@ export function CollectionBanner({ workspaceId }: { workspaceId: string }) {
       {/* catchy, rotating status — no raw stats, just "something's happening" + a soft ETA */}
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-line/50 pt-2 text-sm">
         <span className="rani-dots" aria-hidden><span /><span /><span /></span>
-        <span key={phrase} className="animate-fade-in font-medium text-brand-deep">{PHRASES[phrase]}</span>
+        <span key={phrase} className="animate-fade-in font-medium text-brand-deep">{phrases[phrase % phrases.length]}</span>
         <span className="text-xs text-ink-faint">· usually a minute or two</span>
       </div>
     </section>

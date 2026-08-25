@@ -35,7 +35,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ enqueued: 0, needsCredits: true, balance: await getBalance(auth.orgId) });
     }
     await requeuePausedForOrg(auth.orgId); // reactivate anything paused earlier
-    const enqueued = await enqueueWorkspaceCollection(workspaceId);
+    // User-initiated refresh → force a real re-scrape (bypass the 6h freshness reuse).
+    const enqueued = await enqueueWorkspaceCollection(workspaceId, { force: true });
     void logEvent("collect_started", { workspaceId, enqueued }, { orgId: auth.orgId });
     // Nudge the worker so collection starts within seconds, not next cron tick.
     after(() => nudgeWorker());

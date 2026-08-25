@@ -216,7 +216,7 @@ export default async function FindabilityPage() {
       )}
 
       {/* Owner control: which exact searches we track (dish/near-me/nearby towns) */}
-      <FindabilityKeywords workspaceId={state.workspace.id} />
+      <FindabilityKeywords workspaceId={state.workspace.id} vertical={state.workspace.vertical} />
     </div>
   );
 }

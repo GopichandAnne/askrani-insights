@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { keywordExamples } from "@/lib/vertical-vocab";
 
 interface Kw { id: string; term: string; intent: string; value_weight: number; active: boolean }
 interface Sug { term: string; intent: string; value_weight: number }
@@ -10,7 +11,7 @@ const INTENT_DOT: Record<string, string> = { everyday: "bg-brand", urgent: "bg-c
 /** Owner control over the exact Google searches Findability tracks: see the
  *  tracked terms, add your own (dish-level / "near me"), and pull Rani's
  *  menu-aware suggestions to add with one tap. */
-export function FindabilityKeywords({ workspaceId }: { workspaceId: string }) {
+export function FindabilityKeywords({ workspaceId, vertical }: { workspaceId: string; vertical?: string }) {
   const [kws, setKws] = useState<Kw[]>([]);
   const [loading, setLoading] = useState(true);
   const [val, setVal] = useState("");
@@ -71,8 +72,8 @@ export function FindabilityKeywords({ workspaceId }: { workspaceId: string }) {
         </button>
       </div>
       <p className="mb-3 text-xs text-ink-faint">
-        These are the exact Google searches we check your rank for. Add the ones your customers really type — a signature dish, a
-        &ldquo;near me&rdquo; search, or a nearby town (e.g. <i>rumali roti near me</i>, <i>goat mandi leander</i>).
+        These are the exact Google searches we check your rank for. Add the ones your customers really type — a specific offering, a
+        &ldquo;near me&rdquo; search, or a nearby town (e.g. <i>{keywordExamples(vertical)}</i>).
       </p>
 
       {loading ? (

@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   if (!(await workspaceInOrg(workspaceId, auth.orgId))) return unauthorized();
 
   const jobs = await getWorkspaceJobs(workspaceId);
-  const { data } = await createServiceClient().from("workspace").select("goals, target_business_id").eq("id", workspaceId).maybeSingle();
+  const { data } = await createServiceClient().from("workspace").select("goals, target_business_id, vertical").eq("id", workspaceId).maybeSingle();
   const ephemeral = !!(data?.goals as any)?.ephemeral;
   const targetId = data?.target_business_id ?? null;
   const withTarget = jobs.map((j: any) => ({ ...j, isTarget: j.business_id === targetId }));
@@ -23,5 +23,5 @@ export async function GET(req: Request) {
   // its progress so the "scraping" isn't invisible while it drains.
   const fj = (data?.goals as any)?.flyerJob;
   const flyers = fj && fj.status === "running" ? { processed: Number(fj.cursor ?? 0), total: Number(fj.total ?? 0) } : null;
-  return NextResponse.json({ jobs: withTarget, ephemeral, flyers });
+  return NextResponse.json({ jobs: withTarget, ephemeral, flyers, vertical: data?.vertical ?? null });
 }

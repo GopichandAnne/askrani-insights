@@ -27,7 +27,7 @@ type Svc = ReturnType<typeof createServiceClient>;
 
 /** Enqueue a collect job per business in the workspace (target first). Idempotent
  *  — skips a business that already has a pending/running job. */
-export async function enqueueWorkspaceCollection(workspaceId: string): Promise<number> {
+export async function enqueueWorkspaceCollection(workspaceId: string, opts: { force?: boolean } = {}): Promise<number> {
   const svc = createServiceClient();
   const { data: ws } = await svc
     .from("workspace")
@@ -42,6 +42,22 @@ export async function enqueueWorkspaceCollection(workspaceId: string): Promise<n
   const businesses: { id: string; priority: number }[] = [];
   if (ws?.target_business_id) businesses.push({ id: ws.target_business_id as string, priority: 10 });
   for (const e of edges ?? []) businesses.push({ id: e.competitor_id as string, priority: 0 });
+
+  // A user-initiated refresh must do REAL work: clear the 6h freshness stamp so
+  // collectBusiness actually re-scrapes instead of skip-and-reusing (which showed
+  // "done" instantly without scraping). Scheduled/cron refreshes pass no force, so
+  // they still reuse a recently-collected business across workspaces (cost saver).
+  if (opts.force && businesses.length) {
+    const ids = businesses.map((b) => b.id);
+    const { data: rows } = await svc.from("business").select("id, attributes").in("id", ids);
+    for (const r of (rows ?? []) as { id: string; attributes: Record<string, unknown> | null }[]) {
+      const attrs = { ...(r.attributes ?? {}) };
+      if (attrs.last_collected_at) {
+        delete attrs.last_collected_at;
+        await svc.from("business").update({ attributes: attrs }).eq("id", r.id);
+      }
+    }
+  }
 
   let enqueued = 0;
   for (const b of businesses) {
