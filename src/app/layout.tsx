@@ -24,6 +24,7 @@ export const metadata: Metadata = {
 const NAV: NavItem[] = [
   { href: "/", label: "This Week", icon: "today", match: ["/edge"] },
   { href: "/scorecard", label: "You vs Market", icon: "scorecard" },
+  { href: "/plan", label: "Your plan", icon: "plan" },
   { href: "/you", label: "You", icon: "you" },
   { href: "/content", label: "Content", icon: "content" },
   { href: "/winning", label: "What's winning", icon: "winning" },

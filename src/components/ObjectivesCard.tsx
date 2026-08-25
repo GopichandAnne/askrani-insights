@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ObjectivesReport, Objective, Horizon } from "@/lib/objectives";
 
 /** Proactive, self-grading action plan — daily/weekly/monthly objectives that
@@ -27,8 +28,9 @@ export function ObjectivesCard({ report }: { report: ObjectivesReport }) {
     <section className="card">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 font-semibold">🎯 Your objectives <span className="text-xs font-normal text-ink-faint">— auto-tracked from your data</span></h2>
-        <span className="text-xs text-ink-faint">{done}/{items.length} done{report.completedTotal ? ` · ${report.completedTotal} completed all-time` : ""}</span>
+        <Link href="/plan" className="text-xs font-medium text-brand hover:underline">Open your plan →</Link>
       </div>
+      <p className="text-xs text-ink-faint">{done}/{items.length} done{report.completedTotal ? ` · ${report.completedTotal} completed all-time` : ""}</p>
 
       <div className="mt-3 space-y-4">
         {HORIZONS.map(({ key, label, note }) => {
