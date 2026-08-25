@@ -1,9 +1,10 @@
 import { Fragment } from "react";
 import { activeWorkspace } from "@/lib/workspace";
-import { getOrMakeFindabilityReport, type FindabilityReport } from "@/lib/findability";
+import { getOrMakeFindabilityReport, type FindabilityReport, FINDABILITY_REFRESH_CREDITS } from "@/lib/findability";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
+import { FindabilityRefreshButton } from "@/components/FindabilityRefreshButton";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -34,12 +35,15 @@ export default async function FindabilityPage() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <div>
-        <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
-        <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Findability</h1>
-        <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-          Where customers find you — your rank in Google search for the terms they actually type, scored against your real competitors.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
+          <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Findability</h1>
+          <p className="mt-1 max-w-2xl text-sm text-ink-soft">
+            Where customers find you — your rank in Google search for the terms they actually type, scored against your real competitors.
+          </p>
+        </div>
+        <FindabilityRefreshButton workspaceId={state.workspace.id} credits={FINDABILITY_REFRESH_CREDITS} />
       </div>
 
       {report.empty ? (
