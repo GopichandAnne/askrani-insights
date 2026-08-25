@@ -99,6 +99,11 @@ export function ObjectivesBoard({ report, standing, businessName, vertical }: { 
                     <div className="min-w-0 flex-1">
                       <p className={`text-sm font-medium ${doneY ? "text-ink-faint line-through" : "text-ink"}`}>{o.title}</p>
                       {o.why && <p className="mt-0.5 text-xs text-ink-faint">{o.why}</p>}
+                      {o.evidence && (
+                        <p className="mt-1.5 rounded-lg border-l-2 border-brand-soft bg-white/40 px-2 py-1 text-[11px] leading-relaxed text-ink-soft">
+                          <span className="font-semibold text-brand-deep">From your data — </span>{o.evidence}
+                        </p>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-center">
                       {tl

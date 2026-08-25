@@ -49,6 +49,7 @@ export function ObjectivesCard({ report }: { report: ObjectivesReport }) {
                       <div className="min-w-0 flex-1">
                         <p className={`text-sm font-medium ${doneY ? "text-ink-faint line-through" : "text-ink"}`}>{o.title}</p>
                         {o.why && <p className="mt-0.5 text-xs text-ink-faint">{o.why}</p>}
+                        {o.evidence && !doneY && <p className="mt-1 text-[11px] text-ink-soft"><span className="font-semibold text-brand-deep">From your data — </span>{o.evidence}</p>}
                       </div>
                       <span className="shrink-0 self-center">
                         {tl
