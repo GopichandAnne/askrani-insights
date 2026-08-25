@@ -13,6 +13,7 @@ import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
+import { buildPriceCanon } from "@/lib/pricecanon";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -82,6 +83,14 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     await snapshotMarket(row, db);
   } catch {
     /* non-fatal — next cycle captures it */
+  }
+  // Refresh the price canonical map (intelligent like-for-like matching for the
+  // scorecard Price basket). Best-effort — the scorecard falls back to the
+  // deterministic matcher if this is stale/absent.
+  try {
+    await buildPriceCanon(row, db);
+  } catch {
+    /* non-fatal — deterministic basket still works */
   }
   // Preserve this cycle's artifacts (deals/ad-moves/breakouts/formats/demand) in
   // the append-only event log, so seasonality is queryable over time.

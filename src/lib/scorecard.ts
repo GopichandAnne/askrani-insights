@@ -122,14 +122,20 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
   //   • no real shared basket in the market → robust MEDIAN of each business's
   //     own items (median resists the platter/catering skew the old mean had),
   //   • no items at all (flyer-only) → the flyer average already on avgPrice.
+  // Intelligent matching: the cached LLM canonical map (goals.priceCanon) collapses
+  // synonyms / other languages / spelling & portion variants (idly=idli, beets=
+  // chukandar, gel manicure≈gel nails) onto one label, vertical-aware. Falls back to
+  // the deterministic normalizer for anything the LLM didn't group (or if uncomputed).
+  const canon = (goals.priceCanon?.canon ?? {}) as Record<string, string>;
+  const clusterKey = (name: string): string => { const nn = normItem(name); return canon[nn] ?? nn; };
   const bizByItem = new Map<string, Set<string>>();
-  for (const r of all) for (const it of r.items ?? []) { const nn = normItem(it.name); if (nn.length < 3) continue; (bizByItem.get(nn) ?? bizByItem.set(nn, new Set()).get(nn)!).add(normName(r.name)); }
+  for (const r of all) for (const it of r.items ?? []) { const nn = clusterKey(it.name); if (nn.length < 3) continue; (bizByItem.get(nn) ?? bizByItem.set(nn, new Set()).get(nn)!).add(normName(r.name)); }
   const commonBasket = new Set([...bizByItem].filter(([, s]) => s.size >= 2).map(([n]) => n));
   const basketMode = commonBasket.size >= 3; // enough overlap to be a real basket
   const priceBasisOf = (r: Raw): number | null => {
     const items = r.items ?? [];
     if (basketMode) {
-      const bp = items.filter((it) => commonBasket.has(normItem(it.name))).map((it) => it.price);
+      const bp = items.filter((it) => commonBasket.has(clusterKey(it.name))).map((it) => it.price);
       return bp.length >= 2 ? bp.reduce((a, b) => a + b, 0) / bp.length : null; // too little overlap → no fair price score
     }
     const ps = items.map((it) => it.price);
