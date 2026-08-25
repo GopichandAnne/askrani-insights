@@ -5,6 +5,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { FindabilityRefreshButton } from "@/components/FindabilityRefreshButton";
+import { FindabilityKeywords } from "@/components/FindabilityKeywords";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -213,6 +214,9 @@ export default async function FindabilityPage() {
           </p>
         </>
       )}
+
+      {/* Owner control: which exact searches we track (dish/near-me/nearby towns) */}
+      <FindabilityKeywords workspaceId={state.workspace.id} />
     </div>
   );
 }
