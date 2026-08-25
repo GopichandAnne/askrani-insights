@@ -14,6 +14,8 @@ import { RefreshButton } from "@/components/RefreshButton";
 import { RatingRankChart } from "@/components/RatingRankChart";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { buildDigest } from "@/lib/digest";
+import { getObjectives } from "@/lib/objectives";
+import { ObjectivesCard } from "@/components/ObjectivesCard";
 import { RaniMark } from "@/components/RaniSpinner";
 import { creditsSummary, PLANS } from "@/lib/credits";
 
@@ -178,6 +180,7 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
   // The digest — "what changed & what to do," built from the cached pillars (pure,
   // no I/O). Same content that gets pushed to the owner's inbox each week.
   const digest = buildDigest({ name: workspace.name, vertical: workspace.vertical }, goals, (goals.digestSeen?.ids as string[]) ?? []);
+  const objectives = await getObjectives(workspace); // cached, self-graded action plan
 
   const [report, { data: news }, { data: social }] = await Promise.all([
     buildWorkspaceReport(workspace),
@@ -366,6 +369,9 @@ async function Dashboard({ workspace }: { workspace: WorkspaceRow }) {
           <Link href="/billing" className="btn btn-primary px-3 py-1.5 text-sm">Buy credits</Link>
         </div>
       </section>
+
+      {/* proactive, self-grading objectives — what to improve + auto-checked progress */}
+      {objectives && !objectives.empty && <ObjectivesCard report={objectives} />}
 
       {/* 1 — This Week: ONE synthesis (the digest is the ranked "what changed + what
           to do"). The briefing + edge widgets said the same thing three ways; the

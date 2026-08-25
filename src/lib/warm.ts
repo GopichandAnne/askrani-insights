@@ -14,6 +14,7 @@ import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
+import { refreshObjectives } from "@/lib/objectives";
 
 /**
  * Warm the workspace's synthesis caches AFTER collection finishes, so the owner's
@@ -91,6 +92,13 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     await buildPriceCanon(row, db);
   } catch {
     /* non-fatal — deterministic basket still works */
+  }
+  // Grade + refresh the proactive objectives LAST — it depends on the freshly
+  // synthesized pillars + scorecard above (auto-completes what the data now shows).
+  try {
+    await refreshObjectives(row, db);
+  } catch {
+    /* non-fatal — objectives just won't update this cycle */
   }
   // Preserve this cycle's artifacts (deals/ad-moves/breakouts/formats/demand) in
   // the append-only event log, so seasonality is queryable over time.
