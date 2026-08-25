@@ -1,6 +1,7 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
+import { buildScorecard } from "@/lib/scorecard";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
 
@@ -18,12 +19,13 @@ export interface AskResult {
 }
 
 const GROUNDING = [
-  "You are Ask Rani, a friendly local-market analyst for a busy, non-technical small-business owner.",
-  "Answer ONLY from the DATA provided (the owner is \"you\"). Be concise: 1–4 short sentences, plain English, no jargon.",
-  "Use specific business names and real numbers from the data. Never invent or estimate figures that aren't present.",
-  "Prices are in USD. 'offers' means menu items/products. 'events' are recent market changes.",
-  "A numbered SOURCES list is provided — customer reviews (Yelp/Google), the business's own website & menus, delivery apps (DoorDash/UberEats), social media posts (Instagram/Facebook/TikTok/YouTube), and local market radar: industry trends, local news, and nearby openings (News).",
-  "You may reference any source, including social posts and news. When a statement rests on a source, cite it inline with its number in square brackets, e.g. [2]. Only cite numbers that appear in SOURCES.",
+  "You are Ask Rani, an expert local-market strategist advising a busy, non-technical small-business owner (the owner is \"you\").",
+  "You have the FULL picture in DATA: a competitive SCORECARD (your position score + rank, and every metric — rating, price, social reach, AI search, Google findability — as YOUR score vs the market AVERAGE vs the category LEADER), plus findability detail (which searches you're losing), AI-search detail (who the AIs recommend), item prices, reviews, recent market events, open recommendations, and citable SOURCES (reviews, website, delivery apps, social, local news).",
+  "For EVERY answer, be a strategist who drives action — not a data-reader. Structure: (1) answer directly with the specific numbers from DATA, (2) briefly say WHY when it helps, (3) give ONE concrete, doable next step to fix it or capitalize on it. Always end with that next step.",
+  "Ground everything in DATA — real names and real numbers, never invent or estimate figures that aren't present. If a specific number is genuinely missing, say briefly how to get it, but STILL give your best strategic guidance from what IS there (especially the scorecard).",
+  "Map the owner's wording to the DATA and never claim a metric 'isn't available' when the scorecard has it: 'social'/'social search'/'social score' → the Social reach metric; 'AI'/'ChatGPT'/'AI search' → AI search; 'ranking'/'show up on Google'/'found' → Findability; 'reputation'/'stars' → Rating.",
+  "Prices are USD. 'offers' = menu items/products. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
+  "Keep it tight: 2–5 sentences, plain English, no jargon, and make the next step specific enough to do today.",
 ].join(" ");
 
 const SYSTEM_STRUCTURED = `${GROUNDING} If the data doesn't contain the answer, set answerable=false and briefly say what's missing or suggest collecting more.`;
@@ -42,7 +44,7 @@ const SCHEMA = {
   additionalProperties: false,
   properties: {
     answerable: { type: "boolean", description: "true if the DATA supports a real answer" },
-    answer: { type: "string", description: "Concise plain-English answer (1–4 sentences)." },
+    answer: { type: "string", description: "Plain-English strategist answer (2–5 sentences): the read with real numbers, the why, and one concrete next step to act on." },
   },
   required: ["answerable", "answer"],
 };
@@ -61,7 +63,10 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   }
   const ws = state.workspace;
 
-  const report = await buildWorkspaceReport(ws);
+  // Build the raw report AND the synthesized competitive scorecard in parallel —
+  // the scorecard is what makes Rani an ADVISOR (it knows every metric vs the
+  // market + leader), not just a reader of raw rows.
+  const [report, scorecard] = await Promise.all([buildWorkspaceReport(ws), buildScorecard(ws)]);
   const supabase = await createClient();
   const ids = await workspaceBusinessIds(ws);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];
@@ -160,8 +165,31 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
       article: String(c.media?.[0]?.excerpt ?? "").slice(0, 700) || undefined,
     }));
 
+  // ── the synthesized intelligence: scorecard + pillar headlines ──────────────
+  const { data: wRow } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const goals = (wRow?.goals ?? {}) as Record<string, any>;
+  const fnd = goals.findability && !goals.findability.empty ? goals.findability : null;
+  const aif = goals.aiFindability && !goals.aiFindability.empty ? goals.aiFindability : null;
+
+  const intel = {
+    // your position + every metric as you vs market-average vs the leader (with gaps)
+    scorecard: scorecard.empty ? null : {
+      positionScore: scorecard.composite.you, rank: scorecard.composite.rank, of: scorecard.composite.total,
+      headline: scorecard.headline,
+      metrics: scorecard.metrics.map((m) => ({ metric: m.label, you: m.you, marketAvg: m.avg, best: m.best, leader: m.bestName })),
+    },
+    // Google findability: your score + the searches you're losing (fix targets)
+    findability: fnd ? {
+      score: fnd.score, inTop3: fnd.coverage?.inTop3, ofTerms: fnd.coverage?.total,
+      losing: (fnd.keywords ?? []).filter((k: any) => k.yourRank == null || k.yourRank > 3).slice(0, 6).map((k: any) => ({ term: k.term, yourRank: k.yourRank, leader: k.topCompetitor })),
+    } : null,
+    // AI search: your score + who the AIs recommend instead
+    aiSearch: aif ? { score: aif.score, engines: aif.engines, aiRecommends: (aif.competitorsRecommended ?? []).slice(0, 5).map((c: any) => c.name) } : null,
+  };
+
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
+    intel,
     businesses: report.pricing.map((p) => ({
       name: p.name, you: p.isTarget, pricedItems: p.offers, avgPrice: p.avgPrice, minPrice: p.minPrice, maxPrice: p.maxPrice,
     })),
@@ -183,7 +211,7 @@ export async function answerQuestion(question: string): Promise<AskResult> {
   if ("guard" in p) return { answerable: false, answer: p.guard };
   try {
     const { data } = await getLlm().callStructured<AskResult>({
-      system: SYSTEM_STRUCTURED, text: p.text, schema: SCHEMA, tier: "extract", maxTokens: 500,
+      system: SYSTEM_STRUCTURED, text: p.text, schema: SCHEMA, tier: "extract", maxTokens: 700,
     });
     return { answerable: !!data.answerable, answer: String(data.answer ?? "").trim() || "I couldn't find that in your data yet.", workspace: p.workspace };
   } catch (e) {
@@ -197,7 +225,7 @@ export async function* streamAnswer(question: string): AsyncIterable<string> {
   const p = await buildAskPrompt(question);
   if ("guard" in p) { yield p.guard; return; }
   try {
-    for await (const delta of getLlm().streamText({ system: SYSTEM_STREAM, text: p.text, tier: "extract", maxTokens: 500 })) {
+    for await (const delta of getLlm().streamText({ system: SYSTEM_STREAM, text: p.text, tier: "extract", maxTokens: 700 })) {
       yield delta;
     }
   } catch (e) {
