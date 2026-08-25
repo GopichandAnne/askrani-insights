@@ -1,7 +1,7 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
-import { buildScorecard } from "@/lib/scorecard";
+import { buildScorecard, type Scorecard } from "@/lib/scorecard";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
 
@@ -26,6 +26,7 @@ const GROUNDING = [
   "Map the owner's wording to the DATA and never claim a metric 'isn't available' when the scorecard has it: 'social'/'social search'/'social score' → the Social reach metric; 'AI'/'ChatGPT'/'AI search' → AI search; 'ranking'/'show up on Google'/'found' → Findability; 'reputation'/'stars' → Rating.",
   "Prices are USD. 'offers' = whatever this business sells. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
   "Tailor EVERY answer to DATA.businessType — reason and advise as an expert in THAT industry, and read the generic pillars through its lens: 'offers'/'winning items'/'menu' mean this business's actual thing (dishes for a restaurant, products for a grocery, treatments/services for a salon or clinic, listings for real estate, classes for fitness). Never give generic or off-industry advice, and never assume it's a restaurant unless businessType says so.",
+  "For time-based questions ('was there a sale on X a month ago?', 'what promos ran recently?'), use DATA.promotionsHistory (dated past deals), DATA.intel.competitorDeals (current) and DATA.recentEvents. Only claim a past promo if it's actually in that dated history; if the history doesn't reach back that far, say so plainly (monitoring may not have been running that long) rather than guessing.",
   "Keep it tight: 2–5 sentences, plain English, no jargon, and make the next step specific enough to do today.",
 ].join(" ");
 
@@ -49,6 +50,43 @@ const SCHEMA = {
   },
   required: ["answerable", "answer"],
 };
+
+/** The FULL synthesized picture — every pillar the app computes, compacted to a
+ *  headline + a few key items so Rani reasons like the whole product, not one page.
+ *  Shared by the assistant and the coverage dev route. */
+export function makeIntel(scorecard: Scorecard, goals: Record<string, any>): Record<string, unknown> {
+  const g = goals;
+  const fnd = g.findability && !g.findability.empty ? g.findability : null;
+  const aif = g.aiFindability && !g.aiFindability.empty ? g.aiFindability : null;
+  const arr = (x: any): any[] => (Array.isArray(x) ? x : []);
+  const clip = (s: any, n = 160): string | undefined => (s == null ? undefined : String(s).slice(0, n));
+  const themeOf = (x: any) => (typeof x === "string" ? x : x?.theme ?? x?.name ?? x?.format ?? x?.topic);
+  return {
+    scorecard: scorecard.empty ? null : {
+      positionScore: scorecard.composite.you, rank: scorecard.composite.rank, of: scorecard.composite.total,
+      headline: scorecard.headline,
+      metrics: scorecard.metrics.map((m) => ({ metric: m.label, you: m.you, marketAvg: m.avg, best: m.best, leader: m.bestName })),
+    },
+    briefing: g.briefing ? { headline: clip(g.briefing.headline), summary: clip(g.briefing.summary, 240) } : null,
+    you: g.you ? { health: g.you.synthesis?.health, summary: clip(g.you.synthesis?.summary, 240), customersLove: arr(g.you.synthesis?.loves).slice(0, 4).map(themeOf), gripes: arr(g.you.synthesis?.gripes).slice(0, 3).map((x: any) => x?.theme ?? x), price: g.you.price } : null,
+    findability: fnd ? { score: fnd.score, inTop3: fnd.coverage?.inTop3, ofTerms: fnd.coverage?.total, losing: arr(fnd.keywords).filter((k: any) => k.yourRank == null || k.yourRank > 3).slice(0, 6).map((k: any) => ({ term: k.term, yourRank: k.yourRank, leader: k.topCompetitor })) } : null,
+    aiSearch: aif ? { score: aif.score, engines: aif.engines, aiRecommends: arr(aif.competitorsRecommended).slice(0, 5).map((c: any) => c.name) } : null,
+    reviewPulse: g.pulse ? { summary: clip(g.pulse.summary), rising: arr(g.pulse.rising).slice(0, 4).map(themeOf), fading: arr(g.pulse.fading).slice(0, 3).map(themeOf), ratingDelta: g.pulse.ratingDelta, newReviews: g.pulse.newReviews } : null,
+    socialPulse: g.socialPulse ? { summary: clip(g.socialPulse.summary), risingFormats: arr(g.socialPulse.risingFormats).slice(0, 4).map(themeOf), breakouts: arr(g.socialPulse.breakouts).slice(0, 3).map((b: any) => ({ rival: b.rival, caption: clip(b.caption, 90) })) } : null,
+    whatsWinning: g.winning ? { summary: clip(g.winning.summary), items: arr(g.winning.winning).slice(0, 6).map((x: any) => ({ name: x.name, onYourLineup: x.onYourMenu, move: clip(x.move, 110), momentum: x.momentum })) } : null,
+    contentIdeas: g.content && !g.content.empty ? { swipe: arr(g.content.swipe).slice(0, 4).map((s: any) => ({ format: s.format, from: s.business, yourVersion: clip(s.yourVersion, 120) })), hashtags: arr(g.content.hashtags).slice(0, 6).map((h: any) => h?.tag ?? h), collabs: arr(g.content.collabs).slice(0, 4).map((c: any) => c?.handle ?? c) } : null,
+    competitorDeals: g.deals ? { summary: clip(g.deals.summary), deals: arr(g.deals.deals).slice(0, 5).map((d: any) => ({ rival: d.rival, deal: clip(d.deal, 110), when: d.when })), suggestedMoves: arr(g.deals.moves).slice(0, 4).map((m: any) => clip(m, 120)) } : null,
+    unmetDemand: g.demand ? { summary: clip(g.demand.summary), needs: arr(g.demand.demands).slice(0, 5).map((x: any) => ({ need: x.need, move: clip(x.move, 110), servedLocally: x.servedLocally })) } : null,
+    localTrends: g.localTrends ? { summary: clip(g.localTrends.summary), trends: arr(g.localTrends.trends).slice(0, 5).map((t: any) => ({ topic: t.topic, momentum: t.momentum, yourMove: clip(t.yourMove, 110) })) } : null,
+    flyerDeals: g.flyerDeals && !g.flyerDeals.empty ? arr(g.flyerDeals.deals).slice(0, 8) : null,
+  };
+}
+
+/** Which pillars are populated for a workspace — powers the coverage dev route. */
+export function intelCoverage(scorecard: Scorecard, goals: Record<string, any>): Record<string, boolean> {
+  const intel = makeIntel(scorecard, goals);
+  return Object.fromEntries(Object.entries(intel).map(([k, v]) => [k, v != null]));
+}
 
 type Prompt = { text: string; workspace: string; sources: Source[] } | { guard: string };
 
@@ -169,50 +207,17 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   // ── the synthesized intelligence: scorecard + pillar headlines ──────────────
   const { data: wRow } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const goals = (wRow?.goals ?? {}) as Record<string, any>;
-  const fnd = goals.findability && !goals.findability.empty ? goals.findability : null;
-  const aif = goals.aiFindability && !goals.aiFindability.empty ? goals.aiFindability : null;
-  const g = goals;
-  const arr = (x: any): any[] => (Array.isArray(x) ? x : []);
-  const clip = (s: any, n = 160): string | undefined => (s == null ? undefined : String(s).slice(0, n));
-  const themeOf = (x: any) => (typeof x === "string" ? x : x?.theme ?? x?.name ?? x?.format ?? x?.topic);
+  const intel = makeIntel(scorecard, goals);
 
-  // The FULL synthesized picture — every pillar the app computes, compacted to
-  // headline + a few key items so Rani reasons like the whole product, not one page.
-  const intel = {
-    // your position + every metric as you vs market-average vs the leader (with gaps)
-    scorecard: scorecard.empty ? null : {
-      positionScore: scorecard.composite.you, rank: scorecard.composite.rank, of: scorecard.composite.total,
-      headline: scorecard.headline,
-      metrics: scorecard.metrics.map((m) => ({ metric: m.label, you: m.you, marketAvg: m.avg, best: m.best, leader: m.bestName })),
-    },
-    // one-line exec briefing
-    briefing: g.briefing ? { headline: clip(g.briefing.headline), summary: clip(g.briefing.summary, 240) } : null,
-    // how YOU are doing: health, what customers love/gripe, price position
-    you: g.you ? { health: g.you.synthesis?.health, summary: clip(g.you.synthesis?.summary, 240), customersLove: arr(g.you.synthesis?.loves).slice(0, 4).map(themeOf), gripes: arr(g.you.synthesis?.gripes).slice(0, 3).map((x: any) => x?.theme ?? x), price: g.you.price } : null,
-    // Google findability: your score + the searches you're losing (fix targets)
-    findability: fnd ? {
-      score: fnd.score, inTop3: fnd.coverage?.inTop3, ofTerms: fnd.coverage?.total,
-      losing: (fnd.keywords ?? []).filter((k: any) => k.yourRank == null || k.yourRank > 3).slice(0, 6).map((k: any) => ({ term: k.term, yourRank: k.yourRank, leader: k.topCompetitor })),
-    } : null,
-    // AI search: your score + who the AIs recommend instead
-    aiSearch: aif ? { score: aif.score, engines: aif.engines, aiRecommends: (aif.competitorsRecommended ?? []).slice(0, 5).map((c: any) => c.name) } : null,
-    // review pulse: rising/fading themes + rating movement
-    reviewPulse: g.pulse ? { summary: clip(g.pulse.summary), rising: arr(g.pulse.rising).slice(0, 4).map(themeOf), fading: arr(g.pulse.fading).slice(0, 3).map(themeOf), ratingDelta: g.pulse.ratingDelta, newReviews: g.pulse.newReviews } : null,
-    // social pulse: what formats are breaking out on rivals' feeds
-    socialPulse: g.socialPulse ? { summary: clip(g.socialPulse.summary), risingFormats: arr(g.socialPulse.risingFormats).slice(0, 4).map(themeOf), breakouts: arr(g.socialPulse.breakouts).slice(0, 3).map((b: any) => ({ rival: b.rival, caption: clip(b.caption, 90) })) } : null,
-    // what's winning in the market + whether it's already on your lineup
-    whatsWinning: g.winning ? { summary: clip(g.winning.summary), items: arr(g.winning.winning).slice(0, 6).map((x: any) => ({ name: x.name, onYourLineup: x.onYourMenu, move: clip(x.move, 110), momentum: x.momentum })) } : null,
-    // content ideas: swipe-worthy formats, hashtags, collab candidates
-    contentIdeas: g.content && !g.content.empty ? { swipe: arr(g.content.swipe).slice(0, 4).map((s: any) => ({ format: s.format, from: s.business, yourVersion: clip(s.yourVersion, 120) })), hashtags: arr(g.content.hashtags).slice(0, 6).map((h: any) => h?.tag ?? h), collabs: arr(g.content.collabs).slice(0, 4).map((c: any) => c?.handle ?? c) } : null,
-    // rivals' live deals/promotions + suggested counter-moves
-    competitorDeals: g.deals ? { summary: clip(g.deals.summary), deals: arr(g.deals.deals).slice(0, 5).map((d: any) => ({ rival: d.rival, deal: clip(d.deal, 110), when: d.when })), suggestedMoves: arr(g.deals.moves).slice(0, 4).map((m: any) => clip(m, 120)) } : null,
-    // unmet demand from reviews (what customers want that isn't served well)
-    unmetDemand: g.demand ? { summary: clip(g.demand.summary), needs: arr(g.demand.demands).slice(0, 5).map((x: any) => ({ need: x.need, move: clip(x.move, 110), servedLocally: x.servedLocally })) } : null,
-    // local trends + your recommended move for each
-    localTrends: g.localTrends ? { summary: clip(g.localTrends.summary), trends: arr(g.localTrends.trends).slice(0, 5).map((t: any) => ({ topic: t.topic, momentum: t.momentum, yourMove: clip(t.yourMove, 110) })) } : null,
-    // rivals' current flyer/sale prices (when present)
-    flyerDeals: g.flyerDeals && !g.flyerDeals.empty ? arr(g.flyerDeals.deals).slice(0, 8) : null,
-  };
+  // ── dated promotions history: rivals' past sale/deal posts with dates, so Rani
+  //    can answer "was there a sale on X a month ago?" as far back as we collected.
+  const PROMO_RE = /\b(sale|deal|discount|% ?off|\d+% |bogo|buy one|combo|special|offer|promo|coupon|festival|diwali|holiday|clearance|limited time|free )/i;
+  const promotionsHistory = (content ?? [])
+    .map((c: any) => ({ business: (c.business as any)?.canonical_name ?? "Unknown", platform: c.platform as string, when: c.published_at ?? c.observed_at, text: `${c.text ?? ""} ${c.media?.[0]?.excerpt ?? ""}`.replace(/\s+/g, " ").trim() }))
+    .filter((x) => x.when && PROMO_RE.test(x.text))
+    .sort((a, b) => String(b.when).localeCompare(String(a.when)))
+    .slice(0, 15)
+    .map((x) => ({ business: x.business, on: String(x.when).slice(0, 10), via: SOURCE_LABEL[x.platform] ?? x.platform, promo: x.text.slice(0, 160) }));
 
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
@@ -226,6 +231,7 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     recommendations: report.recommendations.slice(0, 8).map((r) => ({ title: r.title, action: r.action })),
     monitoringCost: { projectedPerMonthUsd: report.cost.projectedMonthlyUsd, perBusinessPerMonthUsd: report.cost.perBusinessMonthlyUsd, spentInWindowUsd: report.cost.totalUsd, days: report.cost.days },
     sampleOffersByBusiness: sample,
+    promotionsHistory,   // dated past deals/sales (as far back as collected)
     localNews,
     sources: sourceNotes,
   };
