@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     const { data } = await svc.from("workspace").select("id,name,vertical,target_business_id").eq("id", workspaceId).maybeSingle();
     if (!data) return NextResponse.json({ error: "not found" }, { status: 404 });
     const r = await refreshAiFindability(data as WorkspaceRow);
-    return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines });
+    return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty });
   }
 
   const auth = await requireOrg();
@@ -32,5 +32,5 @@ export async function POST(req: Request) {
   const state = await activeWorkspace();
   if (state.status !== "ok") return NextResponse.json({ error: "no workspace" }, { status: 400 });
   const r = await refreshAiFindability(state.workspace);
-  return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines });
+  return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty });
 }

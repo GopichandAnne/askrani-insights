@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { refreshFindability, computeFindabilityBrief } from "@/lib/findability";
+import { refreshAiFindability } from "@/lib/aifindability";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 import { type WorkspaceRow } from "@/lib/workspace";
 
@@ -56,6 +57,11 @@ async function run(req: Request) {
         // goals.findabilityBrief — no scrape/LLM at digest time).
         const brief = await computeFindabilityBrief(ws);
         await svc.from("workspace").update({ goals: { ...goals, lastFindabilityAt: new Date().toISOString(), findabilityBrief: brief } }).eq("id", ws.id);
+        // AI findability shares the same keyword set — refresh it here too, but only
+        // when a search-grounded engine is configured (else it just returns empty).
+        if (process.env.PERPLEXITY_API_KEY) {
+          try { await refreshAiFindability(ws); } catch { /* best-effort */ }
+        }
         processed++;
       } else skipped++;
     } catch (e) {
