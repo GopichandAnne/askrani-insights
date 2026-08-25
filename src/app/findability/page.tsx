@@ -1,11 +1,13 @@
 import { Fragment } from "react";
 import { activeWorkspace } from "@/lib/workspace";
 import { getOrMakeFindabilityReport, type FindabilityReport, FINDABILITY_REFRESH_CREDITS } from "@/lib/findability";
+import { getAiFindability } from "@/lib/aifindability";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { FindabilityRefreshButton } from "@/components/FindabilityRefreshButton";
 import { FindabilityKeywords } from "@/components/FindabilityKeywords";
+import { AiFindabilityCard } from "@/components/AiFindabilityCard";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -33,6 +35,7 @@ export default async function FindabilityPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Findability" />;
   const report: FindabilityReport = await getOrMakeFindabilityReport(state.workspace);
+  const ai = await getAiFindability(state.workspace);
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -214,6 +217,9 @@ export default async function FindabilityPage() {
           </p>
         </>
       )}
+
+      {/* AI search — the AI-assistant twin of Google search, same keyword set */}
+      <AiFindabilityCard ai={ai} />
 
       {/* Owner control: which exact searches we track (dish/near-me/nearby towns) */}
       <FindabilityKeywords workspaceId={state.workspace.id} vertical={state.workspace.vertical} />

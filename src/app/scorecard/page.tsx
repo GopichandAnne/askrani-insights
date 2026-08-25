@@ -5,7 +5,6 @@ import { collectionActive } from "@/lib/jobs";
 import { buildScorecard } from "@/lib/scorecard";
 import { ScorecardView } from "@/components/ScorecardView";
 import { ShareReadButton } from "@/components/ShareReadButton";
-import { AiFindabilityButton } from "@/components/AiFindabilityButton";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -26,10 +25,7 @@ export default async function ScorecardPage() {
           <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">You vs Your Market</h1>
           <p className="mt-1 max-w-2xl text-sm text-ink-soft">How you stack up against your competitors — rating, price, social reach, AI &amp; Google findability — at a glance, with a plan to beat them.</p>
         </div>
-        <div className="flex flex-wrap items-start gap-2">
-          <AiFindabilityButton />
-          {!sc.empty && <ShareReadButton />}
-        </div>
+        {!sc.empty && <ShareReadButton />}
       </header>
 
       {ephemeral && !sc.empty && (
