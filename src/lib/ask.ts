@@ -24,7 +24,8 @@ const GROUNDING = [
   "For EVERY answer, be a strategist who drives action — not a data-reader. Structure: (1) answer directly with the specific numbers from DATA, (2) briefly say WHY when it helps, (3) give ONE concrete, doable next step to fix it or capitalize on it. Always end with that next step.",
   "Ground everything in DATA — real names and real numbers, never invent or estimate figures that aren't present. If a specific number is genuinely missing, say briefly how to get it, but STILL give your best strategic guidance from what IS there (especially the scorecard).",
   "Map the owner's wording to the DATA and never claim a metric 'isn't available' when the scorecard has it: 'social'/'social search'/'social score' → the Social reach metric; 'AI'/'ChatGPT'/'AI search' → AI search; 'ranking'/'show up on Google'/'found' → Findability; 'reputation'/'stars' → Rating.",
-  "Prices are USD. 'offers' = menu items/products. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
+  "Prices are USD. 'offers' = whatever this business sells. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
+  "Tailor EVERY answer to DATA.businessType — reason and advise as an expert in THAT industry, and read the generic pillars through its lens: 'offers'/'winning items'/'menu' mean this business's actual thing (dishes for a restaurant, products for a grocery, treatments/services for a salon or clinic, listings for real estate, classes for fitness). Never give generic or off-industry advice, and never assume it's a restaurant unless businessType says so.",
   "Keep it tight: 2–5 sentences, plain English, no jargon, and make the next step specific enough to do today.",
 ].join(" ");
 
@@ -170,7 +171,13 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   const goals = (wRow?.goals ?? {}) as Record<string, any>;
   const fnd = goals.findability && !goals.findability.empty ? goals.findability : null;
   const aif = goals.aiFindability && !goals.aiFindability.empty ? goals.aiFindability : null;
+  const g = goals;
+  const arr = (x: any): any[] => (Array.isArray(x) ? x : []);
+  const clip = (s: any, n = 160): string | undefined => (s == null ? undefined : String(s).slice(0, n));
+  const themeOf = (x: any) => (typeof x === "string" ? x : x?.theme ?? x?.name ?? x?.format ?? x?.topic);
 
+  // The FULL synthesized picture — every pillar the app computes, compacted to
+  // headline + a few key items so Rani reasons like the whole product, not one page.
   const intel = {
     // your position + every metric as you vs market-average vs the leader (with gaps)
     scorecard: scorecard.empty ? null : {
@@ -178,6 +185,10 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
       headline: scorecard.headline,
       metrics: scorecard.metrics.map((m) => ({ metric: m.label, you: m.you, marketAvg: m.avg, best: m.best, leader: m.bestName })),
     },
+    // one-line exec briefing
+    briefing: g.briefing ? { headline: clip(g.briefing.headline), summary: clip(g.briefing.summary, 240) } : null,
+    // how YOU are doing: health, what customers love/gripe, price position
+    you: g.you ? { health: g.you.synthesis?.health, summary: clip(g.you.synthesis?.summary, 240), customersLove: arr(g.you.synthesis?.loves).slice(0, 4).map(themeOf), gripes: arr(g.you.synthesis?.gripes).slice(0, 3).map((x: any) => x?.theme ?? x), price: g.you.price } : null,
     // Google findability: your score + the searches you're losing (fix targets)
     findability: fnd ? {
       score: fnd.score, inTop3: fnd.coverage?.inTop3, ofTerms: fnd.coverage?.total,
@@ -185,10 +196,27 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     } : null,
     // AI search: your score + who the AIs recommend instead
     aiSearch: aif ? { score: aif.score, engines: aif.engines, aiRecommends: (aif.competitorsRecommended ?? []).slice(0, 5).map((c: any) => c.name) } : null,
+    // review pulse: rising/fading themes + rating movement
+    reviewPulse: g.pulse ? { summary: clip(g.pulse.summary), rising: arr(g.pulse.rising).slice(0, 4).map(themeOf), fading: arr(g.pulse.fading).slice(0, 3).map(themeOf), ratingDelta: g.pulse.ratingDelta, newReviews: g.pulse.newReviews } : null,
+    // social pulse: what formats are breaking out on rivals' feeds
+    socialPulse: g.socialPulse ? { summary: clip(g.socialPulse.summary), risingFormats: arr(g.socialPulse.risingFormats).slice(0, 4).map(themeOf), breakouts: arr(g.socialPulse.breakouts).slice(0, 3).map((b: any) => ({ rival: b.rival, caption: clip(b.caption, 90) })) } : null,
+    // what's winning in the market + whether it's already on your lineup
+    whatsWinning: g.winning ? { summary: clip(g.winning.summary), items: arr(g.winning.winning).slice(0, 6).map((x: any) => ({ name: x.name, onYourLineup: x.onYourMenu, move: clip(x.move, 110), momentum: x.momentum })) } : null,
+    // content ideas: swipe-worthy formats, hashtags, collab candidates
+    contentIdeas: g.content && !g.content.empty ? { swipe: arr(g.content.swipe).slice(0, 4).map((s: any) => ({ format: s.format, from: s.business, yourVersion: clip(s.yourVersion, 120) })), hashtags: arr(g.content.hashtags).slice(0, 6).map((h: any) => h?.tag ?? h), collabs: arr(g.content.collabs).slice(0, 4).map((c: any) => c?.handle ?? c) } : null,
+    // rivals' live deals/promotions + suggested counter-moves
+    competitorDeals: g.deals ? { summary: clip(g.deals.summary), deals: arr(g.deals.deals).slice(0, 5).map((d: any) => ({ rival: d.rival, deal: clip(d.deal, 110), when: d.when })), suggestedMoves: arr(g.deals.moves).slice(0, 4).map((m: any) => clip(m, 120)) } : null,
+    // unmet demand from reviews (what customers want that isn't served well)
+    unmetDemand: g.demand ? { summary: clip(g.demand.summary), needs: arr(g.demand.demands).slice(0, 5).map((x: any) => ({ need: x.need, move: clip(x.move, 110), servedLocally: x.servedLocally })) } : null,
+    // local trends + your recommended move for each
+    localTrends: g.localTrends ? { summary: clip(g.localTrends.summary), trends: arr(g.localTrends.trends).slice(0, 5).map((t: any) => ({ topic: t.topic, momentum: t.momentum, yourMove: clip(t.yourMove, 110) })) } : null,
+    // rivals' current flyer/sale prices (when present)
+    flyerDeals: g.flyerDeals && !g.flyerDeals.empty ? arr(g.flyerDeals.deals).slice(0, 8) : null,
   };
 
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
+    businessType: ws.vertical,   // restaurant | grocery | salon | dental | fitness | real_estate | smoke_vape | other
     intel,
     businesses: report.pricing.map((p) => ({
       name: p.name, you: p.isTarget, pricedItems: p.offers, avgPrice: p.avgPrice, minPrice: p.minPrice, maxPrice: p.maxPrice,
