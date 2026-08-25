@@ -27,6 +27,7 @@ export interface AiFindabilityReport {
   queries: number;
   at: string;
   empty?: boolean;
+  note?: string;      // when empty: WHY (e.g. "Perplexity 402: insufficient credits")
 }
 
 const SYSTEM =
@@ -81,13 +82,14 @@ function bizIndex(textLower: string, name: string): number {
 // These are the SEARCH-GROUNDED assistants people actually use — their answers
 // reflect live local results. Add Google AI Overviews (via a SERP provider) or
 // Gemini the same way; they just append to the engine list.
-interface EngineResult { engine: string; text: string }
-type EngineFn = (q: string) => Promise<EngineResult | null>;
+interface EngineResult { engine: string; text: string; error?: string }
+type EngineFn = (q: string) => Promise<EngineResult>;
 
-/** Perplexity Sonar (PERPLEXITY_API_KEY). */
-async function perplexityAsk(q: string): Promise<EngineResult | null> {
+/** Perplexity Sonar (PERPLEXITY_API_KEY). Surfaces the HTTP failure reason (e.g.
+ *  402 insufficient credits, 401 bad key) instead of silently returning nothing. */
+async function perplexityAsk(q: string): Promise<EngineResult> {
   const key = process.env.PERPLEXITY_API_KEY;
-  if (!key) return null;
+  if (!key) return { engine: "Perplexity", text: "", error: "no key in server env" };
   try {
     const r = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -95,17 +97,17 @@ async function perplexityAsk(q: string): Promise<EngineResult | null> {
       body: JSON.stringify({ model: process.env.PERPLEXITY_MODEL || "sonar", max_tokens: 500, messages: [{ role: "system", content: ENGINE_SYSTEM }, { role: "user", content: q }] }),
       signal: AbortSignal.timeout(30000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) return { engine: "Perplexity", text: "", error: `${r.status}: ${(await r.text().catch(() => "")).slice(0, 140)}` };
     const d = await r.json();
     return { engine: "Perplexity", text: String(d?.choices?.[0]?.message?.content ?? "") };
-  } catch { return null; }
+  } catch (e) { return { engine: "Perplexity", text: "", error: (e as Error).message }; }
 }
 
 /** ChatGPT with web search (OPENAI_API_KEY) — a search-grounded model does the
  *  browsing. Model is overridable via OPENAI_SEARCH_MODEL if the name changes. */
-async function chatgptAsk(q: string): Promise<EngineResult | null> {
+async function chatgptAsk(q: string): Promise<EngineResult> {
   const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
+  if (!key) return { engine: "ChatGPT", text: "", error: "no key in server env" };
   const model = process.env.OPENAI_SEARCH_MODEL || "gpt-4o-search-preview";
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -114,15 +116,15 @@ async function chatgptAsk(q: string): Promise<EngineResult | null> {
       body: JSON.stringify({ model, messages: [{ role: "system", content: ENGINE_SYSTEM }, { role: "user", content: q }] }),
       signal: AbortSignal.timeout(40000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) return { engine: "ChatGPT", text: "", error: `${r.status}: ${(await r.text().catch(() => "")).slice(0, 140)}` };
     const d = await r.json();
     return { engine: "ChatGPT", text: String(d?.choices?.[0]?.message?.content ?? "") };
-  } catch { return null; }
+  } catch (e) { return { engine: "ChatGPT", text: "", error: (e as Error).message }; }
 }
 
 /** Knowledge-only fallback (Claude) — used ONLY when no search engine is keyed.
  *  It can't browse, so it rarely knows small local shops → the scan reports empty. */
-async function knowledgeAsk(q: string): Promise<EngineResult | null> {
+async function knowledgeAsk(q: string): Promise<EngineResult> {
   try {
     const { data } = await getLlm().callStructured<{ businesses: { name: string }[] }>({
       system: SYSTEM, text: `Customer search: "${q}". List the specific local businesses you'd recommend, best first.`,
@@ -130,7 +132,7 @@ async function knowledgeAsk(q: string): Promise<EngineResult | null> {
     });
     const name = getLlm().provider === "anthropic" ? "Claude" : getLlm().provider;
     return { engine: name, text: (Array.isArray(data.businesses) ? data.businesses : []).map((b) => String(b.name ?? "")).join("\n") };
-  } catch { return null; }
+  } catch (e) { return { engine: "Claude", text: "", error: (e as Error).message }; }
 }
 
 /** The search-grounded engines currently configured (by env keys). */
@@ -190,11 +192,13 @@ export async function refreshAiFindability(ws: WorkspaceRow, opts: { maxQueries?
   // ask every question on every engine; scan each answer (order = prominence)
   const contrib = new Map<string, number[]>();
   const enginesUsed = new Set<string>();
+  const engineErrors: string[] = [];
   let hadAnswer = false;
   for (const q of questions) {
     for (const ask of engineList) {
       const res = await ask(q);
-      if (!res || !res.text.trim()) continue;
+      if (res.error) { engineErrors.push(`${res.engine} ${res.error}`); continue; }
+      if (!res.text.trim()) continue;
       hadAnswer = true;
       enginesUsed.add(res.engine);
       const lower = res.text.toLowerCase();
@@ -220,11 +224,17 @@ export async function refreshAiFindability(ws: WorkspaceRow, opts: { maxQueries?
   // knowledge-only model can't know small local shops, so we mark empty rather than
   // show a misleading flat zero. Lights up the moment a search engine key is set.
   const empty = !grounded || !hadAnswer;
+  // When empty, say WHY so it's fixable at a glance (usually an engine HTTP error
+  // like "402 insufficient credits" or a missing key), not a silent blank.
+  const note = empty
+    ? (engineErrors[0] ?? (grounded ? "engines returned no local businesses" : "no search-grounded engine key set in the server env"))
+    : undefined;
   const report: AiFindabilityReport = {
     score: targetScore, byBiz, competitorsRecommended,
     engines: [...enginesUsed],
     queries: questions.length, at,
     ...(empty ? { empty: true } : {}),
+    ...(note ? { note } : {}),
   };
 
   // persist (re-read goals so we don't clobber a concurrent writer)

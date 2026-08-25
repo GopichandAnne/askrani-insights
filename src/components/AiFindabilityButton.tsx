@@ -23,7 +23,14 @@ export function AiFindabilityButton() {
         return;
       }
       if (d?.ok && d.empty) {
-        setMsg("Ran, but no AI recommendations came back — add a search-grounded key (Perplexity) so the AI can actually search.");
+        const seesKey = d?.configured?.perplexity || d?.configured?.openai;
+        if (!seesKey) {
+          setMsg("No search key detected in the server yet — add PERPLEXITY_API_KEY in Vercel and redeploy (env changes need a fresh deploy).");
+        } else if (d?.note) {
+          setMsg(`Engine issue: ${d.note}`); // e.g. "Perplexity 402: insufficient credits"
+        } else {
+          setMsg("Ran, but the AI returned no local businesses this time.");
+        }
       } else {
         setMsg(d?.error ?? "Couldn’t run right now — try again shortly.");
       }

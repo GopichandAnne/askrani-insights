@@ -14,6 +14,9 @@ export const maxDuration = 120;
  *  - the owner (authenticated) — runs it for their active workspace on demand.
  */
 export async function POST(req: Request) {
+  // whether the SERVER actually sees a search-grounded key (distinguishes an env
+  // that didn't take from an engine that ran but returned nothing)
+  const configured = { perplexity: !!process.env.PERPLEXITY_API_KEY, openai: !!process.env.OPENAI_API_KEY };
   const secret = process.env.WORKER_SECRET;
   const provided = req.headers.get("x-worker-secret") ?? new URL(req.url).searchParams.get("secret");
 
@@ -24,7 +27,7 @@ export async function POST(req: Request) {
     const { data } = await svc.from("workspace").select("id,name,vertical,target_business_id").eq("id", workspaceId).maybeSingle();
     if (!data) return NextResponse.json({ error: "not found" }, { status: 404 });
     const r = await refreshAiFindability(data as WorkspaceRow);
-    return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty });
+    return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty, note: r.note, configured });
   }
 
   const auth = await requireOrg();
@@ -32,5 +35,5 @@ export async function POST(req: Request) {
   const state = await activeWorkspace();
   if (state.status !== "ok") return NextResponse.json({ error: "no workspace" }, { status: 400 });
   const r = await refreshAiFindability(state.workspace);
-  return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty });
+  return NextResponse.json({ ok: true, score: r.score, queries: r.queries, engines: r.engines, empty: !!r.empty, note: r.note, configured });
 }
