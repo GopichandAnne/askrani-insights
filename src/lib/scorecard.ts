@@ -40,7 +40,20 @@ const METRICS: { key: MetricKey; label: string; color: MetricScore["color"] }[] 
   { key: "findability", label: "Findability", color: "teal" },
 ];
 
-interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null; ai?: number | null }
+interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null; ai?: number | null; items?: { name: string; price: number }[]; priceBasis?: number | null }
+
+// Vertical-agnostic item normalizer for like-for-like matching — strips
+// parentheticals, sizes/units and stray numbers, keeps the item words. No
+// hardcoded vocab, so it matches "Chicken Biryani" (restaurant), "Paneer 1lb"
+// (grocery), "Gel Manicure" (salon) alike.
+const normItem = (s: string): string => s.toLowerCase()
+  .replace(/\([^)]*\)/g, " ")
+  .replace(/\b\d+(?:\.\d+)?\s*(?:pcs?|pieces?|oz|ml|lbs?|kg|ct|pack)\b/g, " ")
+  .replace(/\b\d+(?:\.\d+)?\b/g, " ")
+  .replace(/[^a-z ]+/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+const median = (xs: number[]): number => { const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
 // `db` override lets this run outside a request (worker / snapshot script) with a
 // service-role client — `any` because SSR and service clients have distinct generic
@@ -70,8 +83,9 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
   for (const s of (goals.findability?.share ?? []) as { name: string; isYou: boolean; topThree: number; total: number }[]) {
     if (s.total > 0) get(s.isYou ? ws.name : s.name, s.isYou).findPct = (s.topThree / s.total) * 100;
   }
-  // price: report offers first, then flyer fallback (your own + rivals')
-  for (const p of report.pricing) if (p.avgPrice != null) get(p.name, p.isTarget).avgPrice = p.avgPrice;
+  // price: report offers first, then flyer fallback (your own + rivals'). Keep the
+  // per-item prices too — the score is built like-for-like from them below.
+  for (const p of report.pricing) { const r = get(p.name, p.isTarget); if (p.avgPrice != null) r.avgPrice = p.avgPrice; if (p.items?.length) r.items = p.items; }
   const own = get(ws.name, true);
   if (own.avgPrice == null) {
     const ps = ((goals.myFlyerDeals?.deals ?? []) as any[]).map((d) => priceNum(d.price)).filter((n): n is number => n != null);
@@ -98,7 +112,32 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
   get(ws.name, true); // ensure target present
 
   const all = [...byKey.values()];
-  const prices = all.map((r) => r.avgPrice).filter((n): n is number => n != null);
+
+  // ── Price basis: LIKE-FOR-LIKE, not average-of-everything ───────────────────
+  // Compare businesses only on items they SHARE (a "common basket"), so menu size
+  // and composition (catering trays, big platters, a longer scraped menu) can't
+  // skew the score. Build the basket from items offered by ≥2 businesses (matched
+  // by the vertical-agnostic normalizer). A business is scored on its own prices
+  // for those shared items. Fallbacks keep it honest when data is thin:
+  //   • no real shared basket in the market → robust MEDIAN of each business's
+  //     own items (median resists the platter/catering skew the old mean had),
+  //   • no items at all (flyer-only) → the flyer average already on avgPrice.
+  const bizByItem = new Map<string, Set<string>>();
+  for (const r of all) for (const it of r.items ?? []) { const nn = normItem(it.name); if (nn.length < 3) continue; (bizByItem.get(nn) ?? bizByItem.set(nn, new Set()).get(nn)!).add(normName(r.name)); }
+  const commonBasket = new Set([...bizByItem].filter(([, s]) => s.size >= 2).map(([n]) => n));
+  const basketMode = commonBasket.size >= 3; // enough overlap to be a real basket
+  const priceBasisOf = (r: Raw): number | null => {
+    const items = r.items ?? [];
+    if (basketMode) {
+      const bp = items.filter((it) => commonBasket.has(normItem(it.name))).map((it) => it.price);
+      return bp.length >= 2 ? bp.reduce((a, b) => a + b, 0) / bp.length : null; // too little overlap → no fair price score
+    }
+    const ps = items.map((it) => it.price);
+    return ps.length ? median(ps) : (r.avgPrice ?? null);
+  };
+  for (const r of all) r.priceBasis = priceBasisOf(r);
+
+  const prices = all.map((r) => r.priceBasis).filter((n): n is number => n != null);
   const minP = prices.length ? Math.min(...prices) : 0, maxP = prices.length ? Math.max(...prices) : 0;
   const priceScore = (v?: number | null) => v == null ? null : (maxP === minP ? 60 : round(((maxP - v) / (maxP - minP)) * 100));
   const folls = all.map((r) => r.followers).filter((n): n is number => n != null);
@@ -108,7 +147,7 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
   const bscores: BizScore[] = all.map((r) => {
     const scores: Record<MetricKey, number | null> = {
       rating: r.rating != null ? round((r.rating / 5) * 100) : null,
-      price: priceScore(r.avgPrice),
+      price: priceScore(r.priceBasis),
       social: socialScore(r.followers),
       ai: r.ai != null ? r.ai : null,
       findability: r.findPct != null ? round(r.findPct) : null,

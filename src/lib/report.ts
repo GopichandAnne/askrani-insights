@@ -18,6 +18,7 @@ export interface PricingRow {
   avgPrice: number | null;
   minPrice: number | null;
   maxPrice: number | null;
+  items: { name: string; price: number }[]; // deduped priced items — for like-for-like basket scoring
 }
 export interface RatingSource {
   source: string; // 'google' | 'yelp' | ...
@@ -125,26 +126,27 @@ export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30, db?: DbO
   const nameOf = (id: string) => nameById.get(id) ?? "—";
   const isTarget = (id: string) => id === ids.targetId;
 
-  // ── pricing per business (dedupe by entity_text, keep numeric prices) ──
-  const priceAcc = new Map<string, { seen: Set<string>; prices: number[] }>();
+  // ── pricing per business (dedupe by entity_text, keep the priced items) ──
+  const priceAcc = new Map<string, { seen: Set<string>; items: { name: string; price: number }[] }>();
   for (const o of offers ?? []) {
     const bid = (o as any).business_id as string;
-    const label = String((o as any).entity_text ?? "").toLowerCase();
+    const raw = String((o as any).entity_text ?? "");
+    const label = raw.toLowerCase();
     const amt = Number((o as any).pricing?.amount);
-    const acc = priceAcc.get(bid) ?? { seen: new Set<string>(), prices: [] };
+    const acc = priceAcc.get(bid) ?? { seen: new Set<string>(), items: [] };
     if (label && acc.seen.has(label)) {
       priceAcc.set(bid, acc);
       continue;
     }
     if (label) acc.seen.add(label);
-    if (Number.isFinite(amt) && amt > 0) acc.prices.push(amt);
+    if (Number.isFinite(amt) && amt > 0) acc.items.push({ name: raw, price: amt });
     priceAcc.set(bid, acc);
   }
   const pricing: PricingRow[] = scope
     .filter((id) => nameById.has(id))
     .map((id) => {
       const acc = priceAcc.get(id);
-      const prices = acc?.prices ?? [];
+      const prices = (acc?.items ?? []).map((i) => i.price);
       const avg = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
       return {
         businessId: id,
@@ -154,6 +156,7 @@ export async function buildWorkspaceReport(ws: WorkspaceRow, days = 30, db?: DbO
         avgPrice: avg != null ? Number(avg.toFixed(2)) : null,
         minPrice: prices.length ? Math.min(...prices) : null,
         maxPrice: prices.length ? Math.max(...prices) : null,
+        items: (acc?.items ?? []).slice(0, 300),
       };
     })
     .sort((a, b) => Number(b.isTarget) - Number(a.isTarget) || b.offers - a.offers);
