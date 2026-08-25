@@ -26,7 +26,7 @@ const GROUNDING = [
   "Map the owner's wording to the DATA and never claim a metric 'isn't available' when the scorecard has it: 'social'/'social search'/'social score' → the Social reach metric; 'AI'/'ChatGPT'/'AI search' → AI search; 'ranking'/'show up on Google'/'found' → Findability; 'reputation'/'stars' → Rating.",
   "Prices are USD. 'offers' = whatever this business sells. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
   "Tailor EVERY answer to DATA.businessType — reason and advise as an expert in THAT industry, and read the generic pillars through its lens: 'offers'/'winning items'/'menu' mean this business's actual thing (dishes for a restaurant, products for a grocery, treatments/services for a salon or clinic, listings for real estate, classes for fitness). Never give generic or off-industry advice, and never assume it's a restaurant unless businessType says so.",
-  "For time-based questions ('was there a sale on X a month ago?', 'what promos ran recently?'), use DATA.promotionsHistory (dated past deals), DATA.intel.competitorDeals (current) and DATA.recentEvents. Only claim a past promo if it's actually in that dated history; if the history doesn't reach back that far, say so plainly (monitoring may not have been running that long) rather than guessing.",
+  "For time-based / historical questions ('was there a sale on X a month ago?', 'what did rivals run last Diwali?', 'what changed recently?'), lead with DATA.marketHistory — the authoritative dated log of deals, ad moves, breakout posts, rising formats and demand (use firstSeen/lastSeen dates) — plus DATA.promotionsHistory, DATA.intel.competitorDeals (current) and DATA.recentEvents. Only claim a past event if it's actually in that dated history; if the history doesn't reach back that far, say so plainly (monitoring may not have been running that long) rather than guessing.",
   "Keep it tight: 2–5 sentences, plain English, no jargon, and make the next step specific enough to do today.",
 ].join(" ");
 
@@ -219,6 +219,23 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     .slice(0, 15)
     .map((x) => ({ business: x.business, on: String(x.when).slice(0, 10), via: SOURCE_LABEL[x.platform] ?? x.platform, promo: x.text.slice(0, 160) }));
 
+  // ── long-range market history (append-only market_event log): dated deals, ad
+  //    moves, breakout posts, rising formats and unmet demand, first-seen date
+  //    first — the authoritative record that lets Rani answer "what did rivals run
+  //    last month / last Diwali?" as monitoring accumulates. Empty for a brand-new
+  //    workspace (nothing that far back exists yet).
+  const { data: mevents } = await supabase
+    .from("market_event")
+    .select("kind,rival,title,detail,first_seen_on,last_seen_on")
+    .eq("workspace_id", ws.id)
+    .order("first_seen_on", { ascending: false })
+    .limit(40);
+  const marketHistory = (mevents ?? []).slice(0, 25).map((e: any) => ({
+    kind: e.kind, rival: e.rival ?? undefined,
+    what: String(e.title ?? "").slice(0, 140), detail: e.detail ? String(e.detail).slice(0, 120) : undefined,
+    firstSeen: e.first_seen_on, lastSeen: e.last_seen_on,
+  }));
+
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
     businessType: ws.vertical,   // restaurant | grocery | salon | dental | fitness | real_estate | smoke_vape | other
@@ -231,7 +248,8 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     recommendations: report.recommendations.slice(0, 8).map((r) => ({ title: r.title, action: r.action })),
     monitoringCost: { projectedPerMonthUsd: report.cost.projectedMonthlyUsd, perBusinessPerMonthUsd: report.cost.perBusinessMonthlyUsd, spentInWindowUsd: report.cost.totalUsd, days: report.cost.days },
     sampleOffersByBusiness: sample,
-    promotionsHistory,   // dated past deals/sales (as far back as collected)
+    marketHistory,       // authoritative append-only log: dated deals/moves over time
+    promotionsHistory,   // raw dated promo posts (supplements marketHistory)
     localNews,
     sources: sourceNotes,
   };
