@@ -48,7 +48,10 @@ async function run(req: Request) {
 
     try {
       const r = await refreshFindability(ws);
-      if (r.activated) {
+      // Only mark done when we actually captured rank snapshots — a run that
+      // activated but produced nothing (keyword-gen failed) must retry next tick,
+      // not stamp lastFindabilityAt and skip the workspace for a cadence period.
+      if (r.activated && r.snapshots > 0) {
         // Cache the compact brief on goals for the weekly digest (buildDigest reads
         // goals.findabilityBrief — no scrape/LLM at digest time).
         const brief = await computeFindabilityBrief(ws);

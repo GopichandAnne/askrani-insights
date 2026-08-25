@@ -167,7 +167,11 @@ export async function refreshFindability(ws: WorkspaceRow, opts: { runs?: number
     });
     ({ data: kws } = await loadKw());
   }
-  if (!kws?.length) return { ...empty, activated: true };
+  // Keyword generation failed (e.g. the LLM was unavailable / out of credits).
+  // Report NOT activated so the caller retries next tick — returning activated:true
+  // here made the daily tick stamp lastFindabilityAt and skip this workspace for a
+  // whole cadence period, permanently stranding it on a transient outage.
+  if (!kws?.length) return empty;
 
   const runs = Math.min(3, Math.max(1, opts.runs ?? DEFAULT_RUNS));
   const near = { lat: geo.lat, lng: geo.lng, radiusKm: ANCHOR_RADIUS_KM };
