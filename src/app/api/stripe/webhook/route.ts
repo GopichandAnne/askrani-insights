@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { isStripeConfigured, stripe, CATALOG, catalogByPrice } from "@/lib/stripe";
-import { grantTopup, setPlan, grantPlanCredits, markEventProcessed, orgByStripeCustomer, setStripeCustomer } from "@/lib/credits";
+import { grantTopup, setPlan, grantPlanCredits, markEventProcessed, orgByStripeCustomer, setStripeCustomer, planOfOrg } from "@/lib/credits";
 import { requeuePausedForOrg } from "@/lib/jobs";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +56,28 @@ export async function POST(req: Request) {
       if (orgId && (await markEventProcessed(orgId, event.id))) {
         await grantPlanCredits(orgId); // reset monthly allotment
         await requeuePausedForOrg(orgId);
+      }
+    } else if (event.type === "customer.subscription.updated") {
+      // Plan switches made in the Customer Portal fire this. Sync the app's plan to
+      // the subscription's current price, and re-grant credits ONLY when the plan
+      // actually changed — so unrelated updates (card change, cancel-at-period-end
+      // toggle, proration) don't repeatedly reset the credit allotment.
+      const sub = event.data.object as Stripe.Subscription;
+      const orgId = sub.customer ? await orgByStripeCustomer(String(sub.customer)) : null;
+      if (orgId && (await markEventProcessed(orgId, event.id))) {
+        const priceId = sub.items?.data?.[0]?.price?.id ?? null;
+        const hit = catalogByPrice(priceId);
+        const active = sub.status === "active" || sub.status === "trialing";
+        if (active && hit?.item.plan) {
+          const current = await planOfOrg(orgId);
+          if (current !== hit.item.plan) {
+            await setPlan(orgId, hit.item.plan, "active");
+            await grantPlanCredits(orgId); // align credits to the new tier
+            await requeuePausedForOrg(orgId);
+          }
+        } else if (sub.status === "canceled" || sub.status === "unpaid" || sub.status === "incomplete_expired") {
+          await setPlan(orgId, "free", "canceled");
+        }
       }
     } else if (event.type === "customer.subscription.deleted") {
       const sub = event.data.object as Stripe.Subscription;
