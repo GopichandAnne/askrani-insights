@@ -22,6 +22,11 @@ import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/en
 
 const MAX_PAGES = 8;
 
+// Verticals for which the healthcare/local-services review directories
+// (Healthgrades, Zocdoc) are worth scraping. Extend as medical verticals land.
+const DIRECTORY_VERTICALS = new Set(["dental"]);
+const DIRECTORIES = ["healthgrades", "zocdoc"];
+
 export interface CollectResult {
   businessId: string;
   name: string;
@@ -227,6 +232,10 @@ export async function collectBusiness(
   // etc. are never on them, so we skip all delivery discovery + Apify scraping for
   // non-food verticals — that's wasted Apify compute/proxy spend otherwise.
   const foodVertical = vertical === "restaurant" || vertical === "grocery";
+  // Healthcare/local-services directories (Healthgrades, Zocdoc) only make sense
+  // for health verticals — that's where their reputation + accepted insurance
+  // live. A restaurant has no Healthgrades profile, so never spend a scrape there.
+  const directoryVertical = DIRECTORY_VERTICALS.has(vertical);
   const attrs = (biz.attributes as any) ?? {};
   const geo = attrs.geo as { lat: number; lng: number } | undefined;
 
@@ -493,6 +502,47 @@ export async function collectBusiness(
     }
     result.reviews += n;
     await finishRun(svc, run, n);
+  }
+
+  // ── 3.5) HEALTHCARE DIRECTORIES (Healthgrades, Zocdoc) — reputation +
+  //    accepted insurance for dental/medical. Each emits a per-source rating
+  //    summary (feeds the Rating ring alongside Google/Yelp), the accepted-
+  //    insurance list (a citable "do they take my plan?" source), and review
+  //    text (review-pulse / rival-gripe mining). Dormant unless an Apify Actor
+  //    id is set; skipped entirely for non-directory verticals. ───────────────
+  if (directoryVertical) {
+    for (const dir of DIRECTORIES) {
+      const prov = getProvider(dir);
+      if (!prov?.isConfigured() || !wants(dir) || !hasTime()) continue;
+      const run = await startRun(svc, dir, businessId);
+      let n = 0, costUsd = 0;
+      let dirErr: string | undefined;
+      try {
+        const urlKey = `${dir}_url`;
+        let profileUrl = attrs[urlKey] as string | undefined;
+        if (!profileUrl) {
+          try {
+            const cands = await prov.discoverProfiles({ query: biz.canonical_name, near: geo, limit: 1 });
+            profileUrl = cands[0]?.externalId ?? cands[0]?.url;
+          } catch { /* discovery unsupported → profile URL must be attached in Channels */ }
+          if (profileUrl) { attrs[urlKey] = profileUrl; attrsDirty = true; }
+        }
+        if (profileUrl) {
+          const job = await prov.collectContent({ urls: [profileUrl] });
+          await pollJob(prov, job.jobId, 95000);
+          for await (const rev of prov.fetchResults(job.jobId)) { await upsertObsContentItem(svc, businessId, rev, nowIso); n++; }
+          const st = await prov.getJob(job.jobId);
+          costUsd = st.costUsd ?? 0;
+          dirErr = st.error;
+          if (n > 0) result.sources.push(dir);
+        }
+      } catch (e) {
+        dirErr = (e as Error).message;
+        errors.push(`${dir}: ${dirErr}`);
+      }
+      result.reviews += n;
+      await finishRun(svc, run, n, dirErr, costUsd);
+    }
   }
 
   // ── 4) YOUTUBE (official API): recent uploads → content + extraction ─────
