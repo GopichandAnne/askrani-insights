@@ -4,6 +4,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { spendForCost } from "@/lib/credits";
 import { type WorkspaceRow } from "@/lib/workspace";
 import { staleCached } from "@/lib/staleCache";
+import { findabilityGuide } from "@/lib/vertical-vocab";
 
 /**
  * Findability — collection engine (headless). Tracks where a workspace's target
@@ -40,9 +41,9 @@ const KW_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          term: { type: "string", description: "the exact phrase a local customer types — a specific DISH ('rumali roti near me'), a cuisine ('south indian restaurant near me'), or an intent ('indian food delivery cedar park'). Use a locality OR 'near me'. lowercase, no punctuation." },
-          intent: { type: "string", enum: ["everyday", "urgent", "high_value"], description: "everyday = routine, highest volume; urgent = open-now / delivery / near-me; high_value = catering, party trays, bulk/family packs." },
-          value_weight: { type: "number", description: "1 to 3 — how much revenue this term represents (routine ~1, catering/high-value ~3)." },
+          term: { type: "string", description: "the exact phrase a local customer types — a specific OFFERING (a signature item/service/procedure), a category ('south indian restaurant near me', 'dentist near me'), or an intent ('emergency dentist', 'indian food delivery cedar park'). Use a locality OR 'near me'. lowercase, no punctuation." },
+          intent: { type: "string", enum: ["everyday", "urgent", "high_value"], description: "everyday = routine, highest volume; urgent = time-critical / immediate-need search; high_value = the big-ticket / high-margin search." },
+          value_weight: { type: "number", description: "1 to 3 — how much revenue this term represents (routine ~1, high-value ~3)." },
         },
         required: ["term", "intent", "value_weight"],
       },
@@ -50,13 +51,17 @@ const KW_SCHEMA = {
   },
   required: ["keywords"],
 };
-const KW_SYSTEM =
-  "You list the REAL Google searches local customers type to find THIS specific business — the terms it must rank for. Real people search three ways: (1) by DISH / signature item ('rumali roti near me', 'goat mandi cedar park', 'hyderabadi biryani near me'); (2) by cuisine / category ('south indian restaurant near me', 'indian food leander'); (3) by intent ('indian food delivery cedar park', 'best biryani near me', 'indian catering near me'). Rules: use the business's ACTUAL menu items provided — pick the signature, crave-worthy, searchable ones, not obscure sides. VARY the location across the localities provided AND 'near me' (most people search 'near me', not a city) — never put the same city on every term. Spread across everyday (routine, high volume), urgent (open now / delivery / near me), and high_value (catering, party trays, bulk / family packs); weight high_value heavier. lowercase, no punctuation. Ground strictly in this business's menu + category — no generic filler.";
+/** Vertical-aware generation prompt: the three-mode framing is universal; the
+ *  examples and what urgent/high-value MEAN come from the business type. */
+function kwSystem(vertical?: string): string {
+  const g = findabilityGuide(vertical);
+  return `You list the REAL Google searches local customers type to find THIS specific business — the terms it must rank for. Real people search three ways: (1) by a SIGNATURE OFFERING (${g.offeringWord}); (2) by CATEGORY / specialty; (3) by INTENT. For a business like this, real searches look like: ${g.examples}. Rules: use the business's ACTUAL ${g.offeringWord} provided — pick the signature, in-demand, searchable ones, not obscure extras; if none are provided, ground in the category and specialty. VARY the location across the localities provided AND 'near me' (most people search 'near me', not a city) — never put the same city on every term. Spread across everyday (routine, high volume), urgent (${g.urgent}), and high_value (${g.highValue}); weight high_value heavier. lowercase, no punctuation. Ground strictly in this business's offerings + category — no generic filler.`;
+}
 
 /** Gather the real context that makes keywords business-specific: the target's
  *  actual menu items (from collected offers) + the nearby towns customers come
  *  from (the competitors' cities), so searches span dishes AND localities. */
-async function keywordContext(svc: Svc, ws: WorkspaceRow): Promise<{ name: string; city: string; category?: string; subtype?: string; dishes: string[]; localities: string[] }> {
+async function keywordContext(svc: Svc, ws: WorkspaceRow): Promise<{ name: string; vertical: string; city: string; category?: string; subtype?: string; dishes: string[]; localities: string[] }> {
   const { data: wsRow } = await svc.from("workspace").select("target_business_id").eq("id", ws.id).maybeSingle();
   const targetId = wsRow?.target_business_id as string | undefined;
   let name = ws.name, city = "", category: string | undefined, subtype = "", dishes: string[] = [];
@@ -83,7 +88,7 @@ async function keywordContext(svc: Svc, ws: WorkspaceRow): Promise<{ name: strin
     const c = cityFromAddress(e.competitor?.attributes?.address as string);
     if (c) localities.add(c);
   }
-  return { name, city, category, subtype, dishes, localities: [...localities].slice(0, 6) };
+  return { name, vertical: ws.vertical, city, category, subtype, dishes, localities: [...localities].slice(0, 6) };
 }
 
 type KwCtx = Awaited<ReturnType<typeof keywordContext>>;
@@ -91,14 +96,15 @@ type KwCtx = Awaited<ReturnType<typeof keywordContext>>;
  *  tracked). Shared by first-run generation and the owner's "suggest more". */
 async function llmKeywords(ctx: KwCtx, count: number, exclude: Set<string>): Promise<{ term: string; intent: Intent; value_weight: number }[]> {
   if (!isLlmConfigured()) return [];
+  const offeringWord = findabilityGuide(ctx.vertical).offeringWord;
   const text = `BUSINESS: ${ctx.name}\nCATEGORY: ${ctx.category ?? ""}\nSPECIALTY: ${ctx.subtype ?? ""}\n`
-    + `MENU ITEMS (use the signature / searchable ones): ${ctx.dishes.length ? ctx.dishes.join(", ") : "(none collected — use the category)"}\n`
+    + `WHAT THEY OFFER — ${offeringWord} (use the signature / searchable ones): ${ctx.dishes.length ? ctx.dishes.join(", ") : "(none collected — use the category + specialty)"}\n`
     + `LOCALITIES customers search from (spread terms across these + 'near me'): ${ctx.localities.length ? ctx.localities.join(", ") : ctx.city || "(unknown)"}\n`
     + (exclude.size ? `ALREADY TRACKED — do NOT repeat: ${[...exclude].slice(0, 40).join(", ")}\n` : "")
     + `Return about ${count} fresh terms.`;
   try {
     const { data } = await getLlm().callStructured<{ keywords: { term: string; intent: Intent; value_weight: number }[] }>({
-      system: KW_SYSTEM, text, schema: KW_SCHEMA, tier: "classify", maxTokens: 1000,
+      system: kwSystem(ctx.vertical), text, schema: KW_SCHEMA, tier: "classify", maxTokens: 1000,
     });
     const seen = new Set<string>(exclude);
     return (data?.keywords ?? [])

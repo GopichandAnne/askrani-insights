@@ -40,6 +40,18 @@ const METRICS: { key: MetricKey; label: string; color: MetricScore["color"] }[] 
   { key: "findability", label: "Findability", color: "teal" },
 ];
 
+// The "price" ring means different things per vertical. A dentist publishes no
+// menu — the money signal is new-patient specials + published procedure prices —
+// so it reads as "Offers & pricing", not "Price". Restaurants/grocery keep "Price".
+const METRIC_LABEL_BY_VERTICAL: Record<string, Partial<Record<MetricKey, string>>> = {
+  dental: { price: "Offers & pricing" },
+  salon: { price: "Offers & pricing" },
+  fitness: { price: "Pricing & offers" },
+  real_estate: { price: "Pricing" },
+};
+const labelFor = (key: MetricKey, base: string, vertical?: string): string =>
+  METRIC_LABEL_BY_VERTICAL[vertical ?? ""]?.[key] ?? base;
+
 interface Raw { name: string; isYou: boolean; rating?: number | null; findPct?: number | null; avgPrice?: number | null; followers?: number | null; ai?: number | null; items?: { name: string; price: number }[]; priceBasis?: number | null }
 
 // Vertical-agnostic item normalizer for like-for-like matching — strips
@@ -168,7 +180,7 @@ export async function buildScorecard(ws: WorkspaceRow, db?: any): Promise<Scorec
     const rivals = bscores.filter((b) => !b.isYou).map((b) => ({ name: b.name, v: b.scores[m.key] })).filter((x): x is { name: string; v: number } => x.v != null);
     const avg = rivals.length ? round(rivals.reduce((a, b) => a + b.v, 0) / rivals.length) : null;
     const bestRow = rivals.length ? rivals.reduce((a, b) => (b.v > a.v ? b : a)) : null;
-    return { key: m.key, label: m.label, color: m.color, you, avg, best: bestRow?.v ?? null, bestName: bestRow?.name ?? null };
+    return { key: m.key, label: labelFor(m.key, m.label, ws.vertical), color: m.color, you, avg, best: bestRow?.v ?? null, bestName: bestRow?.name ?? null };
   });
 
   const ranked = [...bscores].filter((b) => b.composite != null).sort((a, b) => b.composite! - a.composite!);

@@ -42,6 +42,10 @@ const SUBTYPE_TAGS: Record<string, string[]> = {
   laser_body: ["laserhairremoval", "coolsculpting"], skincare: ["hydrafacial", "facial", "skincareroutine"],
   lash_brow: ["lashextensions", "microblading"], nails: ["nailart", "nails"],
   hair: ["hairsalon", "balayage"], waxing: ["waxing"], wellness: ["wellness", "ivtherapy"],
+  // dental practice service lines
+  pediatric: ["pediatricdentist", "kidsdentist"], orthodontic: ["invisalign", "braces", "orthodontist"],
+  cosmetic: ["cosmeticdentistry", "smilemakeover", "veneers"], implant: ["dentalimplants", "implantdentistry"],
+  emergency: ["emergencydentist"], endodontic: ["rootcanal"], family: ["familydentist", "dentistry"],
 };
 
 export function industryHashtags(vertical: string, subtype: string[] = [], max = 5): string[] {

@@ -213,6 +213,20 @@ const BEAUTY_ALIASES: [RegExp, string][] = [
   [/\b(massage|wellness|iv\s*(drip|therapy)|sauna|cryo)\b/i, "wellness"],
 ];
 
+// Dental practice subtypes — from the name + Google types. Matched only on dental
+// places (via a dental-shaped haystack) so they never leak into other verticals,
+// and let discovery rank like-for-like (a pediatric practice near other kids'
+// dentists; a cosmetic/implant clinic near its true peers, not a general family DDS).
+const DENTAL_ALIASES: [RegExp, string][] = [
+  [/\b(pediatric|paediatric|children'?s?|kids?)\b/i, "pediatric"],
+  [/\b(orthodont|braces|invisalign|clear\s*aligner|aligners?)\b/i, "orthodontic"],
+  [/\b(cosmetic|veneers?|smile\s*(makeover|design)|whitening)\b/i, "cosmetic"],
+  [/\b(implant|oral\s*surg|periodont|prosthodont|full\s*arch|all[-\s]?on[-\s]?4)\b/i, "implant"],
+  [/\b(emergency|urgent|walk[-\s]?in|same[-\s]?day)\b/i, "emergency"],
+  [/\b(endodont|root\s*canal)\b/i, "endodontic"],
+  [/\b(family|general\s*dent)\b/i, "family"],
+];
+
 // Broad families so related cuisines still count as "similar" (Indian ↔ Pakistani).
 const BROAD: Record<string, string> = {
   indian: "south_asian", pakistani: "south_asian", bangladeshi: "south_asian",
@@ -263,6 +277,13 @@ export function extractSubtype(cand: CandidateLike): string[] {
   // injectables-led med spa near other injectables clinics).
   const beautyHay = `${name} ${gtypes.join(" ")}`;
   for (const [re, key] of BEAUTY_ALIASES) if (re.test(beautyHay)) found.add(key);
+
+  // Dental subtypes — ONLY on confirmed dental places (so generic tokens like
+  // "family" / "emergency" never leak into restaurants or other verticals).
+  const dentalHay = `${name} ${gtypes.join(" ")} ${cand.category ?? ""}`;
+  if (/\b(dentist|dental|orthodont|dds|dmd|endodont|periodont|prosthodont|oral\s*surg)\b/i.test(dentalHay)) {
+    for (const [re, key] of DENTAL_ALIASES) if (re.test(dentalHay)) found.add(key);
+  }
   return [...found];
 }
 
