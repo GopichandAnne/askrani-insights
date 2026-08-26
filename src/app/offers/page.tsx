@@ -2,6 +2,8 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
+import { getOrMakePriceHints } from "@/lib/pricehints";
+import { PriceHintsCard } from "@/components/PriceHintsCard";
 import { getCompetitorSocial } from "@/lib/social";
 import { getOrMakeMenuCompare } from "@/lib/menucompare";
 import type { FlyerDeal } from "@/lib/flyers";
@@ -70,9 +72,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   const ids = await workspaceBusinessIds(ws);
   const supabase = await createClient();
 
-  const built = await withinBudget(Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days), getOrMakeMenuCompare(ws)]));
+  const built = await withinBudget(Promise.all([getOrMakeDeals(ws), getOrMakeMyDeals(ws), getOrMakePriceGaps(ws), getCompetitorSocial(ws, days), getOrMakeMenuCompare(ws), getOrMakePriceHints(ws)]));
   if (!built) return <PillarBuilding title="Offers & deals" subtitle="Comparing prices, promos and deals across your competitors — this first read is finishing in the background." />;
-  const [rivalDeals, myDeals, priceGaps, social, menuCompare] = built;
+  const [rivalDeals, myDeals, priceGaps, social, menuCompare, priceHints] = built;
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
 
   // price-drop detection over FULL history (a competitor lowered an item's price)
@@ -219,6 +221,10 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
           </section>
         );
       })()}
+
+      {/* Price hints mined from reviews — real prices customers mention across the
+          market. The pricing signal for verticals that don't publish a price list. */}
+      <PriceHintsCard report={priceHints} />
 
       {/* menu / service price comparison — item-level, for bounded-menu verticals */}
       {(menuCompare.overview.length > 0 || menuCompare.matches.length > 0) && (() => {

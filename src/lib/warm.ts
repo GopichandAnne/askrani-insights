@@ -12,6 +12,7 @@ import { buildMenuLens } from "@/lib/menu";
 import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
+import { minePriceHints, priceHintsIsGood } from "@/lib/pricehints";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -59,6 +60,9 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // must run after You is cached; this builds the week-over-week theme diff.
     { key: "pulse", run: () => generateReviewPulse(row, db), good: (v) => pulseIsGood(v) && !v?.failed },
     { key: "socialPulse", run: () => generateSocialPulse(row, db), good: (v) => socialPulseIsGood(v) && !v?.failed },
+    // Mine real prices customers quote in reviews (target + competitors) — a hint
+    // into competitor pricing from data we already collected; feeds Offers + Rani.
+    { key: "priceHints", run: () => minePriceHints(row, db), good: (v) => priceHintsIsGood(v) && !v?.failed },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;
