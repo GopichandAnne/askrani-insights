@@ -4,6 +4,7 @@ import { buildWorkspaceReport } from "@/lib/report";
 import { buildScorecard, type Scorecard } from "@/lib/scorecard";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
+import { buildDentalBenchmark } from "@/lib/dentalbenchmark";
 
 /**
  * "Ask Rani" inline answers — natural-language questions answered over the
@@ -26,6 +27,7 @@ const GROUNDING = [
   "Map the owner's wording to the DATA and never claim a metric 'isn't available' when the scorecard has it: 'social'/'social search'/'social score' → the Social reach metric; 'AI'/'ChatGPT'/'AI search' → AI search; 'ranking'/'show up on Google'/'found' → Findability; 'reputation'/'stars' → Rating.",
   "Prices are USD. 'offers' = whatever this business sells. When a claim rests on a SOURCE, cite it inline by number in square brackets, e.g. [2] — only numbers that appear in SOURCES.",
   "For 'what do competitors charge for X?' / 'how much is a <thing> around here?' questions, use DATA.intel.priceHints — real prices seen in reviews & posts (a customer reporting what they paid, or a rival advertising one), per offering (typical/low/high + example mentions with the business + source). Present these as hints gathered from the wild (a range, with how many mentions), never as an exact published fee, and note that exact prices vary by case/insurance.",
+  "For DENTAL procedure-cost questions ('how much is a crown / root canal / implant near me?'), use DATA.dentalBenchmark — an area ballpark per procedure (a standardized-code benchmark scaled to the region), plus any price actually seen locally. Give the area range, mention the locally-seen figure when present, and always say it's an estimate — the exact fee depends on the tooth/materials/insurance.",
   "Tailor EVERY answer to DATA.businessType — reason and advise as an expert in THAT industry, and read the generic pillars through its lens: 'offers'/'winning items'/'menu' mean this business's actual thing (dishes for a restaurant, products for a grocery, treatments/services for a salon or clinic, listings for real estate, classes for fitness). Never give generic or off-industry advice, and never assume it's a restaurant unless businessType says so.",
   "For time-based / historical questions ('was there a sale on X a month ago?', 'what did rivals run last Diwali?', 'what changed recently?'), lead with DATA.marketHistory — the authoritative dated log of deals, ad moves, breakout posts, rising formats and demand (use firstSeen/lastSeen dates) — plus DATA.promotionsHistory, DATA.intel.competitorDeals (current) and DATA.recentEvents. Only claim a past event if it's actually in that dated history; if the history doesn't reach back that far, say so plainly (monitoring may not have been running that long) rather than guessing.",
   "Keep it tight: 2–5 sentences, plain English, no jargon, and make the next step specific enough to do today.",
@@ -238,10 +240,24 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     firstSeen: e.first_seen_on, lastSeen: e.last_seen_on,
   }));
 
+  // Dental: a per-procedure area ballpark (standardized-code benchmark scaled to
+  // the region, overlaid with local signal) so Rani can answer "how much is a crown
+  // around here?" even when no specific price was scraped.
+  let dentalBenchmark: unknown = undefined;
+  if (ws.vertical === "dental") {
+    const { data: tgt } = ids.targetId ? await supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle() : { data: null };
+    const bm = buildDentalBenchmark((tgt?.attributes as any)?.address, goals.priceHints);
+    dentalBenchmark = {
+      region: bm.region, note: bm.note,
+      procedures: bm.rows.map((r) => ({ procedure: r.label, cdt: r.cdt, areaTypicalUsd: r.areaLow === r.areaHigh ? r.areaLow : [r.areaLow, r.areaHigh], seenLocallyUsd: r.localLow != null ? [r.localLow, r.localHigh, `${r.localMentions} mentions`] : undefined })),
+    };
+  }
+
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
     businessType: ws.vertical,   // restaurant | grocery | salon | dental | fitness | real_estate | smoke_vape | other
     intel,
+    dentalBenchmark,
     businesses: report.pricing.map((p) => ({
       name: p.name, you: p.isTarget, pricedItems: p.offers, avgPrice: p.avgPrice, minPrice: p.minPrice, maxPrice: p.maxPrice,
     })),

@@ -4,6 +4,8 @@ import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
 import { getOrMakePriceHints } from "@/lib/pricehints";
 import { PriceHintsCard } from "@/components/PriceHintsCard";
+import { buildDentalBenchmark } from "@/lib/dentalbenchmark";
+import { DentalBenchmarkCard } from "@/components/DentalBenchmarkCard";
 import { getCompetitorSocial } from "@/lib/social";
 import { getOrMakeMenuCompare } from "@/lib/menucompare";
 import type { FlyerDeal } from "@/lib/flyers";
@@ -76,6 +78,14 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   if (!built) return <PillarBuilding title="Offers & deals" subtitle="Comparing prices, promos and deals across your competitors — this first read is finishing in the background." />;
   const [rivalDeals, myDeals, priceGaps, social, menuCompare, priceHints] = built;
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
+
+  // Dental: a per-procedure "ballpark near you" from the standardized-code benchmark,
+  // overlaid with any local price signal — no owner fee import needed.
+  let dentalBenchmark = null;
+  if (ws.vertical === "dental" && ids.targetId) {
+    const { data: tgt } = await supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle();
+    dentalBenchmark = buildDentalBenchmark((tgt?.attributes as any)?.address, priceHints);
+  }
 
   // price-drop detection over FULL history (a competitor lowered an item's price)
   const priceHist = new Map<string, { price: number; seen: number }[]>();
@@ -222,8 +232,12 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
         );
       })()}
 
-      {/* Price hints mined from reviews — real prices customers mention across the
-          market. The pricing signal for verticals that don't publish a price list. */}
+      {/* Dental: a ballpark per procedure for the area (no fee import needed),
+          overlaid with local signal — then the mined hints below refine it. */}
+      {dentalBenchmark && <DentalBenchmarkCard benchmark={dentalBenchmark} />}
+
+      {/* Price hints mined from reviews & posts — real prices across the market.
+          The pricing signal for verticals that don't publish a price list. */}
       <PriceHintsCard report={priceHints} />
 
       {/* menu / service price comparison — item-level, for bounded-menu verticals */}
