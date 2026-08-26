@@ -80,7 +80,7 @@ export async function refreshCompetitorAds(
   if (!compIds.length) return { activated: true, scraped: 0, advertisers: 0, costUsd: 0 };
 
   const [{ data: biz }, { data: idents }] = await Promise.all([
-    svc.from("business").select("id, canonical_name").in("id", compIds),
+    svc.from("business").select("id, canonical_name, attributes").in("id", compIds),
     svc.from("external_identity").select("business_id, platform, url").in("business_id", compIds).eq("platform", "facebook"),
   ]);
   const fbByBiz = new Map<string, string>();
@@ -91,25 +91,31 @@ export async function refreshCompetitorAds(
   let costUsd = 0;
   for (const b of biz ?? []) {
     const name = String((b as any).canonical_name ?? "");
+    const attrs = (((b as any).attributes ?? {}) as Record<string, any>);
     const fbUrl = fbByBiz.get((b as any).id);
     const query = fbSlug(fbUrl) ?? name;
     if (!query) continue;
-    // page-scoped when we have the numeric id (cheap); else keyword, but the run
-    // is hard-capped at maxCostUsd platform-side so it can't run away.
+    // Page-scope when we know the numeric page id (only THIS advertiser's ads, so
+    // no truncation risk + cheap). Otherwise keyword search, which the collector
+    // gives real headroom + a $ ceiling so we don't cut off the target's ads.
+    const storedPageId = typeof attrs.fb_page_id === "string" ? attrs.fb_page_id : undefined;
     const { items, costUsd: c } = await collectApifyAdLibrary(query, {
-      limit: opts.limitPerAdvertiser ?? 15,
-      pageId: fbPageId(fbUrl),
-      maxCostUsd: opts.maxCostPerAdvertiserUsd ?? 0.12,
+      limit: opts.limitPerAdvertiser,
+      pageId: storedPageId || fbPageId(fbUrl),
+      maxCostUsd: opts.maxCostPerAdvertiserUsd,
     });
     costUsd += c;
     // Ad Library keyword search returns any advertiser matching the term, so keep
     // only ads whose advertiser actually overlaps this competitor's name (drops
-    // unrelated brands the keyword happened to match).
+    // unrelated brands the keyword happened to match — never the target's ads).
     const want = toks(name);
-    for (const ad of items) {
-      const adv = toks(ad.advertiser);
-      const relevant = want.size === 0 || [...adv].some((t) => want.has(t));
-      if (relevant) all.push({ ...ad, advertiser: ad.advertiser === "A rival" ? name : ad.advertiser });
+    const relevant = items.filter((ad) => { const adv = toks(ad.advertiser); return want.size === 0 || [...adv].some((t) => want.has(t)); });
+    for (const ad of relevant) all.push({ ...ad, advertiser: ad.advertiser === "A rival" ? name : ad.advertiser });
+    // Self-heal: learn this competitor's page id from a matched ad, so the NEXT
+    // run page-scopes (exact + cheap) instead of the lossy keyword search.
+    if (!storedPageId) {
+      const pid = relevant.find((a) => a.pageId)?.pageId;
+      if (pid) await svc.from("business").update({ attributes: { ...attrs, fb_page_id: pid } }).eq("id", (b as any).id).then(() => {}, () => {});
     }
   }
   // dedup by advertiser+text

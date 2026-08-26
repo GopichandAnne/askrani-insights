@@ -400,7 +400,7 @@ export function hashtagActorConfigured(): boolean {
 // Ad Library actors vary; the owner picks a working one).
 export interface RivalAd {
   advertiser: string; text: string; cta?: string; link?: string; snapshotUrl?: string;
-  platforms?: string[]; since?: string;
+  platforms?: string[]; since?: string; pageId?: string;
 }
 // Default to the validated pay-per-item Ad Library scraper so the feature needs
 // only APIFY_TOKEN (override with APIFY_AD_LIBRARY_ACTOR to use a different one).
@@ -423,6 +423,8 @@ export function mapAdItem(it: any): RivalAd {
     snapshotUrl: id ? `https://www.facebook.com/ads/library/?id=${id}` : (it.ad_snapshot_url ?? it.url ?? undefined),
     platforms: it.publisherPlatform ?? it.publisher_platforms ?? s.platforms ?? undefined,
     since: it.startDateFormatted ?? it.ad_delivery_start_time ?? it.start_date ?? undefined,
+    // the advertiser's numeric page id — lets us page-scope future runs (cheap + exact)
+    pageId: String(it.pageID ?? it.pageId ?? s.pageID ?? s.page_id ?? it.page_id ?? "").replace(/\D/g, "") || undefined,
   };
 }
 
@@ -435,26 +437,32 @@ export async function collectApifyAdLibrary(
   const actor = AD_LIBRARY_ACTOR();
   if (!token || !query.trim()) return empty;
   const country = opts.country ?? "US";
-  const limit = opts.limit ?? 15;
   // Prefer a PAGE-SCOPED search (only THIS advertiser's ads) when we have the
   // numeric page id — a keyword search fans out to every advertiser matching the
   // term, and this actor bills per ad scraped, so keyword search is the cost trap.
-  const searchUrl = opts.pageId
+  const pageScoped = !!opts.pageId;
+  const searchUrl = pageScoped
     ? `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&view_all_page_id=${opts.pageId}&search_type=page`
     : `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
   const maxMs = opts.maxMs ?? 90000;
-  // HARD platform-side caps so a broad match can never run away again: maxItems
-  // bounds result-billed actors, maxTotalChargeUsd bounds pay-per-event ones.
-  // Apify enforces these and aborts the run when hit, regardless of the actor.
-  const maxCostUsd = opts.maxCostUsd ?? 0.15;
-  const runUrl = `https://api.apify.com/v2/acts/${actor}/runs?token=${token}&maxItems=${limit}&maxTotalChargeUsd=${maxCostUsd}`;
+  // Caps differ by mode so we bound COST without throwing away the target's ads:
+  //  • page-scoped → every ad IS the target's, so a small cap keeps their full set;
+  //  • keyword → results fan out across advertisers, so the target's ads may sit
+  //    LOWER in the list. Capping too low would truncate before we reach them (a
+  //    false negative). So give keyword real headroom, bounded by the $ ceiling —
+  //    the name-filter downstream still drops the unrelated advertisers we scraped.
+  // maxItems bounds result-billed actors; maxTotalChargeUsd bounds pay-per-event
+  // ones. Apify enforces both and aborts the run when hit, whatever the actor.
+  const itemCap = pageScoped ? (opts.limit ?? 25) : Math.max(opts.limit ?? 40, 40);
+  const maxCostUsd = opts.maxCostUsd ?? (pageScoped ? 0.10 : 0.25);
+  const runUrl = `https://api.apify.com/v2/acts/${actor}/runs?token=${token}&maxItems=${itemCap}&maxTotalChargeUsd=${maxCostUsd}`;
 
   try {
     const runRes = await fetch(runUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       // pass several common input shapes; actors ignore the keys they don't use
-      body: JSON.stringify({ urls: [{ url: searchUrl }], startUrls: [{ url: searchUrl }], searchTerms: [query], count: limit, maxItems: limit, resultsLimit: limit, activeStatus: "active", country }),
+      body: JSON.stringify({ urls: [{ url: searchUrl }], startUrls: [{ url: searchUrl }], searchTerms: [query], count: itemCap, maxItems: itemCap, resultsLimit: itemCap, activeStatus: "active", country }),
     });
     if (!runRes.ok) return empty;
     const runId = ((await runRes.json()) as any).data?.id;
