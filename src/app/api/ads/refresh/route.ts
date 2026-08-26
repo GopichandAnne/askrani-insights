@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     const result = await refreshCompetitorAds(ws as WorkspaceRow, {
       maxCompetitors: Number(body.maxCompetitors) || undefined,
       limitPerAdvertiser: Number(body.limitPerAdvertiser) || undefined,
+      force: !!body.force, // a deliberate manual refresh bypasses the 7-day freshness guard
     });
     return NextResponse.json(result);
   } catch (e) {

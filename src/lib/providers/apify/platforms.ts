@@ -428,22 +428,33 @@ export function mapAdItem(it: any): RivalAd {
 
 export async function collectApifyAdLibrary(
   query: string,
-  opts: { limit?: number; maxMs?: number; country?: string } = {},
+  opts: { limit?: number; maxMs?: number; country?: string; pageId?: string; maxCostUsd?: number } = {},
 ): Promise<{ items: RivalAd[]; costUsd: number }> {
   const empty = { items: [] as RivalAd[], costUsd: 0 };
   const token = process.env.APIFY_TOKEN;
   const actor = AD_LIBRARY_ACTOR();
   if (!token || !query.trim()) return empty;
   const country = opts.country ?? "US";
-  const searchUrl = `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
+  const limit = opts.limit ?? 15;
+  // Prefer a PAGE-SCOPED search (only THIS advertiser's ads) when we have the
+  // numeric page id — a keyword search fans out to every advertiser matching the
+  // term, and this actor bills per ad scraped, so keyword search is the cost trap.
+  const searchUrl = opts.pageId
+    ? `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&view_all_page_id=${opts.pageId}&search_type=page`
+    : `https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=${country}&q=${encodeURIComponent(query)}&search_type=keyword_unordered`;
   const maxMs = opts.maxMs ?? 90000;
+  // HARD platform-side caps so a broad match can never run away again: maxItems
+  // bounds result-billed actors, maxTotalChargeUsd bounds pay-per-event ones.
+  // Apify enforces these and aborts the run when hit, regardless of the actor.
+  const maxCostUsd = opts.maxCostUsd ?? 0.15;
+  const runUrl = `https://api.apify.com/v2/acts/${actor}/runs?token=${token}&maxItems=${limit}&maxTotalChargeUsd=${maxCostUsd}`;
 
   try {
-    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+    const runRes = await fetch(runUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       // pass several common input shapes; actors ignore the keys they don't use
-      body: JSON.stringify({ urls: [{ url: searchUrl }], startUrls: [{ url: searchUrl }], searchTerms: [query], count: opts.limit ?? 20, activeStatus: "active", country }),
+      body: JSON.stringify({ urls: [{ url: searchUrl }], startUrls: [{ url: searchUrl }], searchTerms: [query], count: limit, maxItems: limit, resultsLimit: limit, activeStatus: "active", country }),
     });
     if (!runRes.ok) return empty;
     const runId = ((await runRes.json()) as any).data?.id;

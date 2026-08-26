@@ -29,6 +29,14 @@ const fbSlug = (url?: string) => {
   const slug = m?.[1];
   return slug && !/^(pages|profile\.php|people)$/i.test(slug) ? slug.replace(/[-.]/g, " ") : undefined;
 };
+// A numeric Facebook page id, if the URL carries one (profile.php?id=123 or
+// /pages/Name/123). Lets us scope the Ad Library to ONLY this advertiser — far
+// cheaper than a keyword search that fans out across every matching brand.
+const fbPageId = (url?: string): string | undefined => {
+  if (!url) return undefined;
+  const m = /[?&]id=(\d{5,})/.exec(url) ?? /\/pages\/[^/]+\/(\d{5,})/.exec(url) ?? /facebook\.com\/(\d{6,})(?:[/?#]|$)/.exec(url);
+  return m?.[1];
+};
 
 const SCHEMA = {
   type: "object", additionalProperties: false,
@@ -50,11 +58,23 @@ const empty = (at: string): AdsReport => ({ summary: "", ads: [], patterns: [], 
 
 /** Scrape each competitor's active ads, synthesize, and cache. COST-BEARING —
  *  only called from the gated /api/ads/refresh endpoint, never on render. */
+const ADS_FRESH_MS = 7 * 24 * 60 * 60 * 1000; // ads change weekly at most — don't re-scrape every collection cycle
+
 export async function refreshCompetitorAds(
-  ws: WorkspaceRow, opts: { maxCompetitors?: number; limitPerAdvertiser?: number } = {},
+  ws: WorkspaceRow, opts: { maxCompetitors?: number; limitPerAdvertiser?: number; maxCostPerAdvertiserUsd?: number; force?: boolean } = {},
 ): Promise<{ activated: boolean; scraped: number; advertisers: number; costUsd: number }> {
   if (!adLibraryConfigured()) return { activated: false, scraped: 0, advertisers: 0, costUsd: 0 };
   const svc = createServiceClient();
+  // Freshness guard: this is auto-called after EVERY collection cycle, but ads move
+  // slowly and each scrape is metered — so skip when the cache is < 7 days old
+  // (unless forced from the manual refresh button). This is the main frequency lever.
+  if (!opts.force) {
+    const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+    const prevAt = (gRow?.goals as any)?.ads?.at as string | undefined;
+    if (prevAt && Date.now() - new Date(prevAt).getTime() < ADS_FRESH_MS) {
+      return { activated: true, scraped: 0, advertisers: 0, costUsd: 0 };
+    }
+  }
   const ids = await workspaceBusinessIds(ws, svc as unknown as RlsClient);
   const compIds = ids.competitorIds.slice(0, opts.maxCompetitors ?? 8);
   if (!compIds.length) return { activated: true, scraped: 0, advertisers: 0, costUsd: 0 };
@@ -71,9 +91,16 @@ export async function refreshCompetitorAds(
   let costUsd = 0;
   for (const b of biz ?? []) {
     const name = String((b as any).canonical_name ?? "");
-    const query = fbSlug(fbByBiz.get((b as any).id)) ?? name;
+    const fbUrl = fbByBiz.get((b as any).id);
+    const query = fbSlug(fbUrl) ?? name;
     if (!query) continue;
-    const { items, costUsd: c } = await collectApifyAdLibrary(query, { limit: opts.limitPerAdvertiser ?? 15 });
+    // page-scoped when we have the numeric id (cheap); else keyword, but the run
+    // is hard-capped at maxCostUsd platform-side so it can't run away.
+    const { items, costUsd: c } = await collectApifyAdLibrary(query, {
+      limit: opts.limitPerAdvertiser ?? 15,
+      pageId: fbPageId(fbUrl),
+      maxCostUsd: opts.maxCostPerAdvertiserUsd ?? 0.12,
+    });
     costUsd += c;
     // Ad Library keyword search returns any advertiser matching the term, so keep
     // only ads whose advertiser actually overlaps this competitor's name (drops
