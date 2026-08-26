@@ -8,6 +8,8 @@ import { buildDentalBenchmark } from "@/lib/dentalbenchmark";
 import { DentalBenchmarkCard } from "@/components/DentalBenchmarkCard";
 import { buildPriceAnchors } from "@/lib/priceanchors";
 import { PricingTransparencyCard } from "@/components/PricingTransparencyCard";
+import { buildInsuranceCompare } from "@/lib/insurance";
+import { InsuranceCompareCard } from "@/components/InsuranceCompareCard";
 import { getCompetitorSocial } from "@/lib/social";
 import { getOrMakeMenuCompare } from "@/lib/menucompare";
 import type { FlyerDeal } from "@/lib/flyers";
@@ -86,12 +88,15 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   // the transparent minority) beat review/post mentions. No owner fee import needed.
   let dentalBenchmark = null;
   let priceAnchors = null;
+  let insurance = null;
   if (ws.vertical === "dental" && ids.targetId) {
-    const [{ data: tgt }, anchors] = await Promise.all([
+    const [{ data: tgt }, anchors, ins] = await Promise.all([
       supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle(),
       buildPriceAnchors(ws),
+      buildInsuranceCompare(ws),
     ]);
     priceAnchors = anchors;
+    insurance = ins;
     dentalBenchmark = buildDentalBenchmark((tgt?.attributes as any)?.address, priceHints, anchors);
   }
 
@@ -247,6 +252,9 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
       {/* Dental: who in the market publishes real prices vs keeps them off-site —
           transparency is a differentiator, and publishers give real anchors. */}
       {priceAnchors && !priceAnchors.empty && <PricingTransparencyCard report={priceAnchors} />}
+
+      {/* Dental: insurance acceptance across the market — a top patient filter. */}
+      {insurance && !insurance.empty && <InsuranceCompareCard report={insurance} />}
 
       {/* Price hints mined from reviews & posts — real prices across the market.
           The pricing signal for verticals that don't publish a price list. */}

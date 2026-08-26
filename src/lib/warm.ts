@@ -14,6 +14,7 @@ import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { minePriceHints, priceHintsIsGood } from "@/lib/pricehints";
 import { buildPriceAnchors } from "@/lib/priceanchors";
+import { buildInsuranceCompare } from "@/lib/insurance";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -67,6 +68,10 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // Transparent-price anchors + who-publishes-vs-opaque intel (dental). Cheap +
     // deterministic; returns empty for non-dental. Feeds the benchmark + Rani.
     { key: "priceAnchors", run: () => buildPriceAnchors(row, db), good: (v) => !!v && (!!v.anchors?.length || !!v.transparency?.length || !!v.empty) },
+    // Insurance-acceptance comparison (dental) — who takes which plans, from data
+    // we already extract off practice websites. Cheap + deterministic; empty for
+    // non-dental. Feeds Offers + Rani.
+    { key: "insurance", run: () => buildInsuranceCompare(row, db), good: (v) => !!v && (!!v.businesses?.length || !!v.empty) },
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;
