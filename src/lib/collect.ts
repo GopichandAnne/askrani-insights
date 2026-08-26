@@ -22,10 +22,11 @@ import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/en
 
 const MAX_PAGES = 8;
 
-// Verticals for which the healthcare/local-services review directories
-// (Healthgrades, Zocdoc) are worth scraping. Extend as medical verticals land.
+// Verticals for which the healthcare review directory (Healthgrades) is worth
+// reading. Extend as medical verticals land. (Zocdoc dropped — it 403s a plain
+// fetch and its Apify actors proved unreliable; Google + Healthgrades cover it.)
 const DIRECTORY_VERTICALS = new Set(["dental"]);
-const DIRECTORIES = ["healthgrades", "zocdoc"];
+const DIRECTORIES = ["healthgrades"];
 
 export interface CollectResult {
   businessId: string;

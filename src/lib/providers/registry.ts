@@ -6,7 +6,7 @@ import { YelpProvider } from "./yelp";
 import { YouTubeProvider } from "./youtube";
 import { ApifyProvider } from "./apify";
 import { BrightDataProvider } from "./brightdata";
-import { HealthgradesProvider, ZocdocProvider } from "./directory";
+import { HealthgradesProvider } from "./directory";
 
 /**
  * Provider registry — the single place that knows which adapters exist and
@@ -28,7 +28,6 @@ export function allProviders(): PublicContentProvider[] {
       new ApifyProvider(),
       new BrightDataProvider(),
       new HealthgradesProvider(),
-      new ZocdocProvider(),
     ];
   }
   return _all;
