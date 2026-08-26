@@ -46,7 +46,10 @@ export function DentalBenchmarkCard({ benchmark }: { benchmark: DentalBenchmark 
                     <span className="font-semibold text-brand-deep">
                       {r.localLow === r.localHigh ? money(r.localLow) : `${money(r.localLow)}–${money(r.localHigh!)}`}
                       <span className="ml-1 text-[11px] font-normal text-ink-faint">
-                        {r.localMentions}×{r.localWhere ? ` · ${r.localWhere}` : ""}
+                        {r.localWhere ? `${r.localWhere}` : `${r.localMentions}×`}
+                        {r.localSource === "published"
+                          ? <span className="ml-1 rounded bg-trust-direct/10 px-1 text-[10px] text-trust-direct">posted</span>
+                          : <span className="ml-1 rounded bg-surface-sunken px-1 text-[10px] text-ink-faint">mentioned</span>}
                       </span>
                     </span>
                   ) : (

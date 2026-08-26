@@ -62,6 +62,15 @@ const STATE_NAME: Record<string, string> = {
   california: "CA", "new york": "NY", texas: "TX", florida: "FL", washington: "WA", massachusetts: "MA", colorado: "CO", illinois: "IL", virginia: "VA", arizona: "AZ", georgia: "GA", oregon: "OR", nevada: "NV", michigan: "MI", "north carolina": "NC", pennsylvania: "PA", ohio: "OH", tennessee: "TN", "new jersey": "NJ", maryland: "MD", minnesota: "MN", wisconsin: "WI",
 };
 
+/** Match a raw offer/item string to a benchmark procedure (via the alias table),
+ *  so published prices + review mentions can be grouped onto the same procedure. */
+export function matchProcedure(itemText: string): { key: string; label: string } | null {
+  const item = String(itemText ?? "").toLowerCase();
+  if (item.length < 3) return null;
+  const proc = PROCS.find((p) => p.aliases.some((a) => item === a || item.includes(a) || a.includes(item)));
+  return proc ? { key: proc.key, label: proc.label } : null;
+}
+
 /** Pull a 2-letter state code from a US address string (", TX 78613" or "Texas"). */
 export function stateFromAddress(address?: string): string | undefined {
   const a = String(address ?? "");
@@ -78,7 +87,11 @@ export interface BallparkRow {
   areaLow: number; areaHigh: number;      // benchmark × regional multiplier
   localLow?: number; localHigh?: number;   // real scraped local signal, if any
   localMentions?: number; localWhere?: string;
+  localSource?: "published" | "mentioned"; // published = a clinic's own posted price (strongest); mentioned = quoted in a review/post
 }
+// Structural shape of the price-anchors report we overlay (kept structural to
+// avoid a circular import with priceanchors.ts, which imports matchProcedure here).
+interface AnchorsLike { anchors: { key: string; low: number; high: number; prices: { business: string }[] }[] }
 export interface DentalBenchmark {
   region: string;           // e.g. "TX" or "your area"
   multiplier: number;
@@ -89,29 +102,41 @@ export interface DentalBenchmark {
 const roundTo = (n: number, step: number) => Math.round(n / step) * step;
 const stepFor = (n: number) => (n >= 1000 ? 50 : n >= 200 ? 25 : 5);
 
-/** Build the ballpark table for a workspace's region, overlaying any local price
- *  hints we've already mined. Deterministic — no DB, no LLM. */
-export function buildDentalBenchmark(address: string | undefined, priceHints?: PriceHintsReport | null): DentalBenchmark {
+/** Build the ballpark table for a workspace's region, overlaying real local signal.
+ *  Two tiers of real signal, strongest first: PUBLISHED anchors (a clinic's own
+ *  posted price, from `anchors`) beat MENTIONED hints (quoted in a review/post,
+ *  from `priceHints`). Deterministic — no DB, no LLM. */
+export function buildDentalBenchmark(address: string | undefined, priceHints?: PriceHintsReport | null, anchors?: AnchorsLike | null): DentalBenchmark {
   const state = stateFromAddress(address);
   const mult: number = (state ? STATE_MULT[state] : undefined) ?? 1.0;
   const region = state ?? "your area";
 
-  // index local hints by procedure key (match hint item text against aliases)
-  const local = new Map<string, { low: number; high: number; mentions: number; where?: string }>();
+  // index PUBLISHED anchors by procedure key (real posted prices — highest confidence)
+  const published = new Map<string, { low: number; high: number; count: number; where?: string }>();
+  for (const a of anchors?.anchors ?? []) {
+    published.set(a.key, { low: a.low, high: a.high, count: a.prices.length, where: a.prices[0]?.business });
+  }
+  // index MENTIONED hints by procedure key (match hint item text against aliases)
+  const mentioned = new Map<string, { low: number; high: number; mentions: number; where?: string }>();
   for (const b of priceHints?.byItem ?? []) {
     const item = b.item.toLowerCase();
     const proc = PROCS.find((p) => p.aliases.some((a) => item === a || item.includes(a) || a.includes(item)));
     if (proc) {
       const ex = (priceHints?.hints ?? []).find((h) => !h.isYou && proc.aliases.some((a) => h.item.toLowerCase().includes(a)));
-      local.set(proc.key, { low: b.low, high: b.high, mentions: b.mentions, where: ex?.business });
+      mentioned.set(proc.key, { low: b.low, high: b.high, mentions: b.mentions, where: ex?.business });
     }
   }
 
   const rows: BallparkRow[] = PROCS.map((p) => {
     const areaLow = roundTo(p.low * mult, stepFor(p.low * mult));
     const areaHigh = roundTo(p.high * mult, stepFor(p.high * mult));
-    const l = local.get(p.key);
-    return { key: p.key, label: p.label, cdt: p.cdt, areaLow, areaHigh, localLow: l?.low, localHigh: l?.high, localMentions: l?.mentions, localWhere: l?.where };
+    const pub = published.get(p.key);
+    const men = mentioned.get(p.key);
+    // published price wins; fall back to a review/post mention
+    const l = pub ? { low: pub.low, high: pub.high, n: pub.count, where: pub.where, source: "published" as const }
+      : men ? { low: men.low, high: men.high, n: men.mentions, where: men.where, source: "mentioned" as const }
+      : null;
+    return { key: p.key, label: p.label, cdt: p.cdt, areaLow, areaHigh, localLow: l?.low, localHigh: l?.high, localMentions: l?.n, localWhere: l?.where, localSource: l?.source };
   });
 
   const note = state
