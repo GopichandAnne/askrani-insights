@@ -132,6 +132,23 @@ function normalizeRef(u: string): string {
 }
 
 /** Upsert a content_item from any RawObservation (website page, review, post). */
+/** Normalize a provider-supplied timestamp to ISO, or null. Handles Unix epoch
+ *  seconds/ms (the Facebook posts actor returns e.g. 1779025419 seconds, which as
+ *  a raw value blows up the timestamptz column — "out of range"), numeric strings,
+ *  ISO/loose date strings, and empty/garbage → null. Central so every provider's
+ *  dates land safely instead of silently dropping the whole content item. */
+function toIsoOrNull(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" || (typeof v === "string" && /^\d{9,14}$/.test(v.trim()))) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const d = new Date(n < 1e12 ? n * 1000 : n); // < 1e12 → seconds, else milliseconds
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const d = new Date(String(v));
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 async function upsertObsContentItem(
   svc: Svc,
   businessId: string,
@@ -150,7 +167,7 @@ async function upsertObsContentItem(
         url: obs.sourceUrl,
         text: obs.text ?? null,
         media: obs.media ?? [],
-        published_at: obs.publishedAt ?? null,
+        published_at: toIsoOrNull(obs.publishedAt),
         observed_at: nowIso,
       },
       { onConflict: "platform,external_ref" },
@@ -682,7 +699,7 @@ export async function collectBusiness(
               url: it.url,
               text: it.title,
               media: [{ type: "news", kind: it.kind, source: it.source, excerpt: it.excerpt || undefined }],
-              published_at: it.publishedAt ?? null,
+              published_at: toIsoOrNull(it.publishedAt),
               observed_at: nowIso,
             },
             { onConflict: "platform,external_ref" },
