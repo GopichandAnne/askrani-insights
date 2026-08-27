@@ -23,6 +23,11 @@ const PLATFORMS: Array<{ platform: string; re: RegExp }> = [
   { platform: "ubereats", re: /(^|\.)ubereats\.com\// },
   { platform: "grubhub", re: /(^|\.)grubhub\.com\// },
   { platform: "yelp", re: /(^|\.)yelp\.com\/biz\// },
+  // Healthcare review directories (dental/medical) — a "Book on Zocdoc" / "Reviews
+  // on Healthgrades" link on the practice's own site is the strongest signal of
+  // its real profile URL, so the directory readers can target it automatically.
+  { platform: "zocdoc", re: /(^|\.)zocdoc\.com\/(practice|dentist|doctor|provider)\// },
+  { platform: "healthgrades", re: /(^|\.)healthgrades\.com\/(dentist|physician|providers)\// },
   // Online-booking platforms (salons / med spas / wellness) — a link here is a
   // real "Book now" page, more useful to surface than the plain website.
   { platform: "booking", re: /(^|\.)(vagaro|boulevard|blvd\.co|glossgenius|mindbody(online)?|acuityscheduling|squarespace-scheduling|setmore|gettimely|timelyapp|zenoti|aestheticrecord|withcherry|gocherry|booksy|phorest|fresha|schedulicity|janeapp|book\.squareup)\.com\// },

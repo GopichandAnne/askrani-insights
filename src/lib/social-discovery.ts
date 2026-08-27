@@ -339,6 +339,53 @@ export async function findDeliveryUrls(name: string, city: string, want: Deliver
   return out;
 }
 
+// ── healthcare directory URL discovery (Zocdoc / Healthgrades) ───────────────
+// When a practice's site doesn't link its directory profile, find it by name+city
+// via web search — the profile URL embeds the practice name (…/practice/austin-3d-
+// dental-…), so we match on name-token overlap in the slug (no "first result").
+export interface DirectoryWant { healthgrades?: boolean; zocdoc?: boolean }
+export interface DirectoryFound { healthgrades?: string; zocdoc?: string; searched: boolean }
+const DIR_HOST: Record<string, RegExp> = {
+  zocdoc: /(^|\/\/)(www\.)?zocdoc\.com\/(practice|dentist|doctor|provider)\//i,
+  healthgrades: /(^|\/\/)(www\.)?healthgrades\.com\/(dentist|physician|providers)\//i,
+};
+function directoryCandidates(results: SearchResult[], platform: "zocdoc" | "healthgrades"): string[] {
+  const re = DIR_HOST[platform]; const out: string[] = []; const seen = new Set<string>();
+  for (const r of results) {
+    const u = String(r.url ?? "");
+    if (re.test(u)) { const c = u.split("#")[0].split("?")[0]; if (!seen.has(c)) { seen.add(c); out.push(c); } }
+  }
+  return out;
+}
+export async function findDirectoryUrls(name: string, city: string, want: DirectoryWant = { healthgrades: true, zocdoc: true }): Promise<DirectoryFound> {
+  const out: DirectoryFound = { searched: false };
+  const clean = cleanName(name); const loc = city ? ` ${city}` : "";
+  const nameToks = new Set(nameTokens(name));
+  const plans: [("zocdoc" | "healthgrades"), string][] = [];
+  if (want.zocdoc) plans.push(["zocdoc", "zocdoc dentist"]);
+  if (want.healthgrades) plans.push(["healthgrades", "healthgrades dentist"]);
+  for (const [platform, word] of plans) {
+    const queries = [`site:${platform}.com ${clean}${loc}`, `${clean}${loc} ${word}`];
+    const cands: string[] = []; const seen = new Set<string>();
+    for (const q of queries) {
+      const res = await search(q);
+      if (res.length) out.searched = true;
+      for (const u of directoryCandidates(res, platform)) if (!seen.has(u)) { seen.add(u); cands.push(u); }
+      if (cands.length >= 6) break;
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    // pick the candidate whose slug best matches the practice name (require ≥1 token)
+    let best: string | undefined; let bestScore = 0;
+    for (const u of cands) {
+      const slug = u.toLowerCase();
+      let score = 0; for (const t of nameToks) if (slug.includes(t)) score++;
+      if (score > bestScore) { bestScore = score; best = u; }
+    }
+    if (best && bestScore >= 1) out[platform] = best;
+  }
+  return out;
+}
+
 export interface SocialWant { instagram?: boolean; facebook?: boolean; tiktok?: boolean }
 export interface SocialFound {
   instagram?: string; facebook?: string; tiktok?: string; searched: boolean;

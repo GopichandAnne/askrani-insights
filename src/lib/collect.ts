@@ -5,7 +5,7 @@ import { getProvider } from "@/lib/providers/registry";
 import type { RawObservation } from "@/lib/providers/types";
 import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "@/lib/providers/apify/platforms";
 import { collectLocalNews, extractCity } from "@/lib/news";
-import { findSocialHandles, findDeliveryUrls, reverseGeoCity } from "@/lib/social-discovery";
+import { findSocialHandles, findDeliveryUrls, findDirectoryUrls, reverseGeoCity } from "@/lib/social-discovery";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
 
 /**
@@ -429,6 +429,33 @@ export async function collectBusiness(
     }
   }
 
+  // ── 1c) INTELLIGENT DIRECTORY URL discovery (dental) — the practice's Zocdoc /
+  //    Healthgrades profile URL, so the directory readers auto-target it without
+  //    the owner pasting anything. Website links are already captured above (as
+  //    auto_verified); this fills in via name+city search for practices that don't
+  //    link their profile. Runs for the target AND every competitor we collect.
+  if (directoryVertical && !attrs.directory_resolved && hasTime()) {
+    const haveHg = (identRows ?? []).some((i: any) => i.platform === "healthgrades");
+    const haveZd = (identRows ?? []).some((i: any) => i.platform === "zocdoc");
+    if (!haveHg || !haveZd) {
+      let city = extractCity(attrs.address as string | undefined);
+      if (!city && geo) city = await reverseGeoCity(geo);
+      if (city) {
+        try {
+          const dirs = await findDirectoryUrls(biz.canonical_name, city, { healthgrades: !haveHg, zocdoc: !haveZd });
+          for (const [platform, url] of Object.entries(dirs)) {
+            if (platform === "searched" || !url || typeof url !== "string") continue;
+            await svc.from("external_identity").insert({ business_id: businessId, platform, url, verification_state: "observed" }).then(() => {}, () => {});
+            (identRows ?? []).push({ platform, url, handle: null } as any);
+          }
+          if (dirs.searched) { attrs.directory_resolved = true; attrsDirty = true; }
+        } catch {
+          /* best-effort — retry next run */
+        }
+      }
+    }
+  }
+
   // ── 2) GOOGLE reviews (resolve+store place_id first) ─────────────────────
   const google = getProvider("google");
   if (google?.isConfigured() && wants("google") && hasTime()) {
@@ -510,8 +537,9 @@ export async function collectBusiness(
   //    accepted insurance for dental/medical. Each emits a per-source rating
   //    summary (feeds the Rating ring alongside Google/Yelp), the accepted-
   //    insurance list (a citable "do they take my plan?" source), and review
-  //    text (review-pulse / rival-gripe mining). Dormant unless an Apify Actor
-  //    id is set; skipped entirely for non-directory verticals. ───────────────
+  //    text (review-pulse / rival-gripe mining). The profile URL is AUTO-DISCOVERED
+  //    (website link or name+city search, above) — the owner never sets it.
+  //    Healthgrades = free fetch; Zocdoc = Bright Data (dormant w/o token). ──────
   if (directoryVertical) {
     for (const dir of DIRECTORIES) {
       const prov = getProvider(dir);
@@ -520,15 +548,9 @@ export async function collectBusiness(
       let n = 0, costUsd = 0;
       let dirErr: string | undefined;
       try {
-        const urlKey = `${dir}_url`;
-        let profileUrl = attrs[urlKey] as string | undefined;
-        if (!profileUrl) {
-          try {
-            const cands = await prov.discoverProfiles({ query: biz.canonical_name, near: geo, limit: 1 });
-            profileUrl = cands[0]?.externalId ?? cands[0]?.url;
-          } catch { /* discovery unsupported → profile URL must be attached in Channels */ }
-          if (profileUrl) { attrs[urlKey] = profileUrl; attrsDirty = true; }
-        }
+        // auto-discovered profile URL (external_identity: website link or search),
+        // falling back to a manually-attached attrs.<dir>_url if present.
+        const profileUrl = identityUrl(dir) ?? (attrs[`${dir}_url`] as string | undefined);
         if (profileUrl) {
           const job = await prov.collectContent({ urls: [profileUrl] });
           await pollJob(prov, job.jobId, 95000);
