@@ -88,23 +88,31 @@ export async function buildInsuranceCompare(ws: WorkspaceRow, db?: RlsClient): P
   const scope = ids.all;
   if (!scope.length) return emptyReport(at);
 
-  const [{ data: biz }, { data: offers }] = await Promise.all([
+  const [{ data: biz }, { data: offers }, { data: dirItems }] = await Promise.all([
     supabase.from("business").select("id, canonical_name").in("id", scope),
+    // website-sourced insurance (the dental module writes it as an "Insurance accepted" offer)
     supabase.from("offer").select("business_id, entity_text, conditions").in("business_id", scope).ilike("entity_text", "%insurance%").limit(2000),
+    // directory-sourced insurance (Zocdoc via Bright Data emits an "Insurance accepted (Zocdoc)" review/profile item)
+    supabase.from("content_item").select("business_id, text").in("business_id", scope).in("platform", ["zocdoc", "healthgrades"]).ilike("text", "%insurance accepted%").limit(2000),
   ]);
   const nameById = new Map<string, string>();
   for (const b of biz ?? []) nameById.set((b as any).id, (b as any).canonical_name ?? "Unknown");
 
-  // gather payers per business (from the entity_text label + the conditions list)
+  // gather payers per business — from website offers (entity_text + conditions) AND
+  // directory content items (Zocdoc/Healthgrades insurance text), merged.
   const payersByBiz = new Map<string, Set<string>>();
-  for (const o of offers ?? []) {
-    const bid = (o as any).business_id as string;
-    const conds = Array.isArray((o as any).conditions) ? (o as any).conditions as string[] : [];
-    const found = payersFrom([String((o as any).entity_text ?? ""), ...conds]);
-    if (!found.length) continue;
+  const add = (bid: string, found: string[]) => {
+    if (!found.length) return;
     const set = payersByBiz.get(bid) ?? new Set<string>();
     for (const p of found) set.add(p);
     payersByBiz.set(bid, set);
+  };
+  for (const o of offers ?? []) {
+    const conds = Array.isArray((o as any).conditions) ? (o as any).conditions as string[] : [];
+    add((o as any).business_id as string, payersFrom([String((o as any).entity_text ?? ""), ...conds]));
+  }
+  for (const c of dirItems ?? []) {
+    add((c as any).business_id as string, payersFrom([String((c as any).text ?? "")]));
   }
 
   const businesses: BizInsurance[] = [...payersByBiz.entries()]

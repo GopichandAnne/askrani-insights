@@ -22,11 +22,12 @@ import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/en
 
 const MAX_PAGES = 8;
 
-// Verticals for which the healthcare review directory (Healthgrades) is worth
-// reading. Extend as medical verticals land. (Zocdoc dropped — it 403s a plain
-// fetch and its Apify actors proved unreliable; Google + Healthgrades cover it.)
+// Verticals for which the healthcare review directories are worth reading. Extend
+// as medical verticals land. Healthgrades = plain fetch (free). Zocdoc = via Bright
+// Data Web Unlocker (403s a plain fetch); dormant unless BRIGHTDATA_API_TOKEN set,
+// and only runs for a business with a stored zocdoc_url.
 const DIRECTORY_VERTICALS = new Set(["dental"]);
-const DIRECTORIES = ["healthgrades"];
+const DIRECTORIES = ["healthgrades", "zocdoc"];
 
 export interface CollectResult {
   businessId: string;
