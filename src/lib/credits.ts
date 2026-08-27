@@ -74,11 +74,49 @@ export interface Billing {
   totalCostUsd: number;  // lifetime real COGS
   ledger: LedgerEntry[]; // capped recent history
   processedEvents?: string[]; // Stripe event ids handled (idempotency)
+  rev?: number;          // optimistic-concurrency counter (compare-and-swap)
 }
 
-const DEFAULT: Billing = { plan: "free", planCredits: 0, topupCredits: 0, trialGranted: false, status: "active", totalSpent: 0, totalCostUsd: 0, ledger: [] };
+const DEFAULT: Billing = { plan: "free", planCredits: 0, topupCredits: 0, trialGranted: false, status: "active", totalSpent: 0, totalCostUsd: 0, ledger: [], rev: 0 };
 const LEDGER_CAP = 300;
 type Svc = ReturnType<typeof createServiceClient>;
+
+/** Sentinel a mutator returns to abort the write (a deliberate no-op — e.g. the
+ *  event was already processed, or the balance is short). */
+const BILLING_ABORT = Symbol("billing_abort");
+type BillingMutator = (b: Billing) => void | typeof BILLING_ABORT | Promise<void | typeof BILLING_ABORT>;
+
+/**
+ * Atomic read-modify-write of the org billing blob, with compare-and-swap on a
+ * `rev` counter and retry-on-conflict. Every billing mutation goes through this so
+ * concurrent writers can't clobber each other — the exact bug where Stripe fires
+ * checkout.session.completed AND invoice.paid within milliseconds (separate
+ * serverless calls), and one's stale write reset the plan the other had just set.
+ * Returns the new billing, or null if the mutator aborted.
+ */
+async function mutateBilling(svc: Svc, orgId: string, mutate: BillingMutator): Promise<Billing | null> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { settings, billing } = await readBilling(svc, orgId);
+    const oldRev = billing.rev ?? 0;
+    if ((await mutate(billing)) === BILLING_ABORT) return null;
+    billing.rev = oldRev + 1;
+    billing.ledger = (billing.ledger ?? []).slice(-LEDGER_CAP);
+    let q = svc.from("organization").update({ settings: { ...settings, billing } }).eq("id", orgId);
+    // CAS: only write if rev is unchanged since our read (first write: null or 0).
+    q = oldRev === 0
+      ? q.or("settings->billing->>rev.is.null,settings->billing->>rev.eq.0")
+      : q.filter("settings->billing->>rev", "eq", String(oldRev));
+    const { data } = await q.select("id");
+    if (data && data.length) return billing; // applied
+    await new Promise((r) => setTimeout(r, 25 + attempt * 40)); // conflict → re-read + retry
+  }
+  // Last resort (rare): a plain write so a grant is never silently dropped.
+  const { settings, billing } = await readBilling(svc, orgId);
+  if ((await mutate(billing)) === BILLING_ABORT) return null;
+  billing.rev = (billing.rev ?? 0) + 1;
+  await writeBilling(svc, orgId, settings, billing);
+  return billing;
+}
 
 async function readBilling(svc: Svc, orgId: string): Promise<{ settings: Record<string, unknown>; billing: Billing }> {
   const { data } = await svc.from("organization").select("settings").eq("id", orgId).maybeSingle();
@@ -132,12 +170,12 @@ export async function grantTrialIfNeeded(orgId: string): Promise<void> {
   if (await linkedStore(orgId)) return;
   try {
     const svc = createServiceClient();
-    const { settings, billing } = await readBilling(svc, orgId);
-    if (billing.trialGranted) return;
-    billing.trialGranted = true;
-    billing.topupCredits += TRIAL_CREDITS;
-    billing.ledger.push({ ts: new Date().toISOString(), delta: TRIAL_CREDITS, bucket: "topup", reason: "trial_grant" });
-    await writeBilling(svc, orgId, settings, billing);
+    await mutateBilling(svc, orgId, (b) => {
+      if (b.trialGranted) return BILLING_ABORT;
+      b.trialGranted = true;
+      b.topupCredits += TRIAL_CREDITS;
+      b.ledger.push({ ts: new Date().toISOString(), delta: TRIAL_CREDITS, bucket: "topup", reason: "trial_grant" });
+    });
   } catch { /* never block auth on credits */ }
 }
 
@@ -149,17 +187,17 @@ export async function spendForCost(orgId: string, costUsd: number, ref: Record<s
   if (store) { await walletDebit(store, credits, "collection", { enforce: false, costUsd, ref }); return; }
   try {
     const svc = createServiceClient();
-    const { settings, billing } = await readBilling(svc, orgId);
-    // debit plan credits first, then top-up (may go negative in Phase 1 — record-only)
-    let remaining = credits;
-    const fromPlan = Math.min(billing.planCredits, remaining);
-    billing.planCredits -= fromPlan;
-    remaining -= fromPlan;
-    billing.topupCredits -= remaining;
-    billing.totalSpent += credits;
-    billing.totalCostUsd = Number((billing.totalCostUsd + costUsd).toFixed(4));
-    billing.ledger.push({ ts: new Date().toISOString(), delta: -credits, bucket: fromPlan >= credits ? "plan" : "topup", reason: "collection_debit", costUsd: Number(costUsd.toFixed(4)), ref });
-    await writeBilling(svc, orgId, settings, billing);
+    await mutateBilling(svc, orgId, (b) => {
+      // debit plan credits first, then top-up (may go negative in Phase 1 — record-only)
+      let remaining = credits;
+      const fromPlan = Math.min(b.planCredits, remaining);
+      b.planCredits -= fromPlan;
+      remaining -= fromPlan;
+      b.topupCredits -= remaining;
+      b.totalSpent += credits;
+      b.totalCostUsd = Number((b.totalCostUsd + costUsd).toFixed(4));
+      b.ledger.push({ ts: new Date().toISOString(), delta: -credits, bucket: fromPlan >= credits ? "plan" : "topup", reason: "collection_debit", costUsd: Number(costUsd.toFixed(4)), ref });
+    });
   } catch { /* record-only; never fail collection on credits */ }
 }
 
@@ -214,17 +252,17 @@ export async function spendCredits(orgId: string, credits: number, reason: strin
     return r ? r.ok : false;
   }
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  if (balanceOf(billing) < credits) return false;
-  let remaining = credits;
-  const fromPlan = Math.min(billing.planCredits, remaining);
-  billing.planCredits -= fromPlan;
-  remaining -= fromPlan;
-  billing.topupCredits -= remaining;
-  billing.totalSpent += credits;
-  billing.ledger.push({ ts: new Date().toISOString(), delta: -credits, bucket: fromPlan >= credits ? "plan" : "topup", reason, ref });
-  await writeBilling(svc, orgId, settings, billing);
-  return true;
+  const result = await mutateBilling(svc, orgId, (b) => {
+    if (balanceOf(b) < credits) return BILLING_ABORT; // insufficient → no charge
+    let remaining = credits;
+    const fromPlan = Math.min(b.planCredits, remaining);
+    b.planCredits -= fromPlan;
+    remaining -= fromPlan;
+    b.topupCredits -= remaining;
+    b.totalSpent += credits;
+    b.ledger.push({ ts: new Date().toISOString(), delta: -credits, bucket: fromPlan >= credits ? "plan" : "topup", reason, ref });
+  });
+  return result !== null;
 }
 
 /** Credit back a prior charge (deep-read → Monitor promotion within the window). */
@@ -233,11 +271,11 @@ export async function refundCredits(orgId: string, credits: number, reason: stri
   const store = await linkedStore(orgId);
   if (store) { await walletGrant(store, credits, reason, ref); return; }
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  billing.topupCredits += credits;                    // refunds land in the persistent bucket
-  billing.totalSpent = Math.max(0, billing.totalSpent - credits);
-  billing.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason, ref });
-  await writeBilling(svc, orgId, settings, billing);
+  await mutateBilling(svc, orgId, (b) => {
+    b.topupCredits += credits;                    // refunds land in the persistent bucket
+    b.totalSpent = Math.max(0, b.totalSpent - credits);
+    b.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason, ref });
+  });
 }
 
 export interface CreditsSummary {
@@ -286,40 +324,37 @@ export async function planOfOrg(orgId: string): Promise<string> {
 /** One-time top-up: add persistent credits. */
 export async function grantTopup(orgId: string, credits: number, ref?: Record<string, unknown>): Promise<void> {
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  billing.topupCredits += credits;
-  billing.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason: "topup_purchase", ref });
-  await writeBilling(svc, orgId, settings, billing);
+  await mutateBilling(svc, orgId, (b) => {
+    b.topupCredits += credits;
+    b.ledger.push({ ts: new Date().toISOString(), delta: credits, bucket: "topup", reason: "topup_purchase", ref });
+  });
 }
 
 /** Set the active plan + status (no credit change; grant happens on invoice.paid). */
 export async function setPlan(orgId: string, plan: string, status = "active"): Promise<void> {
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  billing.plan = plan;
-  billing.status = status;
-  await writeBilling(svc, orgId, settings, billing);
+  await mutateBilling(svc, orgId, (b) => { b.plan = plan; b.status = status; });
 }
 
 /** Reset the monthly plan-credit allotment (subscription first payment + renewals). */
 export async function grantPlanCredits(orgId: string): Promise<void> {
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  const grant = PLANS[billing.plan]?.monthlyCredits ?? 0;
-  billing.planCredits = grant; // reset, not accumulate (use-it-or-lose-it)
-  billing.ledger.push({ ts: new Date().toISOString(), delta: grant, bucket: "plan", reason: "period_reset" });
-  await writeBilling(svc, orgId, settings, billing);
+  await mutateBilling(svc, orgId, (b) => {
+    const grant = PLANS[b.plan]?.monthlyCredits ?? 0;
+    b.planCredits = grant; // reset, not accumulate (use-it-or-lose-it)
+    b.ledger.push({ ts: new Date().toISOString(), delta: grant, bucket: "plan", reason: "period_reset" });
+  });
 }
 
 /** Idempotency: returns true the first time an event id is seen for the org. */
 export async function markEventProcessed(orgId: string, eventId: string): Promise<boolean> {
   const svc = createServiceClient();
-  const { settings, billing } = await readBilling(svc, orgId);
-  const seen = billing.processedEvents ?? [];
-  if (seen.includes(eventId)) return false;
-  billing.processedEvents = [...seen, eventId].slice(-100);
-  await writeBilling(svc, orgId, settings, billing);
-  return true;
+  const result = await mutateBilling(svc, orgId, (b) => {
+    const seen = b.processedEvents ?? [];
+    if (seen.includes(eventId)) return BILLING_ABORT;
+    b.processedEvents = [...seen, eventId].slice(-100);
+  });
+  return result !== null;
 }
 
 /** Store the Stripe customer id on the org (column) + find org by it. */
