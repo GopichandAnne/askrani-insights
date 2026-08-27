@@ -45,9 +45,6 @@ const METRICS: { key: MetricKey; label: string; color: MetricScore["color"] }[] 
 // so it reads as "Offers & pricing", not "Price". Restaurants/grocery keep "Price".
 const METRIC_LABEL_BY_VERTICAL: Record<string, Partial<Record<MetricKey, string>>> = {
   dental: { price: "Offers & pricing" },
-  salon: { price: "Offers & pricing" },
-  fitness: { price: "Pricing & offers" },
-  real_estate: { price: "Pricing" },
 };
 const labelFor = (key: MetricKey, base: string, vertical?: string): string =>
   METRIC_LABEL_BY_VERTICAL[vertical ?? ""]?.[key] ?? base;
