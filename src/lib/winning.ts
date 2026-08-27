@@ -2,6 +2,7 @@ import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { dedupeCrossPost } from "@/lib/dedupe";
 
 /**
  * "What's winning" — the entity-level fusion, the moat. Instead of business-level
@@ -105,12 +106,14 @@ export async function generateWinning(ws: WorkspaceRow, db?: RlsClient): Promise
   const scope = ids.all;
   if (!scope.length) return empty(at);
 
-  const [{ data: bizRows }, { data: offers }, { data: reviews }, { data: posts }] = await Promise.all([
+  const [{ data: bizRows }, { data: offers }, { data: reviews }, { data: postsRaw }] = await Promise.all([
     supabase.from("business").select("id, canonical_name").in("id", scope),
     supabase.from("offer").select("business_id, entity_text, pricing").in("business_id", scope).limit(6000),
     supabase.from("content_item").select("text").in("business_id", scope).in("platform", ["google", "yelp"]).order("observed_at", { ascending: false }).limit(600),
-    supabase.from("content_item").select("text, media, business:business_id(canonical_name)").in("business_id", ids.competitorIds).in("platform", SOCIAL).order("observed_at", { ascending: false }).limit(400),
+    supabase.from("content_item").select("text, platform, media, business:business_id(canonical_name)").in("business_id", ids.competitorIds).in("platform", SOCIAL).order("observed_at", { ascending: false }).limit(400),
   ]);
+  // collapse the same post cross-posted to IG/FB/TikTok so it isn't counted twice
+  const posts = dedupeCrossPost(postsRaw ?? []);
 
   const nameById = new Map<string, string>((bizRows ?? []).map((b) => [(b as any).id, (b as any).canonical_name]));
   const targetId = ids.targetId;

@@ -2,6 +2,7 @@ import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { dedupeCrossPost } from "@/lib/dedupe";
 
 /**
  * Social PULSE — the time-derivative of the local content scene, mirroring the
@@ -66,7 +67,7 @@ export async function generateSocialPulse(ws: WorkspaceRow, db?: RlsClient): Pro
   const ids = await workspaceBusinessIds(ws, supabase);
   if (!ids.competitorIds.length) return empty(at);
 
-  const { data: posts } = await supabase
+  const { data: postsRaw } = await supabase
     .from("content_item")
     .select("text, platform, media, url, published_at, observed_at, business:business_id(canonical_name)")
     .in("business_id", ids.competitorIds)
@@ -74,7 +75,8 @@ export async function generateSocialPulse(ws: WorkspaceRow, db?: RlsClient): Pro
     .order("observed_at", { ascending: false })
     .limit(600);
 
-  const all = (posts ?? []).map((p) => {
+  const posts = dedupeCrossPost(postsRaw ?? []); // collapse IG/FB/TikTok cross-posts
+  const all = posts.map((p) => {
     const mm = metricsOf((p as any).media);
     return {
       rival: (p as any).business?.canonical_name ?? "A rival",

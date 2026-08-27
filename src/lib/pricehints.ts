@@ -2,6 +2,7 @@ import { staleCached } from "@/lib/staleCache";
 import { createClient, createServiceClient, type RlsClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { dedupeCrossPost } from "@/lib/dedupe";
 
 /**
  * Price HINTS — the "how do you get a hint into competitors' pricing?" answer.
@@ -77,8 +78,11 @@ export async function minePriceHints(ws: WorkspaceRow, db?: RlsClient): Promise<
     .limit(800);
 
   const SOURCE_LABEL: Record<string, string> = { google: "Google review", yelp: "Yelp review", healthgrades: "Healthgrades review", zocdoc: "Zocdoc review", instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok" };
+  // Collapse cross-posted social captions (same promo mirrored to IG/FB/TikTok) so
+  // one post isn't counted as multiple price mentions.
+  const deduped = dedupeCrossPost(rows ?? []);
   // keep only text that plausibly quotes a dollar amount (skip rating summaries)
-  const candidates = (rows ?? [])
+  const candidates = deduped
     .map((r: any) => ({
       business: (r.business as any)?.canonical_name ?? "Unknown",
       isYou: r.business_id === ids.targetId,
