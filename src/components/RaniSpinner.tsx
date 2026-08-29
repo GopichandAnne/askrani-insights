@@ -17,27 +17,27 @@ export function RaniSpinner({ label }: { label?: string }) {
   );
 }
 
-/** The official Ask Rani mascot mark (from the platform's icon.svg). */
+/** The official Ask Rani mascot mark — the canonical free-standing robot,
+ *  identical to the marketing site (askrani.ai). */
 export function RaniMark({ size = 28 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden className="shrink-0">
-      <defs>
-        <linearGradient id="raniG" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#14B8A6" />
-          <stop offset="1" stopColor="#0D9488" />
-        </linearGradient>
-      </defs>
-      <rect width="100" height="100" rx="24" fill="url(#raniG)" />
-      <line x1="40" y1="34" x2="36" y2="26" stroke="#fff" strokeWidth="3" strokeLinecap="round" opacity="0.9" />
-      <line x1="60" y1="34" x2="64" y2="26" stroke="#fff" strokeWidth="3" strokeLinecap="round" opacity="0.9" />
-      <circle cx="35" cy="23" r="5" fill="#5EEAD4" />
-      <circle cx="65" cy="23" r="5" fill="#FDBA74" />
-      <rect x="26" y="33" width="48" height="38" rx="17" fill="#fff" />
-      <circle cx="42" cy="50" r="6.5" fill="#14B8A6" />
-      <circle cx="58" cy="50" r="6.5" fill="#14B8A6" />
-      <circle cx="40" cy="47.5" r="2" fill="#fff" opacity="0.9" />
-      <circle cx="56" cy="47.5" r="2" fill="#fff" opacity="0.9" />
-      <path d="M43 61 Q50 67 57 61" stroke="#14B8A6" strokeWidth="3" fill="none" strokeLinecap="round" />
+    <svg width={size} height={Math.round(size * 1.2)} viewBox="0 0 100 120" aria-hidden className="shrink-0">
+      <line x1="38" y1="22" x2="33" y2="12" stroke="#94A3B8" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="32" cy="10" r="4.5" fill="#14B8A6" />
+      <line x1="62" y1="22" x2="67" y2="12" stroke="#94A3B8" strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="68" cy="10" r="4.5" fill="#FB923C" />
+      <rect x="25" y="20" width="50" height="40" rx="18" fill="#f0fdfa" stroke="#99f6e4" strokeWidth="1.5" />
+      <circle cx="42" cy="38" r="6" fill="white" stroke="#ccfbf1" strokeWidth="1" />
+      <circle cx="58" cy="38" r="6" fill="white" stroke="#ccfbf1" strokeWidth="1" />
+      <circle cx="42.5" cy="38.5" r="3.5" fill="#14B8A6" />
+      <circle cx="58.5" cy="38.5" r="3.5" fill="#14B8A6" />
+      <circle cx="41" cy="36.5" r="1.5" fill="white" opacity="0.8" />
+      <circle cx="57" cy="36.5" r="1.5" fill="white" opacity="0.8" />
+      <path d="M44 52 Q50 57 56 52" stroke="#14B8A6" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <rect x="35" y="65" width="30" height="32" rx="12" fill="#14B8A6" />
+      <circle cx="45" cy="78" r="1.5" fill="white" opacity="0.3" />
+      <circle cx="50" cy="78" r="1.5" fill="white" opacity="0.3" />
+      <circle cx="55" cy="78" r="1.5" fill="white" opacity="0.3" />
     </svg>
   );
 }
