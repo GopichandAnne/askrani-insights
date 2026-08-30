@@ -298,6 +298,113 @@ async function draftKnowledge(
   }
 }
 
+// ── Answer-readiness grader (the free-tool "brain") ──────────────────────────
+// Given ONE url and no account, read the site and grade how well an AI assistant
+// could answer a real customer's questions from it. Powers the public grader:
+// the score is the shareable hook, the gaps are the exact to-do list, and the
+// answerable ones drive the live Rani demo. Same crawl + LLM the detector uses.
+
+export interface AnswerabilityQuestion {
+  q: string;
+  answerable: boolean;
+  a: string; // one-sentence grounded answer when answerable; "" otherwise
+  category: string;
+}
+
+export interface AnswerabilityGrade {
+  url: string;
+  business: { name: string; what: string };
+  score: number; // 0–100 = answerable / total
+  total: number;
+  answeredCount: number;
+  answered: { q: string; a: string }[];
+  gaps: { q: string; category?: string }[];
+}
+
+const ANSWERABILITY_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    business: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string" },
+        what: { type: "string", description: "One sentence: what this business does and who its customers are." },
+      },
+      required: ["name", "what"],
+    },
+    questions: {
+      type: "array",
+      minItems: 10,
+      maxItems: 16,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          q: { type: "string", description: "A real question a customer of THIS business asks before buying or visiting." },
+          answerable: {
+            type: "boolean",
+            description: "True ONLY if the WEBSITE CONTENT provided actually contains the answer — not if it is merely plausible, typical, or would require calling/emailing.",
+          },
+          a: { type: "string", description: "If answerable, a one-sentence answer grounded strictly in the website content. Empty string otherwise." },
+          category: { type: "string", description: "Short label: hours, pricing, location, services, policies, contact, products, booking, returns, etc." },
+        },
+        required: ["q", "answerable", "a", "category"],
+      },
+    },
+  },
+  required: ["business", "questions"],
+};
+
+/** Read a site and grade its answer-readiness. Fail-soft: null when we can't
+ *  read the page or the LLM isn't configured (the caller degrades gracefully). */
+export async function gradeAnswerability(rawUrl: string): Promise<AnswerabilityGrade | null> {
+  if (!isLlmConfigured()) return null;
+  const base = normalizeUrl(rawUrl);
+  if (!base) return null;
+  const origin = (() => { try { return new URL(base).origin; } catch { return base; } })();
+  const paths = ["/about", "/services", "/faq", "/faqs", "/contact", "/pricing", "/menu"];
+  const urls = [base, ...paths.map((p) => `${origin}${p}`)].slice(0, 6);
+  const pages = await Promise.all(urls.map(fetchPageText));
+  const siteText = pages.filter(Boolean).join("\n\n").slice(0, 12_000);
+  if (!siteText) return null;
+
+  const system =
+    "You grade how well an AI assistant could answer a real customer's questions using ONLY the website content provided. " +
+    "First infer what the business is and who its customers are. Then list the 10–16 questions those customers most commonly ask before buying or visiting. " +
+    "For EACH question set `answerable`: true ONLY if the provided website content actually contains the answer. Be strict — if the answer is merely typical, plausible, or would require calling or emailing, it is NOT answerable. " +
+    "When answerable, give a one-sentence answer grounded strictly in the content. Never invent hours, prices, or policies.";
+  const text = `WEBSITE: ${base}\n\nWEBSITE CONTENT:\n${siteText}`;
+
+  try {
+    const { data } = await getLlm().callStructured<{
+      business: { name: string; what: string };
+      questions: AnswerabilityQuestion[];
+    }>({ system, text, schema: ANSWERABILITY_SCHEMA, tier: "extract", maxTokens: 1600 });
+
+    const qs = (Array.isArray(data.questions) ? data.questions : [])
+      .map((x) => ({ q: clean(x?.q), answerable: !!x?.answerable, a: clean(x?.a), category: clean(x?.category) }))
+      .filter((x) => x.q);
+    if (!qs.length) return null;
+
+    const answered = qs.filter((x) => x.answerable && x.a).map((x) => ({ q: x.q, a: x.a }));
+    const gaps = qs.filter((x) => !x.answerable).map((x) => ({ q: x.q, category: x.category || undefined }));
+    const total = qs.length;
+    return {
+      url: base,
+      business: { name: clean(data.business?.name), what: clean(data.business?.what) },
+      score: Math.round((answered.length / total) * 100),
+      total,
+      answeredCount: answered.length,
+      answered,
+      gaps,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function detectLocal(query: string, name?: string): Promise<DetectResult> {
   const google = getProvider("google");
   if (!google?.isConfigured()) return { detected: null, source: "none" };
