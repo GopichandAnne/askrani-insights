@@ -1,26 +1,29 @@
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
- * Answer-engine probe — the receipts behind Proof B. We ask a LIVE-retrieval
- * engine (Perplexity: reads the web at answer-time, returns citations) a real
- * customer question ABOUT a specific business, capture the verbatim answer +
- * whether it actually answered and whether it cited the business's own site or
- * its Ask Rani Answers page. Run before publish (engine shrugs) and after
- * (engine answers + cites) → an evidenced, dated before→after.
+ * Answer-engine probe — the receipts behind Proof B. Two tiers, because they
+ * prove very different things:
+ *   • "gap"     — NAMED questions about the business (does the engine answer a
+ *                 specific fact, and cite you). Controllable, honest defensive
+ *                 proof: before "I don't have that", after answered + cited.
+ *   • "context" — NON-BRANDED intent queries a prospect who doesn't know you
+ *                 would type ("best DCIM for higher-ed"). The signal is whether
+ *                 you get MENTIONED/recommended at all — the discovery win. High
+ *                 value, harder to move, so we measure it honestly, never promise.
  *
- * Env-gated: no PERPLEXITY_API_KEY → returns null (feature dormant, caller shows
- * "connect an engine"). Perplexity chosen because it reads Bing/live web, which
- * IndexNow refreshes in minutes — the fast path our Answers page targets.
+ * Uses Perplexity (live-retrieval + citations). Env-gated on PERPLEXITY_API_KEY.
  */
 
 export interface ProbeResult {
   question: string;
+  kind: "gap" | "context";
   engine: string;
   answer: string;
   citations: string[];
-  answered: boolean; // did it actually answer with specifics (vs. "I don't know")
+  answered: boolean; // gap: a specific substantive answer was given
+  mentioned: boolean; // the business appears (name in answer or domain cited) — the context signal
   citedOwn: boolean; // cited the business site or its Answers page
-  at: string; // ISO timestamp — the receipt
+  at: string;
 }
 
 const ANSWERED_SCHEMA = {
@@ -30,21 +33,21 @@ const ANSWERED_SCHEMA = {
   required: ["answered"],
 };
 
+const CONTEXT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { queries: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 4 } },
+  required: ["queries"],
+};
+
 function hostOf(u: string): string {
   try { return new URL(u).host.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
 }
 
-async function askPerplexity(
-  name: string,
-  siteUrl: string | undefined,
-  question: string,
-): Promise<{ answer: string; citations: string[] } | null> {
+/** Ask Perplexity a raw prompt; returns the answer text + citation URLs. */
+async function askPerplexity(system: string, user: string): Promise<{ answer: string; citations: string[] } | null> {
   const key = process.env.PERPLEXITY_API_KEY;
   if (!key) return null;
-  const sys =
-    "You answer questions about a specific business using live web sources. If you cannot find specific information about THIS business, say so plainly rather than guessing.";
-  const who = siteUrl ? `the business "${name}" (${siteUrl})` : `the business "${name}"`;
-  const user = `About ${who}: ${question}`;
   try {
     const res = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
@@ -52,7 +55,7 @@ async function askPerplexity(
       body: JSON.stringify({
         model: process.env.PERPLEXITY_MODEL || "sonar",
         messages: [
-          { role: "system", content: sys },
+          { role: "system", content: system },
           { role: "user", content: user },
         ],
       }),
@@ -96,6 +99,24 @@ async function isAnswered(question: string, answer: string): Promise<boolean> {
   }
 }
 
+/** Non-branded intent queries a prospect who doesn't know the business would type. */
+async function contextQueries(name: string, hints: string[]): Promise<string[]> {
+  if (!isLlmConfigured()) return [];
+  try {
+    const { data } = await getLlm().callStructured<{ queries: string[] }>({
+      system:
+        "Write 3-4 realistic NON-BRANDED search queries a prospective customer would type into an AI assistant when looking for what this business offers — describe their need, problem, or the product category, and the buyer's context (industry, size) where it helps. NEVER mention the business name or its domain. These test whether the business gets DISCOVERED by people who don't know it yet.",
+      text: `BUSINESS: ${name}\nWHAT ITS CUSTOMERS ASK (domain context only): ${hints.slice(0, 6).join(" | ")}`,
+      schema: CONTEXT_SCHEMA,
+      tier: "classify",
+      maxTokens: 200,
+    });
+    return (data.queries ?? []).map((q) => String(q ?? "").trim()).filter(Boolean).slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
 export async function probeAnswerEngines(input: {
   name: string;
   siteUrl?: string;
@@ -109,31 +130,73 @@ export async function probeAnswerEngines(input: {
   const answersPath = (() => {
     try { return input.answersUrl ? new URL(input.answersUrl).pathname : ""; } catch { return ""; }
   })();
+  const nameLow = input.name.toLowerCase();
+  const firstWord = input.name.split(/[\s,]+/)[0]?.toLowerCase() ?? nameLow;
 
-  const out: ProbeResult[] = [];
-  for (const q of input.questions.slice(0, 4)) {
-    const at = new Date().toISOString();
-    const pr = await askPerplexity(input.name, input.siteUrl, q);
-    if (!pr) {
-      out.push({ question: q, engine: "perplexity", answer: "", citations: [], answered: false, citedOwn: false, at });
-      continue;
-    }
-    const answered = await isAnswered(q, pr.answer);
-    const citedOwn = pr.citations.some((c) => {
+  const cites = (citations: string[]) =>
+    citations.some((c) => {
       const h = hostOf(c);
       if (siteHost && h === siteHost) return true;
       if (answersPath && answersPath.length > 3 && c.includes(answersPath)) return true;
       return false;
     });
+  const names = (answer: string) => {
+    const low = answer.toLowerCase();
+    return low.includes(nameLow) || (firstWord.length >= 4 && low.includes(firstWord));
+  };
+
+  const out: ProbeResult[] = [];
+
+  // Tier 1 — named "gap" probes: does the engine answer a specific fact + cite you.
+  const gapSys =
+    "You answer questions about a specific business using live web sources. If you cannot find specific information about THIS business, say so plainly rather than guessing.";
+  for (const q of input.questions.slice(0, 3)) {
+    const at = new Date().toISOString();
+    const who = input.siteUrl ? `the business "${input.name}" (${input.siteUrl})` : `the business "${input.name}"`;
+    const pr = await askPerplexity(gapSys, `About ${who}: ${q}`);
+    if (!pr) {
+      out.push({ question: q, kind: "gap", engine: "perplexity", answer: "", citations: [], answered: false, mentioned: false, citedOwn: false, at });
+      continue;
+    }
+    const citedOwn = cites(pr.citations);
     out.push({
       question: q,
+      kind: "gap",
       engine: "perplexity",
       answer: pr.answer.slice(0, 800),
       citations: pr.citations.slice(0, 6),
-      answered,
+      answered: await isAnswered(q, pr.answer),
+      mentioned: names(pr.answer) || citedOwn,
       citedOwn,
       at,
     });
   }
+
+  // Tier 2 — non-branded "context" probes: are you discovered/recommended at all.
+  const ctxSys =
+    "You help a user find the right product or service for their need. Answer using live web sources and recommend specific companies or products BY NAME where relevant.";
+  const ctxQs = await contextQueries(input.name, input.questions);
+  for (const q of ctxQs.slice(0, 3)) {
+    const at = new Date().toISOString();
+    const pr = await askPerplexity(ctxSys, q);
+    if (!pr) {
+      out.push({ question: q, kind: "context", engine: "perplexity", answer: "", citations: [], answered: false, mentioned: false, citedOwn: false, at });
+      continue;
+    }
+    const citedOwn = cites(pr.citations);
+    const mentioned = names(pr.answer) || citedOwn;
+    out.push({
+      question: q,
+      kind: "context",
+      engine: "perplexity",
+      answer: pr.answer.slice(0, 800),
+      citations: pr.citations.slice(0, 6),
+      answered: mentioned, // for context, "showing up" is the win
+      mentioned,
+      citedOwn,
+      at,
+    });
+  }
+
   return out;
 }
