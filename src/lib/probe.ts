@@ -23,6 +23,7 @@ export interface ProbeResult {
   answered: boolean; // gap: a specific substantive answer was given
   mentioned: boolean; // the business appears (name in answer or domain cited) — the context signal
   citedOwn: boolean; // cited the business site or its Answers page
+  competitors?: string[]; // context only — who the engine recommends for these intents
   at: string;
 }
 
@@ -39,6 +40,37 @@ const CONTEXT_SCHEMA = {
   properties: { queries: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 4 } },
   required: ["queries"],
 };
+
+const COMPETITORS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { competitors: { type: "array", items: { type: "string" }, maxItems: 8 } },
+  required: ["competitors"],
+};
+
+/** Who the engine recommends for these non-branded intents (the roadmap of who's
+ *  winning the discovery you're missing). One pass over the context answers. */
+async function extractCompetitors(name: string, answers: string[]): Promise<string[]> {
+  const text = answers.filter(Boolean).join("\n---\n").slice(0, 6000);
+  if (!text || !isLlmConfigured()) return [];
+  try {
+    const { data } = await getLlm().callStructured<{ competitors: string[] }>({
+      system:
+        `From these AI answers to non-branded queries in a business's category, list the specific companies or PRODUCTS that get recommended — the competitors showing up. EXCLUDE "${name}" itself, review sites (G2, Capterra), and generic terms. Distinct names, most-recommended first.`,
+      text,
+      schema: COMPETITORS_SCHEMA,
+      tier: "classify",
+      maxTokens: 150,
+    });
+    const nameLow = name.toLowerCase();
+    return (data.competitors ?? [])
+      .map((c) => String(c ?? "").trim())
+      .filter((c) => c && c.toLowerCase() !== nameLow)
+      .slice(0, 8);
+  } catch {
+    return [];
+  }
+}
 
 function hostOf(u: string): string {
   try { return new URL(u).host.replace(/^www\./, "").toLowerCase(); } catch { return ""; }
@@ -196,6 +228,13 @@ export async function probeAnswerEngines(input: {
       citedOwn,
       at,
     });
+  }
+
+  // Who's winning these intents — attach to each context row for storage/display.
+  const ctxAnswers = out.filter((r) => r.kind === "context").map((r) => r.answer);
+  if (ctxAnswers.length) {
+    const competitors = await extractCompetitors(input.name, ctxAnswers);
+    for (const r of out) if (r.kind === "context") r.competitors = competitors;
   }
 
   return out;
