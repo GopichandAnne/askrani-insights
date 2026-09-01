@@ -205,12 +205,22 @@ export async function smartVertical(cand: CandidateLike, summary?: string): Prom
   return "restaurant";
 }
 
+// A real browser fingerprint. Datacenter-IP WAFs (Cloudflare et al.) routinely
+// 403 a self-identifying bot UA even on sites that serve any browser a 200 — so
+// a public reader must look like a browser or it silently reads nothing.
+const BROWSER_HEADERS: Record<string, string> = {
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+};
+
 async function fetchPageText(url: string): Promise<string> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 5000);
+  const t = setTimeout(() => ctrl.abort(), 9000);
   try {
     const res = await fetch(url, {
-      headers: { "user-agent": "AskRani-Setup/1.0 (+https://askrani.ai)", accept: "text/html" },
+      headers: BROWSER_HEADERS,
       signal: ctrl.signal,
       redirect: "follow",
     });
@@ -577,7 +587,7 @@ async function detectOnline(query: string): Promise<DetectResult> {
   const t = setTimeout(() => ctrl.abort(), 8000);
   try {
     const res = await fetch(url, {
-      headers: { "user-agent": "AskRani-Setup/1.0 (+https://askrani.ai)", accept: "text/html" },
+      headers: BROWSER_HEADERS,
       signal: ctrl.signal,
       redirect: "follow",
     });
