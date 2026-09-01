@@ -405,6 +405,58 @@ export async function gradeAnswerability(rawUrl: string): Promise<AnswerabilityG
   }
 }
 
+// ── Grader live demo — let a visitor chat with Rani on their just-graded site ──
+// Answers strictly from the site's public content (the same pages the grader read),
+// cached briefly so a demo session doesn't re-crawl on every message. A preview,
+// honestly bounded: no invented facts; "check with the team" when the site is silent.
+const DEMO_CACHE = new Map<string, { at: number; text: string }>();
+
+const DEMO_ANSWER_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { answer: { type: "string" } },
+  required: ["answer"],
+};
+
+export async function demoAnswer(rawUrl: string, question: string): Promise<{ answer: string } | null> {
+  if (!isLlmConfigured()) return null;
+  const base = normalizeUrl(rawUrl);
+  if (!base) return null;
+  const q = (question ?? "").trim().slice(0, 300);
+  if (!q) return null;
+
+  let text = "";
+  const cached = DEMO_CACHE.get(base);
+  if (cached && Date.now() - cached.at < 15 * 60_000) {
+    text = cached.text;
+  } else {
+    const origin = (() => { try { return new URL(base).origin; } catch { return base; } })();
+    const paths = ["/about", "/services", "/faq", "/faqs", "/contact", "/pricing", "/product", "/features"];
+    const urls = [base, ...paths.map((p) => `${origin}${p}`)].slice(0, 6);
+    const pages = await Promise.all(urls.map(fetchPageText));
+    text = pages.filter(Boolean).join("\n\n").slice(0, 12_000);
+    if (text) DEMO_CACHE.set(base, { at: Date.now(), text });
+  }
+  if (!text) return null;
+
+  const system =
+    "You are Rani, a friendly website assistant, answering a visitor USING ONLY the business's website content below. " +
+    "Answer in 1-3 short, warm sentences. If the content doesn't cover it, say briefly that you'd need to check with the team — never invent facts, prices, or policies.";
+  try {
+    const { data } = await getLlm().callStructured<{ answer: string }>({
+      system,
+      text: `WEBSITE CONTENT:\n${text}\n\nVISITOR QUESTION: ${q}`,
+      schema: DEMO_ANSWER_SCHEMA,
+      tier: "classify",
+      maxTokens: 220,
+    });
+    const answer = (data.answer ?? "").trim();
+    return answer ? { answer } : null;
+  } catch {
+    return null;
+  }
+}
+
 async function detectLocal(query: string, name?: string): Promise<DetectResult> {
   const google = getProvider("google");
   if (!google?.isConfigured()) return { detected: null, source: "none" };
