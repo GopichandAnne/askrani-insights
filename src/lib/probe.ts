@@ -239,3 +239,42 @@ export async function probeAnswerEngines(input: {
 
   return out;
 }
+
+export interface DiscoveryTeaser {
+  queries: { query: string; mentioned: boolean }[];
+  competitors: string[];
+  mentionedCount: number;
+  total: number;
+}
+
+/** Cheap discovery preview for the PUBLIC grader: 2 non-branded queries — are you
+ *  recommended, and who is instead? Bounded to 2 engine calls to cap public cost. */
+export async function discoveryTeaser(input: {
+  name: string;
+  siteUrl?: string;
+  hints?: string[];
+}): Promise<DiscoveryTeaser | null> {
+  if (!process.env.PERPLEXITY_API_KEY || !input.name) return null;
+  const ctxQs = await contextQueries(input.name, input.hints ?? []);
+  if (!ctxQs.length) return null;
+
+  const siteHost = input.siteUrl ? hostOf(input.siteUrl) : "";
+  const nameLow = input.name.toLowerCase();
+  const firstWord = input.name.split(/[\s,]+/)[0]?.toLowerCase() ?? nameLow;
+  const ctxSys =
+    "You help a user find the right product or service for their need. Answer using live web sources and recommend specific companies or products BY NAME where relevant.";
+
+  const answers: string[] = [];
+  const queries: { query: string; mentioned: boolean }[] = [];
+  for (const q of ctxQs.slice(0, 2)) {
+    const pr = await askPerplexity(ctxSys, q);
+    const answer = pr?.answer ?? "";
+    const cited = (pr?.citations ?? []).some((c) => !!siteHost && hostOf(c) === siteHost);
+    const low = answer.toLowerCase();
+    const mentioned = cited || low.includes(nameLow) || (firstWord.length >= 4 && low.includes(firstWord));
+    queries.push({ query: q, mentioned });
+    answers.push(answer);
+  }
+  const competitors = await extractCompetitors(input.name, answers);
+  return { queries, competitors, mentionedCount: queries.filter((q) => q.mentioned).length, total: queries.length };
+}
