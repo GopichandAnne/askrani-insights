@@ -4,12 +4,6 @@ import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
 import { getOrMakePriceHints } from "@/lib/pricehints";
 import { PriceHintsCard } from "@/components/PriceHintsCard";
-import { buildDentalBenchmark } from "@/lib/dentalbenchmark";
-import { DentalBenchmarkCard } from "@/components/DentalBenchmarkCard";
-import { buildPriceAnchors } from "@/lib/priceanchors";
-import { PricingTransparencyCard } from "@/components/PricingTransparencyCard";
-import { buildInsuranceCompare } from "@/lib/insurance";
-import { InsuranceCompareCard } from "@/components/InsuranceCompareCard";
 import { getCompetitorSocial } from "@/lib/social";
 import { getOrMakeMenuCompare } from "@/lib/menucompare";
 import type { FlyerDeal } from "@/lib/flyers";
@@ -82,23 +76,6 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   if (!built) return <PillarBuilding title="Offers & deals" subtitle="Comparing prices, promos and deals across your competitors — this first read is finishing in the background." />;
   const [rivalDeals, myDeals, priceGaps, social, menuCompare, priceHints] = built;
   const allFlyerDeals = ((ws.goals as { flyerDeals?: { deals?: FlyerDeal[] } } | undefined)?.flyerDeals?.deals ?? []) as FlyerDeal[];
-
-  // Dental: a per-procedure "ballpark near you" from the standardized-code benchmark,
-  // overlaid with real local signal — PUBLISHED anchors (a clinic's own posted price,
-  // the transparent minority) beat review/post mentions. No owner fee import needed.
-  let dentalBenchmark = null;
-  let priceAnchors = null;
-  let insurance = null;
-  if (ws.vertical === "dental" && ids.targetId) {
-    const [{ data: tgt }, anchors, ins] = await Promise.all([
-      supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle(),
-      buildPriceAnchors(ws),
-      buildInsuranceCompare(ws),
-    ]);
-    priceAnchors = anchors;
-    insurance = ins;
-    dentalBenchmark = buildDentalBenchmark((tgt?.attributes as any)?.address, priceHints, anchors);
-  }
 
   // price-drop detection over FULL history (a competitor lowered an item's price)
   const priceHist = new Map<string, { price: number; seen: number }[]>();
@@ -244,17 +221,6 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
           </section>
         );
       })()}
-
-      {/* Dental: a ballpark per procedure for the area (no fee import needed),
-          overlaid with local signal — then the mined hints below refine it. */}
-      {dentalBenchmark && <DentalBenchmarkCard benchmark={dentalBenchmark} />}
-
-      {/* Dental: who in the market publishes real prices vs keeps them off-site —
-          transparency is a differentiator, and publishers give real anchors. */}
-      {priceAnchors && !priceAnchors.empty && <PricingTransparencyCard report={priceAnchors} />}
-
-      {/* Dental: insurance acceptance across the market — a top patient filter. */}
-      {insurance && !insurance.empty && <InsuranceCompareCard report={insurance} />}
 
       {/* Price hints mined from reviews & posts — real prices across the market.
           The pricing signal for verticals that don't publish a price list. */}

@@ -4,7 +4,6 @@ import { buildWorkspaceReport } from "@/lib/report";
 import { buildScorecard, type Scorecard } from "@/lib/scorecard";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
-import { buildDentalBenchmark } from "@/lib/dentalbenchmark";
 
 /**
  * "Ask Rani" inline answers — natural-language questions answered over the
@@ -244,24 +243,10 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
     firstSeen: e.first_seen_on, lastSeen: e.last_seen_on,
   }));
 
-  // Dental: a per-procedure area ballpark (standardized-code benchmark scaled to
-  // the region, overlaid with local signal) so Rani can answer "how much is a crown
-  // around here?" even when no specific price was scraped.
-  let dentalBenchmark: unknown = undefined;
-  if (ws.vertical === "dental") {
-    const { data: tgt } = ids.targetId ? await supabase.from("business").select("attributes").eq("id", ids.targetId).maybeSingle() : { data: null };
-    const bm = buildDentalBenchmark((tgt?.attributes as any)?.address, goals.priceHints, goals.priceAnchors);
-    dentalBenchmark = {
-      region: bm.region, note: bm.note,
-      procedures: bm.rows.map((r) => ({ procedure: r.label, cdt: r.cdt, areaTypicalUsd: r.areaLow === r.areaHigh ? r.areaLow : [r.areaLow, r.areaHigh], seenLocallyUsd: r.localLow != null ? [r.localLow, r.localHigh, `${r.localMentions} mentions`] : undefined })),
-    };
-  }
-
   const context = {
     you: report.pricing.find((p) => p.isTarget)?.name ?? ws.name,
     businessType: ws.vertical,   // restaurant | grocery | salon | dental | fitness | real_estate | smoke_vape | other
     intel,
-    dentalBenchmark,
     businesses: report.pricing.map((p) => ({
       name: p.name, you: p.isTarget, pricedItems: p.offers, avgPrice: p.avgPrice, minPrice: p.minPrice, maxPrice: p.maxPrice,
     })),

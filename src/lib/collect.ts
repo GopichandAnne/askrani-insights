@@ -26,7 +26,13 @@ const MAX_PAGES = 8;
 // as medical verticals land. Healthgrades = plain fetch (free). Zocdoc = via Bright
 // Data Web Unlocker (403s a plain fetch); dormant unless BRIGHTDATA_API_TOKEN set,
 // and only runs for a business with a stored zocdoc_url.
-const DIRECTORY_VERTICALS = new Set(["dental"]);
+//
+// DISABLED 2026-09-04: dental's pricing/insurance intelligence didn't earn its
+// value (benchmark = hardcoded ranges, insurance depends on the unwired Bright
+// Data stub), so the paid directory pulls are switched off — dental now follows
+// the generic vertical path. Re-add "dental" here to turn them back on. The
+// readers (providers/directory, providers/zocdoc) and DIRECTORIES stay in place.
+const DIRECTORY_VERTICALS = new Set<string>([]);
 const DIRECTORIES = ["healthgrades", "zocdoc"];
 
 export interface CollectResult {

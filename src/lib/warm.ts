@@ -13,8 +13,6 @@ import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { minePriceHints, priceHintsIsGood } from "@/lib/pricehints";
-import { buildPriceAnchors } from "@/lib/priceanchors";
-import { buildInsuranceCompare } from "@/lib/insurance";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -65,13 +63,10 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // Mine real prices customers quote in reviews (target + competitors) — a hint
     // into competitor pricing from data we already collected; feeds Offers + Rani.
     { key: "priceHints", run: () => minePriceHints(row, db), good: (v) => priceHintsIsGood(v) && !v?.failed },
-    // Transparent-price anchors + who-publishes-vs-opaque intel (dental). Cheap +
-    // deterministic; returns empty for non-dental. Feeds the benchmark + Rani.
-    { key: "priceAnchors", run: () => buildPriceAnchors(row, db), good: (v) => !!v && (!!v.anchors?.length || !!v.transparency?.length || !!v.empty) },
-    // Insurance-acceptance comparison (dental) — who takes which plans, from data
-    // we already extract off practice websites. Cheap + deterministic; empty for
-    // non-dental. Feeds Offers + Rani.
-    { key: "insurance", run: () => buildInsuranceCompare(row, db), good: (v) => !!v && (!!v.businesses?.length || !!v.empty) },
+    // NOTE (2026-09-04): the dental priceAnchors + insurance pillars were removed
+    // here when dental's special surfaces were disabled (see collect.ts
+    // DIRECTORY_VERTICALS). buildPriceAnchors/buildInsuranceCompare still exist and
+    // can be re-added as steps if dental is turned back on.
   ];
   for (const { key, run, good } of steps) {
     let value: unknown = null;
