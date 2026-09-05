@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, markDigestSeen } from "@/lib/digest";
+import { buildAttention } from "@/lib/attention";
 import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
 import { whatsappConfigured, whatsAppRecipient, sendWhatsAppReport } from "@/lib/whatsapp";
 import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
@@ -57,11 +58,16 @@ export async function GET(req: Request) {
     due++;
 
     const digest = buildDigest({ name: w.name, vertical: w.vertical }, goals, (goals.digestSeen?.ids as string[]) ?? [], new Date(now));
+    // Attention board — the ranked 2-4 that NEED attention + the steady count, competitor
+    // & pricing first. Deterministic, built from the same cached pillars as the digest.
+    const attention = buildAttention({ name: w.name, vertical: w.vertical }, goals, (goals.attentionSeen?.ids as string[]) ?? [], new Date(now));
+    const stampedAt = new Date(now).toISOString();
+
+    // store the digest + attention board for the in-app surfaces + stamp cadence/seen
+    await svc.from("workspace").update({ goals: { ...goals, digest, attention, lastDigestAt: stampedAt, attentionSeen: { ids: attention.items.map((i) => i.id), at: stampedAt } } }).eq("id", w.id);
+
     if (!digest.items.length) { empty++; continue; }
     built++;
-
-    // store the digest for the in-app feed + stamp cadence
-    await svc.from("workspace").update({ goals: { ...goals, digest, lastDigestAt: new Date(now).toISOString() } }).eq("id", w.id);
 
     // render the report PDF once, share it across every configured channel
     let pdf: Buffer | undefined;
