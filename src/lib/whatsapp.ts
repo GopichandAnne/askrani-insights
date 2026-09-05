@@ -51,6 +51,26 @@ export async function sendWhatsAppText(to: string, body: string): Promise<boolea
   }
 }
 
+/** Download inbound media (e.g. a voice note) by its media id → bytes + mime.
+ *  Two hops: media id → a short-lived signed URL, then fetch that URL (both need
+ *  the bearer token). Returns null on any failure. */
+export async function downloadWhatsAppMedia(mediaId: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+  if (!whatsappConfigured()) return null;
+  try {
+    const meta = await fetch(`${GRAPH()}/${mediaId}`, { headers: { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } });
+    if (!meta.ok) return null;
+    const d = await meta.json().catch(() => ({} as any));
+    const url: string | undefined = d?.url;
+    const mime: string = d?.mime_type || "audio/ogg";
+    if (!url) return null;
+    const bin = await fetch(url, { headers: { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` } });
+    if (!bin.ok) return null;
+    return { bytes: new Uint8Array(await bin.arrayBuffer()), mime };
+  } catch {
+    return null;
+  }
+}
+
 /** Upload the PDF to the Cloud API media endpoint → media id (kept private, not a URL). */
 async function uploadMedia(pdf: Buffer, filename: string): Promise<string | null> {
   try {

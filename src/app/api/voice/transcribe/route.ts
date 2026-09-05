@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
+import { transcribeAudio, transcribeConfigured } from "@/lib/transcribe";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,30 +28,9 @@ export async function POST(req: Request) {
   if (!file || file.size === 0) return NextResponse.json({ error: "no audio" }, { status: 400 });
   if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "audio too long" }, { status: 413 });
 
-  const out = new FormData();
-  out.append("file", file, file.name || "speech.webm");
-
-  const localKey = process.env.OPENAI_API_KEY;
-  const raniUrl = (process.env.RANI_TRANSCRIBE_URL || "https://api.askrani.ai/functions/v1/transcribe").replace(/\/$/, "");
-  const raniSecret = process.env.RANI_OPS_SECRET;
-
-  try {
-    let text = "";
-    if (localKey) {
-      out.append("model", "whisper-1");
-      const r = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${localKey}` }, body: out });
-      if (!r.ok) return NextResponse.json({ error: "couldn't transcribe" }, { status: 502 });
-      text = String((await r.json()).text ?? "").trim();
-    } else if (raniSecret) {
-      // Borrow Rani's Whisper via the shared transcribe function.
-      const r = await fetch(raniUrl, { method: "POST", headers: { "x-ops-secret": raniSecret }, body: out });
-      if (!r.ok) return NextResponse.json({ error: "couldn't transcribe" }, { status: 502 });
-      text = String((await r.json()).text ?? "").trim();
-    } else {
-      return NextResponse.json({ error: "voice transcription isn't configured" }, { status: 503 });
-    }
-    return NextResponse.json({ text });
-  } catch {
-    return NextResponse.json({ error: "couldn't transcribe" }, { status: 502 });
-  }
+  if (!transcribeConfigured()) return NextResponse.json({ error: "voice transcription isn't configured" }, { status: 503 });
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const text = await transcribeAudio(bytes, file.name || "speech.webm", file.type || "audio/webm");
+  if (text == null) return NextResponse.json({ error: "couldn't transcribe" }, { status: 502 });
+  return NextResponse.json({ text });
 }

@@ -1,7 +1,8 @@
 import { after } from "next/server";
 import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
-import { sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp";
+import { sendWhatsAppText, whatsappConfigured, downloadWhatsAppMedia } from "@/lib/whatsapp";
+import { transcribeAudio } from "@/lib/transcribe";
 import { answerFromData, routeToBusiness } from "@/lib/assistant";
 import { applyAssistantAction } from "@/lib/assistantActions";
 import { readWaSession, writeWaSession, type WaSession } from "@/lib/wasession";
@@ -41,7 +42,7 @@ function validSignature(raw: string, header: string | null): boolean {
   try { return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected)); } catch { return false; }
 }
 
-interface Inbound { from: string; text: string }
+interface Inbound { from: string; text?: string; audioId?: string }
 
 type Ws = { id: string; name: string; vertical?: string; organization_id: string; target_business_id?: string | null; goals?: Record<string, any> };
 
@@ -65,6 +66,23 @@ const isSelectionLike = (t: string) => { const w = t.trim().split(/\s+/); return
 
 async function handle(m: Inbound) {
   if (!whatsappConfigured()) return;
+
+  // Resolve the message text — transcribe a voice note if that's what they sent,
+  // so a spoken question is answered exactly like a typed one.
+  let text = (m.text ?? "").trim();
+  let transcribed = false;
+  if (!text && m.audioId) {
+    const media = await downloadWhatsAppMedia(m.audioId);
+    const heard = media ? await transcribeAudio(media.bytes, "note.ogg", media.mime) : null;
+    if (!heard) {
+      await sendWhatsAppText(m.from, "I couldn't quite catch that voice note — mind typing it, or sending it again?");
+      return;
+    }
+    text = heard;
+    transcribed = true;
+  }
+  if (!text) return;
+
   const svc = createServiceClient();
   const candidates = await candidatesFor(svc, m.from);
   if (!candidates.length) {
@@ -76,24 +94,24 @@ async function handle(m: Inbound) {
 
   // ── choose the active business ────────────────────────────────────────────
   let active: Ws | undefined;
-  let question = m.text;
+  let question = text;
 
   if (candidates.length === 1) {
     active = candidates[0];
   } else {
     // route the message to a business (handles "1", a name, "how's my deli?", switches)
-    const idx = await routeToBusiness(candidates.map((c) => ({ id: c.id, name: c.name, vertical: c.vertical })), m.text);
+    const idx = await routeToBusiness(candidates.map((c) => ({ id: c.id, name: c.name, vertical: c.vertical })), text);
     if (idx != null) {
       active = candidates[idx];
       // if this was the reply to a "which business?" prompt, answer their ORIGINAL question
-      if (session.pending?.question && isSelectionLike(m.text)) question = session.pending.question;
+      if (session.pending?.question && isSelectionLike(text)) question = session.pending.question;
     } else {
       active = candidates.find((c) => c.id === session.workspaceId); // generic follow-up → stay on the active one
     }
     if (!active) {
       // still ambiguous → ask, remembering what they wanted
       const list = candidates.map((c, i) => `${i + 1}) ${c.name}`).join("\n");
-      session.pending = { candidateIds: candidates.map((c) => c.id), question: m.text };
+      session.pending = { candidateIds: candidates.map((c) => c.id), question: text };
       await writeWaSession(svc, orgId, m.from, session);
       await sendWhatsAppText(m.from, `You watch a few businesses — which one is this about? Reply with a number:\n${list}`);
       return;
@@ -117,7 +135,9 @@ async function handle(m: Inbound) {
     if (!res.ok) finalAnswer = res.note ? `I couldn't do that — ${res.note}` : "I couldn't make that change — please try again.";
   }
 
-  const reply = candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${finalAnswer}` : finalAnswer;
+  // Echo back a voice note's transcript so a mis-hear is obvious to the owner.
+  const echo = transcribed ? `🎙️ “${text}”\n\n` : "";
+  const reply = echo + (candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${finalAnswer}` : finalAnswer);
 
   session.workspaceId = active.id;
   session.pending = undefined;
@@ -142,6 +162,9 @@ export async function POST(req: Request) {
       for (const msg of change?.value?.messages ?? []) {
         if (msg?.type === "text" && msg?.text?.body && msg?.from) {
           inbound.push({ from: String(msg.from).replace(/\D/g, ""), text: String(msg.text.body) });
+        } else if (msg?.type === "audio" && msg?.audio?.id && msg?.from) {
+          // Voice notes arrive as type "audio" (voice:true) — transcribe in handle().
+          inbound.push({ from: String(msg.from).replace(/\D/g, ""), audioId: String(msg.audio.id) });
         }
       }
     }
