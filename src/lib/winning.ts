@@ -178,7 +178,7 @@ export async function generateWinning(ws: WorkspaceRow, db?: RlsClient): Promise
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const { data } = await getLlm().callStructured<{ summary: string; winning: RawItem[] | string }>({
-        system: SYSTEM, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 2600,
+        system: SYSTEM, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 3800,
       });
       const rows: RawItem[] = Array.isArray(data.winning)
         ? (data.winning as RawItem[])

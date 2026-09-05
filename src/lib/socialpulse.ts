@@ -148,7 +148,11 @@ export async function generateSocialPulse(ws: WorkspaceRow, db?: RlsClient): Pro
   const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), socialThemeHistory: history } }).eq("id", ws.id).then(() => {}, () => {});
 
-  return { breakouts: topBreakouts, risingFormats, fadingFormats, newCollabs, summary, at, ...(failed ? { failed: true } : {}) };
+  // Reaching here means we have real signal (breakouts/collabs/summary — largely
+  // deterministic). The LLM format leg is optional enrichment, so a thrown format
+  // call must NOT mark the whole pillar failed (that made warm retry to failure and
+  // overwrite a good social read). Only the truly-empty path above keeps `failed`.
+  return { breakouts: topBreakouts, risingFormats, fadingFormats, newCollabs, summary, at };
 }
 
 export function socialPulseIsGood(p: SocialPulse): boolean {

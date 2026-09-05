@@ -8,6 +8,8 @@ import { withinBudget } from "@/lib/pillarBudget";
 import { collectionActive } from "@/lib/jobs";
 import { getOrMakeContent, type SwipePost, type CollabItem } from "@/lib/content";
 import { getOrMakeIndustryBest, type IndustryBestPost } from "@/lib/industry";
+import { getOrMakeContentPlan } from "@/lib/contentplan";
+import { ContentPlanBoard } from "@/components/ContentPlanBoard";
 import { getAdsReport } from "@/lib/ads";
 import type { SocialPulse } from "@/lib/socialpulse";
 import { PulseColumns } from "@/components/PulseColumns";
@@ -157,9 +159,10 @@ export default async function ContentPage() {
     getOrMakeContent(state.workspace),
     getOrMakeIndustryBest(state.workspace),
     getAdsReport(state.workspace),
+    getOrMakeContentPlan(state.workspace),
   ]));
-  if (!built) return <PillarBuilding title="Content" subtitle="Reading what's working on your competitors' feeds — this first pass is finishing in the background." />;
-  const [c, industry, ads] = built;
+  if (!built) return <PillarBuilding title="Content" subtitle="Building your content plan and reading what's working on your competitors' feeds — this first pass is finishing in the background." />;
+  const [c, industry, ads, plan] = built;
   // social pulse — cached read only (warmed on collection), so the page stays fast
   const supabase = await createClient();
   const { data: spRow } = await supabase.from("workspace").select("goals").eq("id", state.workspace.id).maybeSingle();
@@ -168,7 +171,7 @@ export default async function ContentPage() {
   // visual read — what each business's photos/posts show (from the image vision pass)
   const visuals = (((spRow?.goals as any)?.visuals?.businesses ?? []) as { name: string; isYou: boolean; notes: string[] }[]).filter((b) => b.notes?.length);
 
-  const nothing = !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0 && !hasPulse && visuals.length === 0;
+  const nothing = plan.ideas.length === 0 && !c.summary && c.swipe.length === 0 && c.collabs.length === 0 && industry.best.length === 0 && ads.ads.length === 0 && !hasPulse && visuals.length === 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -176,8 +179,8 @@ export default async function ContentPage() {
         <p className="text-sm font-medium text-brand-deep">Ask Rani Insights</p>
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">Content</h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-          What&apos;s actually working on your rivals&apos; feeds — the posts worth copying (with a ready version for you),
-          the creators they collaborate with, and the hashtags they ride.
+          Your own posts to publish — ideas grounded in what you sell — plus what&apos;s working on your rivals&apos; feeds:
+          the posts worth copying, the creators they collaborate with, and the hashtags they ride.
         </p>
       </div>
 
@@ -190,6 +193,20 @@ export default async function ContentPage() {
         </div>
       ) : (
         <>
+          {plan.ideas.length > 0 && (
+            <section>
+              <div className="mb-3">
+                <h2 className="flex items-center gap-2 font-semibold">
+                  <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand-gradient text-white shadow-brand">📝</span>
+                  Post about what you sell
+                </h2>
+                {plan.summary && <p className="mt-1 max-w-3xl text-sm text-ink-soft">{plan.summary}</p>}
+                <p className="mt-0.5 text-xs text-ink-faint">Ready-to-post ideas grounded in your own offerings — copy a caption, or refine it into a full draft.</p>
+              </div>
+              <ContentPlanBoard ideas={plan.ideas} />
+            </section>
+          )}
+
           {c.summary && (
             <section className="card-hero">
               <h2 className="flex items-center gap-2 font-display text-lg font-extrabold">

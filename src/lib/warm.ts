@@ -13,6 +13,7 @@ import { generateDeals, dealsIsGood } from "@/lib/deals";
 import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { minePriceHints, priceHintsIsGood } from "@/lib/pricehints";
+import { generateContentPlan, contentPlanIsGood } from "@/lib/contentplan";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -63,6 +64,10 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // Mine real prices customers quote in reviews (target + competitors) — a hint
     // into competitor pricing from data we already collected; feeds Offers + Rani.
     { key: "priceHints", run: () => minePriceHints(row, db), good: (v) => priceHintsIsGood(v) && !v?.failed },
+    // "Post about what you sell" — a content plan grounded in the business's OWN
+    // offerings (offer table). Reads goals.winning/myDeals as best-effort momentum
+    // hints (prior cycle's is fine); the offerings themselves are the ground truth.
+    { key: "contentPlan", run: () => generateContentPlan(row, db), good: (v) => contentPlanIsGood(v) && !v?.failed },
     // NOTE (2026-09-04): the dental priceAnchors + insurance pillars were removed
     // here when dental's special surfaces were disabled (see collect.ts
     // DIRECTORY_VERTICALS). buildPriceAnchors/buildInsuranceCompare still exist and
@@ -77,7 +82,11 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
       } catch { /* fall through to retry */ }
       if (attempt < 2) await sleep(8000); // transient (model overload / rate limit) — back off
     }
-    if (value == null) continue;
+    // Never overwrite a good cache with a failed read. A transient LLM failure
+    // (rate-limit/overload starving the heavy tail pillars — winning/deals/socialPulse)
+    // used to persist {failed:true} over the prior good pillar; now we skip it and
+    // keep last-good until a pass succeeds. Empty (not failed) results still persist.
+    if (value == null || (value as { failed?: boolean })?.failed) continue;
     const { data: cur } = await svc.from("workspace").select("goals").eq("id", workspaceId).maybeSingle();
     await svc
       .from("workspace")

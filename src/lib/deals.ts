@@ -102,7 +102,7 @@ async function runDeals(ws: WorkspaceRow, businessIds: string[], db: RlsClient, 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const { data } = await getLlm().callStructured<{ deals: unknown; summary: string; moves: unknown }>({
-        system, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 1800,
+        system, text: prompt, schema: SCHEMA, tier: "extract", maxTokens: 2600,
       });
       const deals: DealItem[] = parseArrays(data.deals)
         .map((d) => {
