@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, markDigestSeen } from "@/lib/digest";
 import { buildAttention } from "@/lib/attention";
-import { digestRecipient, sendDigest, emailConfigured } from "@/lib/notify";
+import { digestRecipient, sendDigest, sendBriefEmail, orgOwnerEmail, emailConfigured } from "@/lib/notify";
+import { mintBriefLink, isBriefLinkConfigured } from "@/lib/brieflink";
+import { anchorFor } from "@/lib/anchor";
 import { whatsappConfigured, whatsAppRecipient, sendWhatsAppReport } from "@/lib/whatsapp";
 import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
@@ -74,10 +76,29 @@ export async function GET(req: Request) {
     try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, cadence)); }
     catch { pdf = undefined; } // never let a render hiccup block delivery
 
-    // push via email (+ PDF attached) if configured + a recipient resolves
+    // push via email if configured — the BRIEF email (attention board + tokened
+    // deep-links straight into /brief) when there's something to act on, else the
+    // plain digest. Deep-links only mint when BRIEF_LINK_SECRET is set; without it
+    // the brief still ships with plain (login-gated) links.
     if (emailConfigured()) {
       const to = await digestRecipient(svc, w.organization_id, goals);
-      if (to && (await sendDigest(to, w.name, digest, pdf, cadence))) emailed++;
+      if (to) {
+        if (attention.items.length) {
+          const links: { board?: string; byId: Record<string, string> } = { byId: {} };
+          if (isBriefLinkConfigured()) {
+            const tokenEmail = await orgOwnerEmail(svc, w.organization_id);
+            if (tokenEmail) {
+              const origin = process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai";
+              for (const it of attention.items) {
+                const u = mintBriefLink(origin, tokenEmail, w.id, `/brief#${anchorFor(it.id)}`);
+                if (u) links.byId[it.id] = u;
+              }
+              links.board = mintBriefLink(origin, tokenEmail, w.id, "/brief") ?? undefined;
+            }
+          }
+          if (await sendBriefEmail(to, w.name, attention, links, pdf)) emailed++;
+        } else if (await sendDigest(to, w.name, digest, pdf, cadence)) emailed++;
+      }
     }
 
     // push via WhatsApp (the PDF as a document) if configured + a number is on file

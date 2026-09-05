@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Digest, DigestItem } from "@/lib/digest";
+import type { AttentionBoard, AttentionItem } from "@/lib/attention";
 
 /**
  * Delivery for the weekly digest. Email is the pragmatic push channel for a busy
@@ -18,20 +19,15 @@ export function emailConfigured(): boolean {
 const FROM = () => process.env.DIGEST_FROM || "Ask Rani <admin@askrani.ai>";
 const APP_URL = () => (process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai").replace(/\/$/, "");
 
-/** Best-effort recipient: goals.notifyEmail → org owner's auth email. */
-export async function digestRecipient(
-  svc: SupabaseClient,
-  orgId: string | null | undefined,
-  goals: Record<string, any>,
-): Promise<string | null> {
-  const pinned = typeof goals?.notifyEmail === "string" ? goals.notifyEmail.trim() : "";
-  if (pinned) return pinned;
+/** The org owner's AUTH email — the identity a brief deep-link must sign in as
+ *  (distinct from a custom notify address the send goes to). */
+export async function orgOwnerEmail(svc: SupabaseClient, orgId: string | null | undefined): Promise<string | null> {
   if (!orgId) return null;
   const { data: mem } = await svc
     .from("org_membership")
     .select("user_id, role")
     .eq("organization_id", orgId)
-    .order("role", { ascending: true }) // "owner" sorts before others alphabetically enough; we also fall back
+    .order("role", { ascending: true })
     .limit(5);
   const ownerFirst = [...(mem ?? [])].sort((a: any, b: any) => (a.role === "owner" ? -1 : 0) - (b.role === "owner" ? -1 : 0));
   for (const m of ownerFirst) {
@@ -42,6 +38,17 @@ export async function digestRecipient(
     } catch { /* keep trying */ }
   }
   return null;
+}
+
+/** Best-effort SEND-TO recipient: goals.notifyEmail → org owner's auth email. */
+export async function digestRecipient(
+  svc: SupabaseClient,
+  orgId: string | null | undefined,
+  goals: Record<string, any>,
+): Promise<string | null> {
+  const pinned = typeof goals?.notifyEmail === "string" ? goals.notifyEmail.trim() : "";
+  if (pinned) return pinned;
+  return orgOwnerEmail(svc, orgId);
 }
 
 interface EmailAttachment { filename: string; content: string } // content = base64
@@ -108,6 +115,78 @@ export async function sendDigest(to: string, business: string, digest: Digest, p
   const { subject, html } = renderDigestEmail(business, digest, { hasPdf: !!pdf, period });
   const safe = business.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const attachments = pdf ? [{ filename: `askrani-${safe}-${period}-report.pdf`, content: pdf.toString("base64") }] : undefined;
+  return sendEmail(to, subject, html, attachments);
+}
+
+// ── The brief email — leads with the attention board (the 2-4 that need
+//    attention, competitor & pricing first), each item deep-linking straight into
+//    /brief already signed in. `links.byId[id]` is a tokened deep-link when the
+//    deep-link secret is set; otherwise it falls back to a plain (login-gated)
+//    dashboard link, so the email ships either way. ──────────────────────────────
+const CLS_COLOR: Record<AttentionItem["cls"], string> = { A: "#c2410c", B: "#0f766e", C: "#6b7280" };
+
+function briefItemRow(it: AttentionItem, url: string): string {
+  return `
+  <tr><td style="padding:14px 0;border-top:1px solid #eee">
+    <div style="font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:${CLS_COLOR[it.cls]}">${it.icon} ${escapeHtml(it.category)}${it.isNew ? ' · <span style="color:#b45309">new</span>' : ""}</div>
+    <div style="font-size:16px;font-weight:700;color:#111827;margin-top:2px">${escapeHtml(it.headline)}</div>
+    ${it.take ? `<div style="font-size:14px;color:#4b5563;margin-top:2px;line-height:1.45">${escapeHtml(it.take)}</div>` : ""}
+    <div style="margin-top:8px"><a href="${url}" style="display:inline-block;background:#0d9488;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:8px 15px;border-radius:999px">See &amp; act →</a></div>
+  </td></tr>`;
+}
+
+export function renderBriefEmail(
+  business: string,
+  board: AttentionBoard,
+  links: { board?: string; byId?: Record<string, string> },
+): { subject: string; html: string } {
+  const app = APP_URL();
+  const subject = board.items.length ? `${business}: ${board.headline}` : `${business} — your market is steady`;
+  const linkFor = (it: AttentionItem) => links.byId?.[it.id] ?? `${app}${it.href ?? "/brief"}`;
+  const rows = board.items.map((it) => briefItemRow(it, linkFor(it))).join("");
+
+  const moreLines = board.more.slice(0, 5)
+    .map((it) => `<div style="font-size:13px;color:#4b5563;padding:3px 0">${it.icon} ${escapeHtml(it.headline)}</div>`).join("");
+  const moreBlock = board.more.length
+    ? `<div style="margin-top:18px;background:#f8fafc;border:1px solid #eef0f2;border-radius:12px;padding:12px 16px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Also moving in your market</div>
+        ${moreLines}${board.more.length > 5 ? `<div style="font-size:12px;color:#9ca3af;margin-top:4px">+${board.more.length - 5} more</div>` : ""}
+      </div>`
+    : "";
+
+  const boardUrl = links.board ?? `${app}/brief`;
+  const emptyNote = board.items.length ? "" : `<div style="font-size:14px;color:#4b5563;margin-top:6px">Nothing needs your attention right now — Rani is watching and will flag anything that matters.</div>`;
+
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+    <div style="max-width:560px;margin:0 auto;padding:24px 20px">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden">
+        <div style="background:#fff;border-bottom:1px solid #eef0f2;padding:16px 24px"><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle"><img src="https://api.askrani.ai/storage/v1/object/public/branding/RaniLogo.png" alt="Ask Rani" width="55" height="80" style="height:80px;width:auto;display:block;border:0"></td><td style="vertical-align:middle;padding-left:14px;font-size:23px;font-weight:800;color:#0f766e;letter-spacing:.2px">Ask Rani</td></tr></table></div>
+        <div style="padding:22px 24px">
+          <h1 style="font-size:22px;color:#111827;margin:0 0 3px;font-weight:800">${escapeHtml(business)}</h1>
+          <div style="font-size:15px;color:#374151">${escapeHtml(board.statusLine)}</div>
+          ${emptyNote}
+          <table role="presentation" width="100%" style="border-collapse:collapse;margin-top:6px">${rows}</table>
+          ${moreBlock}
+          <div style="font-size:13px;color:#0f766e;background:#ecfdf5;border-radius:10px;padding:10px 14px;margin-top:16px">✓ <b>Everything else is stable</b> — Rani checked ${board.checkedCount} signal${board.checkedCount === 1 ? "" : "s"} across your market.</div>
+          <div style="margin-top:20px"><a href="${boardUrl}" style="display:inline-block;background:#0d9488;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;border-radius:999px">Open your market view →</a></div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:16px;text-align:center">You're getting this because you watch ${escapeHtml(business)} on Ask Rani Insights &middot; <a href="https://askrani.ai" style="color:#9ca3af">askrani.ai</a></div>
+    </div>
+  </body></html>`;
+  return { subject, html };
+}
+
+export async function sendBriefEmail(
+  to: string,
+  business: string,
+  board: AttentionBoard,
+  links: { board?: string; byId?: Record<string, string> },
+  pdf?: Buffer,
+): Promise<boolean> {
+  const { subject, html } = renderBriefEmail(business, board, links);
+  const safe = business.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const attachments = pdf ? [{ filename: `askrani-${safe}-market-report.pdf`, content: pdf.toString("base64") }] : undefined;
   return sendEmail(to, subject, html, attachments);
 }
 
