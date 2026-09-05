@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AttentionBoard, AttentionItem, AttnClass } from "@/lib/attention";
 import { ActOnIt } from "@/components/ActOnIt";
+import { anchorFor } from "@/lib/anchor";
 
 // A = needs attention (coral), B = opportunity (teal/brand), C = watch (neutral).
 const CLS: Record<AttnClass, { chip: string; stripe: string }> = {
@@ -15,7 +16,7 @@ function Card({ it }: { it: AttentionItem }) {
   const [open, setOpen] = useState(false);
   const s = CLS[it.cls] ?? CLS.C;
   return (
-    <div className="card flex gap-3.5 overflow-hidden p-0">
+    <div id={anchorFor(it.id)} className="card flex gap-3.5 scroll-mt-24 overflow-hidden p-0 transition-shadow">
       <div className={`w-1 shrink-0 rounded-full ${s.stripe}`} />
       <div className="min-w-0 flex-1 py-4 pr-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -65,6 +66,19 @@ function MoreRow({ it }: { it: AttentionItem }) {
 export function AttentionView({ board }: { board: AttentionBoard }) {
   const [showAll, setShowAll] = useState(false);
   const more = showAll ? board.more : board.more.slice(0, 6);
+
+  // Deep-link arrival: a brief's link lands on /brief#<item>; scroll to it + flash.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = window.location.hash.slice(1);
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-brand", "ring-offset-2");
+    const t = setTimeout(() => el.classList.remove("ring-2", "ring-brand", "ring-offset-2"), 2600);
+    return () => clearTimeout(t);
+  }, []);
 
   return (
     <div className="space-y-6">
