@@ -4,6 +4,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { collectionActive } from "@/lib/jobs";
 import { AttentionView } from "@/components/AttentionView";
+import { AttentionControls } from "@/components/AttentionControls";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -30,6 +31,7 @@ export default async function BriefPage() {
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">{board.headline}</h1>
         <p className="mt-1 text-sm text-ink-soft">{board.statusLine}</p>
       </div>
+      <AttentionControls mode={board.mode} objective={board.objective} />
       <AttentionView board={board} />
     </div>
   );

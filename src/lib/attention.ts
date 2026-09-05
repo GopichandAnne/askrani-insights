@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { buildDigest, type DigestItem, type ActSpec } from "@/lib/digest";
+import { OBJECTIVES, type AttnMode } from "@/lib/attention-prefs";
 
 /**
  * The attention layer — the brain of the brief. It takes the signals we already
@@ -42,6 +43,8 @@ export interface AttentionBoard {
   more: AttentionItem[];  // everything else, ranked — feeds the "everything moving" board
   stableCount: number;    // count of checked-but-steady signals
   checkedCount: number;   // total signals Rani weighed
+  mode?: AttnMode;        // the attention mode this board was built under
+  objective?: string;     // the owner's current focus (biases the ranking)
   at: string;
   empty?: boolean;
 }
@@ -54,6 +57,34 @@ const KIND_WEIGHT: Record<AttnKind, number> = {
 };
 const CLS_BASE: Record<AttnClass, number> = { A: 30, B: 12, C: 0 };
 const LABEL: Record<AttnClass, string> = { A: "High impact", B: "Opportunity", C: "Watch" };
+
+// ── Phase 5: the learning layer ───────────────────────────────────────────
+export type { AttnMode };
+export interface AttentionPrefs {
+  objective?: string;                               // an OBJECTIVES slug — biases ranking
+  mode?: AttnMode;                                  // how much surfaces (default "balanced")
+  feedback?: { byKind?: Record<string, number> };   // learned net signal per kind
+}
+// Objective → a boost to the kinds that serve that goal, so a margin-focused owner
+// sees pricing first, a reviews-focused owner sees reputation first, and so on.
+const OBJECTIVE_BOOST: Record<string, Partial<Record<AttnKind, number>>> = {
+  protect_margin: { your_pricing: 26, competitor_price: 20, competitor_deal: 12 },
+  more_traffic: { competitor_deal: 14, competitor_launch: 14, social: 12, findability: 16 },
+  grow_sales: { your_pricing: 14, menu: 16, demand: 16, competitor_deal: 12 },
+  more_reviews: { reputation: 30 },
+  get_discovered: { findability: 30, ads: 10 },
+};
+// Attention mode → how much surfaces. Quiet only interrupts for high-impact;
+// Active shows the fuller picture.
+const MODE_SELECT: Record<AttnMode, { classes: AttnClass[]; cap: number }> = {
+  quiet: { classes: ["A"], cap: 2 },
+  balanced: { classes: ["A", "B"], cap: 4 },
+  active: { classes: ["A", "B", "C"], cap: 6 },
+};
+// Feedback weights — a "not useful" nudges a whole KIND down, "acted" strongly up.
+// Clamped so no single tap is permanent, but repeated ones make Rani quieter there.
+const FEEDBACK_WEIGHT: Record<string, number> = { useful: 6, acted: 12, not_useful: -8, dismiss: -12 };
+const clampFb = (v?: number): number => Math.max(-40, Math.min(40, v ?? 0));
 
 const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
 const parseUsd = (s?: string): number | null => { const m = String(s ?? "").match(/\$?\s*(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
@@ -108,6 +139,11 @@ export function buildAttention(
 ): AttentionBoard {
   const at = now.toISOString();
   const seen = new Set(seenIds);
+  // Phase 5 — learned prefs: objective bias + attention mode + per-kind feedback.
+  const prefs = (goals.attentionPrefs ?? {}) as AttentionPrefs;
+  const mode: AttnMode = prefs.mode === "quiet" || prefs.mode === "active" ? prefs.mode : "balanced";
+  const objBoost = prefs.objective ? (OBJECTIVE_BOOST[prefs.objective] ?? {}) : {};
+  const fb = prefs.feedback?.byKind ?? {};
   const cands: AttentionItem[] = [];
 
   // 1) Reuse the digest — it already gathers every pillar with act specs + severity.
@@ -172,13 +208,18 @@ export function buildAttention(
     });
   }
 
+  // Phase 5: bias each candidate by the owner's objective + what they've marked
+  // (not) useful for that kind. Repeated "not useful" pushes a whole kind down.
+  for (const c of cands) c.score += (objBoost[c.kind] ?? 0) + clampFb(fb[c.kind]);
+
   // Dedup (a rival deal can appear from both the digest and a price-drop) + rank.
   const byId = new Map<string, AttentionItem>();
   for (const c of cands) { const prev = byId.get(c.id); if (!prev || c.score > prev.score) byId.set(c.id, c); }
   const ranked = [...byId.values()].sort((a, b) => b.score - a.score || Number(!!b.isNew) - Number(!!a.isNew));
 
-  // Surface the 2-4 that need attention (class A/B); the rest are the ranked "more".
-  const surfaced = ranked.filter((r) => r.cls !== "C").slice(0, 4);
+  // Surface per the attention MODE: quiet interrupts less (A only, 2), active more.
+  const sel = MODE_SELECT[mode];
+  const surfaced = ranked.filter((r) => sel.classes.includes(r.cls)).slice(0, sel.cap);
   const surfacedIds = new Set(surfaced.map((s) => s.id));
   const more = ranked.filter((r) => !surfacedIds.has(r.id));
 
@@ -198,6 +239,7 @@ export function buildAttention(
   return {
     headline, statusLine, items: surfaced, more,
     stableCount, checkedCount: ranked.length, at,
+    mode, objective: prefs.objective,
     ...(surfaced.length ? {} : { empty: true }),
   };
 }
@@ -218,4 +260,37 @@ export async function markAttentionSeen(wsId: string, ids: string[], now = new D
   const { data } = await svc.from("workspace").select("goals").eq("id", wsId).maybeSingle();
   const goals = (data?.goals as Record<string, any>) ?? {};
   await svc.from("workspace").update({ goals: { ...goals, attentionSeen: { ids, at: now.toISOString() } } }).eq("id", wsId);
+}
+
+// ── Phase 5 prefs writes (read-modify-write on goals.attentionPrefs) ────────
+async function patchPrefs(wsId: string, fn: (p: AttentionPrefs) => AttentionPrefs): Promise<void> {
+  const svc = createServiceClient();
+  const { data } = await svc.from("workspace").select("goals").eq("id", wsId).maybeSingle();
+  const goals = (data?.goals as Record<string, any>) ?? {};
+  const prefs = fn((goals.attentionPrefs ?? {}) as AttentionPrefs);
+  await svc.from("workspace").update({ goals: { ...goals, attentionPrefs: prefs } }).eq("id", wsId).then(() => {}, () => {});
+}
+
+/** Set the owner's objective (biases ranking). Pass null to clear. */
+export async function setAttentionObjective(wsId: string, objective: string | null): Promise<void> {
+  const valid = objective && OBJECTIVES.some((o) => o.slug === objective) ? objective : undefined;
+  await patchPrefs(wsId, (p) => ({ ...p, objective: valid }));
+}
+
+/** Set the attention mode (quiet / balanced / active). */
+export async function setAttentionMode(wsId: string, mode: AttnMode): Promise<void> {
+  const valid: AttnMode = mode === "quiet" || mode === "active" ? mode : "balanced";
+  await patchPrefs(wsId, (p) => ({ ...p, mode: valid }));
+}
+
+/** Record feedback on a KIND — the learning signal that makes Rani quieter (or
+ *  louder) about that kind over time. */
+export async function recordAttentionFeedback(wsId: string, kind: string, signal: keyof typeof FEEDBACK_WEIGHT): Promise<void> {
+  const w = FEEDBACK_WEIGHT[signal] ?? 0;
+  if (!w) return;
+  await patchPrefs(wsId, (p) => {
+    const byKind = { ...(p.feedback?.byKind ?? {}) };
+    byKind[kind] = clampFb((byKind[kind] ?? 0) + w);
+    return { ...p, feedback: { byKind } };
+  });
 }

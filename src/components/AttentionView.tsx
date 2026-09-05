@@ -14,7 +14,23 @@ const CLS: Record<AttnClass, { chip: string; stripe: string }> = {
 
 function Card({ it }: { it: AttentionItem }) {
   const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [thanked, setThanked] = useState(false);
   const s = CLS[it.cls] ?? CLS.C;
+
+  // Feedback = the learning signal. "Useful" keeps this kind prominent; "Ignore"
+  // hides it and teaches Rani to show less of that kind over time.
+  async function feedback(signal: "useful" | "dismiss") {
+    if (signal === "dismiss") setDismissed(true); else setThanked(true);
+    try {
+      await fetch("/api/attention/prefs", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "feedback", kind: it.kind, signal }),
+      });
+    } catch { /* best-effort learning */ }
+  }
+  if (dismissed) return null;
+
   return (
     <div id={anchorFor(it.id)} className="card flex gap-3.5 scroll-mt-24 overflow-hidden p-0 transition-shadow">
       <div className={`w-1 shrink-0 rounded-full ${s.stripe}`} />
@@ -44,6 +60,16 @@ function Card({ it }: { it: AttentionItem }) {
               See details →
             </a>
           )}
+          <span className="ml-auto flex items-center gap-1 text-ink-faint">
+            {thanked ? (
+              <span className="px-1 text-xs font-medium text-brand-deep">Thanks ✓</span>
+            ) : (
+              <>
+                <button onClick={() => feedback("useful")} title="Useful — keep these coming" className="grid h-8 w-8 place-items-center rounded-full transition-colors hover:bg-brand-soft hover:text-brand">👍</button>
+                <button onClick={() => feedback("dismiss")} title="Show less like this" className="inline-flex min-h-[32px] items-center rounded-full px-2 text-xs font-medium transition-colors hover:text-coral-dark">Ignore</button>
+              </>
+            )}
+          </span>
         </div>
       </div>
     </div>
