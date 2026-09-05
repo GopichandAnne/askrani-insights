@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendWhatsAppText, whatsappConfigured } from "@/lib/whatsapp";
 import { answerFromData, routeToBusiness } from "@/lib/assistant";
+import { applyAssistantAction } from "@/lib/assistantActions";
 import { readWaSession, writeWaSession, type WaSession } from "@/lib/wasession";
 
 /**
@@ -101,15 +102,26 @@ async function handle(m: Inbound) {
 
   // ── answer, grounded, with recent context ─────────────────────────────────
   const switched = candidates.length > 1 && session.workspaceId && session.workspaceId !== active.id;
-  const { answer } = await answerFromData(
+  const { answer, action } = await answerFromData(
     { id: active.id, name: active.name, vertical: active.vertical, target_business_id: active.target_business_id },
     (active.goals as Record<string, any>) ?? {}, question, session.history, svc,
   );
-  const reply = candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${answer}` : answer;
+
+  // If the copilot decided on a config change (notify address, link a Rani store,
+  // remove a competitor), execute it against THIS workspace — same as the web chat.
+  // On failure, replace the confirming answer with the reason so we never falsely
+  // tell the owner it's done.
+  let finalAnswer = answer;
+  if (action) {
+    const res = await applyAssistantAction(svc, { id: active.id }, action);
+    if (!res.ok) finalAnswer = res.note ? `I couldn't do that — ${res.note}` : "I couldn't make that change — please try again.";
+  }
+
+  const reply = candidates.length > 1 ? `${switched ? `Now on ${active.name}.\n` : `(${active.name}) `}${finalAnswer}` : finalAnswer;
 
   session.workspaceId = active.id;
   session.pending = undefined;
-  session.history = [...session.history, { role: "user", text: question }, { role: "assistant", text: answer }];
+  session.history = [...session.history, { role: "user", text: question }, { role: "assistant", text: finalAnswer }];
   await writeWaSession(svc, orgId, m.from, session);
   await sendWhatsAppText(m.from, reply);
 }
