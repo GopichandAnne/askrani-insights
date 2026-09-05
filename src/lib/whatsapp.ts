@@ -1,4 +1,5 @@
 import type { Digest } from "@/lib/digest";
+import type { AttentionBoard } from "@/lib/attention";
 
 /**
  * WhatsApp delivery via the WhatsApp Business Cloud API (Meta Graph). ENV-GATED —
@@ -67,6 +68,60 @@ async function uploadMedia(pdf: Buffer, filename: string): Promise<string | null
     return typeof d.id === "string" ? d.id : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Send the BRIEF to WhatsApp — the 2-4 that need attention, with a button that
+ * opens straight into /brief already signed in (the deep-link). Business-initiated,
+ * so it needs a pre-approved UTILITY template with a dynamic URL button.
+ *
+ * Register this template (name via WHATSAPP_BRIEF_TEMPLATE, default "market_brief";
+ * language via WHATSAPP_LANG):
+ *   CATEGORY: Utility
+ *   BODY:   "Hi {{1}} 👋 Here's what's moving in your market: {{2}}"
+ *           ({{1}} = business, {{2}} = a one-line summary)
+ *   BUTTON: URL, "Open my brief", url: https://insights.askrani.ai/l?token={{1}}
+ *           (dynamic — WhatsApp appends the token we pass to that base)
+ *
+ * `deepLinkUrl` is the full …/l?token=<token> URL; we pass only <token> as the
+ * button variable. Requires the deep-link secret (no deep-link → caller sends the
+ * PDF report instead), so a "Open my brief" button is never dead.
+ */
+export async function sendWhatsAppBrief(to: string, business: string, board: AttentionBoard, deepLinkUrl: string): Promise<boolean> {
+  if (!whatsappConfigured()) return false;
+  const token = (deepLinkUrl.split("token=")[1] ?? "").split("&")[0];
+  if (!token) return false;
+  const template = process.env.WHATSAPP_BRIEF_TEMPLATE || "market_brief";
+  const lang = process.env.WHATSAPP_LANG || "en_US";
+
+  const top = board.items.slice(0, 3).map((i) => i.headline).join("; ");
+  const summary = (board.headline + (top ? ` — ${top}` : "")).replace(/\s+/g, " ").trim().slice(0, 640);
+
+  try {
+    const r = await fetch(`${GRAPH()}/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: template,
+          language: { code: lang },
+          components: [
+            { type: "body", parameters: [
+              { type: "text", text: business.slice(0, 60) },
+              { type: "text", text: summary },
+            ] },
+            { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: token }] },
+          ],
+        },
+      }),
+    });
+    return r.ok;
+  } catch {
+    return false;
   }
 }
 

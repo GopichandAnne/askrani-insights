@@ -5,7 +5,7 @@ import { buildAttention } from "@/lib/attention";
 import { digestRecipient, sendDigest, sendBriefEmail, orgOwnerEmail, emailConfigured } from "@/lib/notify";
 import { mintBriefLink, isBriefLinkConfigured } from "@/lib/brieflink";
 import { anchorFor } from "@/lib/anchor";
-import { whatsappConfigured, whatsAppRecipient, sendWhatsAppReport } from "@/lib/whatsapp";
+import { whatsappConfigured, whatsAppRecipient, sendWhatsAppReport, sendWhatsAppBrief } from "@/lib/whatsapp";
 import { buildReportInput, renderReportPdf } from "@/lib/reportpdf";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 
@@ -76,35 +76,43 @@ export async function GET(req: Request) {
     try { pdf = await renderReportPdf(buildReportInput({ name: w.name }, goals, digest, cadence)); }
     catch { pdf = undefined; } // never let a render hiccup block delivery
 
-    // push via email if configured — the BRIEF email (attention board + tokened
-    // deep-links straight into /brief) when there's something to act on, else the
-    // plain digest. Deep-links only mint when BRIEF_LINK_SECRET is set; without it
-    // the brief still ships with plain (login-gated) links.
+    // Deep-link basis shared by email + WhatsApp: a board link + per-item links,
+    // minted when the deep-link secret is set and we can resolve the owner's AUTH
+    // email. Without it, links fall back to plain (login-gated) ones.
+    const origin = process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai";
+    let boardUrl: string | undefined;
+    const byId: Record<string, string> = {};
+    if (attention.items.length && isBriefLinkConfigured()) {
+      const tokenEmail = await orgOwnerEmail(svc, w.organization_id);
+      if (tokenEmail) {
+        boardUrl = mintBriefLink(origin, tokenEmail, w.id, "/brief") ?? undefined;
+        for (const it of attention.items) {
+          const u = mintBriefLink(origin, tokenEmail, w.id, `/brief#${anchorFor(it.id)}`);
+          if (u) byId[it.id] = u;
+        }
+      }
+    }
+
+    // push via email — the BRIEF (attention board + deep-links) when there's
+    // something to act on, else the plain digest.
     if (emailConfigured()) {
       const to = await digestRecipient(svc, w.organization_id, goals);
       if (to) {
         if (attention.items.length) {
-          const links: { board?: string; byId: Record<string, string> } = { byId: {} };
-          if (isBriefLinkConfigured()) {
-            const tokenEmail = await orgOwnerEmail(svc, w.organization_id);
-            if (tokenEmail) {
-              const origin = process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai";
-              for (const it of attention.items) {
-                const u = mintBriefLink(origin, tokenEmail, w.id, `/brief#${anchorFor(it.id)}`);
-                if (u) links.byId[it.id] = u;
-              }
-              links.board = mintBriefLink(origin, tokenEmail, w.id, "/brief") ?? undefined;
-            }
-          }
-          if (await sendBriefEmail(to, w.name, attention, links, pdf)) emailed++;
+          if (await sendBriefEmail(to, w.name, attention, { board: boardUrl, byId }, pdf)) emailed++;
         } else if (await sendDigest(to, w.name, digest, pdf, cadence)) emailed++;
       }
     }
 
-    // push via WhatsApp (the PDF as a document) if configured + a number is on file
-    if (whatsappConfigured() && pdf) {
+    // push via WhatsApp — the BRIEF with a deep-link button when there's something
+    // to act on AND the deep-link is configured (so "Open my brief" is never dead);
+    // otherwise the PDF report.
+    if (whatsappConfigured()) {
       const wa = whatsAppRecipient(goals);
-      if (wa && (await sendWhatsAppReport(wa, w.name, digest, pdf))) whatsapped++;
+      if (wa) {
+        if (attention.items.length && boardUrl && (await sendWhatsAppBrief(wa, w.name, attention, boardUrl))) whatsapped++;
+        else if (pdf && (await sendWhatsAppReport(wa, w.name, digest, pdf))) whatsapped++;
+      }
     }
 
     await markDigestSeen(w.id, digest.items.map((i) => i.id), new Date(now));
