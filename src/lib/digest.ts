@@ -158,25 +158,51 @@ export function buildDigest(
     }
   }
 
-  // ── Competitor deals (goals.deals + goals.flyerDeals), grouped by rival ────
-  const captionDeals = ((goals.deals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: clean(d.deal) }));
-  const flyerDeals = ((goals.flyerDeals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: `${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}` }));
-  const byRival = new Map<string, string[]>();
-  for (const d of [...flyerDeals, ...captionDeals].filter((d) => d.rival && d.deal)) {
-    const list = byRival.get(d.rival) ?? [];
-    if (!list.includes(d.deal)) list.push(d.deal);
-    byRival.set(d.rival, list);
+  // ── Competitor promotions vs. weekly flyer prices ─────────────────────────
+  //  Caption deals (goals.deals) are real PROMOTIONS (BOGO, % off, specials).
+  //  Flyer items (goals.flyerDeals) are a rival's itemized weekly-ad PRICES — a
+  //  34-item grocery flyer is ONE weekly sale, not 34 "deals". Count + phrase them
+  //  separately so we never say "running 34 deals". (Specific price DROPS are
+  //  surfaced sharper by the attention layer.)
+  const promoDeals = ((goals.deals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: clean(d.deal) }));
+  const flyerItems = ((goals.flyerDeals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: `${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}` }));
+  const promosByRival = new Map<string, string[]>();
+  for (const d of promoDeals.filter((d) => d.rival && d.deal)) {
+    const l = promosByRival.get(d.rival) ?? []; if (!l.includes(d.deal)) l.push(d.deal); promosByRival.set(d.rival, l);
   }
-  for (const [rival, deals] of [...byRival.entries()].slice(0, 3)) {
-    const shown = deals.slice(0, 4);
-    push({
-      id: `deal:${rival.toLowerCase()}`,
-      severity: "alert", pillar: "Competitor deals", icon: "🏷️",
-      title: deals.length > 1 ? `${rival} is running ${deals.length} deals` : `${rival} is running a deal`,
-      detail: shown.join(" · ") + (deals.length > shown.length ? ` · +${deals.length - shown.length} more` : ""),
-      act: { kind: "promo", move: `Respond to ${rival}'s current offers (${shown.join("; ")}) with a compelling deal of our own`, context: `Competitor: ${rival}. Their deals: ${shown.join("; ")}.` },
-      href: "/content",
-    });
+  const flyersByRival = new Map<string, string[]>();
+  for (const d of flyerItems.filter((d) => d.rival && d.deal)) {
+    const l = flyersByRival.get(d.rival) ?? []; if (!l.includes(d.deal)) l.push(d.deal); flyersByRival.set(d.rival, l);
+  }
+  const dealRivals = [...new Set([...promosByRival.keys(), ...flyersByRival.keys()])]
+    .map((rival) => ({ rival, promos: promosByRival.get(rival) ?? [], flyers: flyersByRival.get(rival) ?? [] }))
+    .sort((a, b) => (b.promos.length - a.promos.length) || (b.flyers.length - a.flyers.length))
+    .slice(0, 3);
+  for (const { rival, promos, flyers } of dealRivals) {
+    const shownP = promos.slice(0, 3);
+    const shownF = flyers.slice(0, 3);
+    if (promos.length) {
+      // real promotions → an alert worth responding to
+      const extraF = flyers.length ? ` · plus ${flyers.length} flyer price${flyers.length > 1 ? "s" : ""}` : "";
+      push({
+        id: `deal:${rival.toLowerCase()}`,
+        severity: "alert", pillar: "Competitor deals", icon: "🏷️",
+        title: promos.length > 1 ? `${rival} is running ${promos.length} deals` : `${rival} is running a deal`,
+        detail: shownP.join(" · ") + extraF + (promos.length > shownP.length ? ` · +${promos.length - shownP.length} more` : ""),
+        act: { kind: "promo", move: `Respond to ${rival}'s current offers (${shownP.join("; ")}) with a compelling deal of our own`, context: `Competitor: ${rival}. Their deals: ${shownP.join("; ")}.` },
+        href: "/offers",
+      });
+    } else if (flyers.length) {
+      // just their weekly ad prices → an opportunity to check, not a promo alert
+      push({
+        id: `flyer:${rival.toLowerCase()}`,
+        severity: "opportunity", pillar: "Competitor pricing", icon: "🧾",
+        title: flyers.length >= 4 ? `${rival}'s weekly sale flyer is up` : `${rival} posted new flyer prices`,
+        detail: shownF.join(" · ") + (flyers.length > shownF.length ? ` · +${flyers.length - shownF.length} more item${flyers.length - shownF.length > 1 ? "s" : ""}` : ""),
+        act: { kind: "promo", move: `${rival}'s weekly flyer is live (${shownF.join("; ")}) — run a sharp weekly offer of our own to match`, context: `Competitor: ${rival}. Flyer prices: ${shownF.join("; ")}.` },
+        href: "/offers",
+      });
+    }
   }
 
   // ── Social pulse — what's breaking out / rising in rivals' content ─────────

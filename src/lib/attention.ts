@@ -60,7 +60,8 @@ const parseUsd = (s?: string): number | null => { const m = String(s ?? "").matc
 
 // Map the digest's source pillar → an attention kind, so we can re-rank across sources.
 const PILLAR_KIND: Record<string, AttnKind> = {
-  "Competitor deals": "competitor_deal", "Reputation": "reputation", "Listings": "listings",
+  "Competitor deals": "competitor_deal", "Competitor pricing": "competitor_deal",
+  "Reputation": "reputation", "Listings": "listings",
   "Findability": "findability", "Social": "social", "Competitor ads": "ads",
   "Unmet demand": "demand", "What's winning": "menu", "Content": "content",
 };
