@@ -33,6 +33,22 @@ export function AssistantChat({ businessName }: { businessName: string }) {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
 
+  // Load the persisted thread on open — the conversation carries across sessions,
+  // reloads and channels (it's the same thread as WhatsApp for this business).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/assistant/chat");
+        const d = await r.json().catch(() => ({}));
+        if (!cancelled && Array.isArray(d.turns) && d.turns.length) {
+          setMsgs(d.turns.filter((t: Msg) => (t.role === "user" || t.role === "assistant") && typeof t.text === "string").map((t: Msg) => ({ role: t.role, text: t.text })));
+        }
+      } catch { /* start fresh */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   async function send(text: string) {
     const q = text.trim();
     if (!q || busy) return;

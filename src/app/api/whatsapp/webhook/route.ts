@@ -5,6 +5,7 @@ import { sendWhatsAppText, whatsappConfigured, downloadWhatsAppMedia } from "@/l
 import { transcribeAudio } from "@/lib/transcribe";
 import { answerFromData, routeToBusiness } from "@/lib/assistant";
 import { applyAssistantAction } from "@/lib/assistantActions";
+import { readConversation, appendConversation, recentTurns } from "@/lib/conversation";
 import { readWaSession, writeWaSession, type WaSession } from "@/lib/wasession";
 
 /**
@@ -120,9 +121,12 @@ async function handle(m: Inbound) {
 
   // ── answer, grounded, with recent context ─────────────────────────────────
   const switched = candidates.length > 1 && session.workspaceId && session.workspaceId !== active.id;
+  // Context from the PERSISTENT per-workspace thread (shared with the web chat), so
+  // Rani remembers across sessions/channels — not just the 24h WhatsApp session.
+  const convo = await readConversation(svc, active.id);
   const { answer, action } = await answerFromData(
     { id: active.id, name: active.name, vertical: active.vertical, target_business_id: active.target_business_id },
-    (active.goals as Record<string, any>) ?? {}, question, session.history, svc,
+    (active.goals as Record<string, any>) ?? {}, question, recentTurns(convo, 10), svc,
   );
 
   // If the copilot decided on a config change (notify address, link a Rani store,
@@ -143,6 +147,7 @@ async function handle(m: Inbound) {
   session.pending = undefined;
   session.history = [...session.history, { role: "user", text: question }, { role: "assistant", text: finalAnswer }];
   await writeWaSession(svc, orgId, m.from, session);
+  await appendConversation(svc, active.id, [{ role: "user", text: question }, { role: "assistant", text: finalAnswer }]);
   await sendWhatsAppText(m.from, reply);
 }
 
