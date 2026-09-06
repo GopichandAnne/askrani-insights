@@ -3,26 +3,19 @@ import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/analytics";
+import { normalizePhone, setAccountPhone } from "@/lib/accountPhone";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Update the owner's profile after first-run — name and, crucially, the contact
- * PHONE NUMBER. The phone is stored on organization.settings.ownerProfile.phone,
- * the same hook the WhatsApp assistant matches an owner on. We deliberately do NOT
- * touch the auth sign-in phone (that needs an OTP re-verification) and we send
- * nothing over WhatsApp here — this just captures/keeps the number current so it's
- * ready when WhatsApp is switched on later.
+ * Update the owner's profile — name and the PHONE NUMBER. The phone is stored two
+ * ways: on organization.settings.ownerProfile.phone (contact/notify), AND — when
+ * the auth identity has no phone yet — on the AUTH user (auth.users.phone) via the
+ * admin API, since that's the number the WhatsApp↔web bridge matches a person on.
+ * We only SET the auth phone when it's empty (we don't silently replace a verified
+ * sign-in identity here); an already-claimed number just stays as the contact. This
+ * is also the write path the phone backfill uses for existing accounts.
  */
-function normalizePhone(raw: unknown): { ok: boolean; value?: string } {
-  const t = String(raw ?? "").trim();
-  if (!t) return { ok: true, value: "" }; // clearing the number is allowed
-  const digits = t.replace(/[^\d+]/g, "");
-  const e164 = digits.startsWith("+") ? digits : `+${digits}`;
-  if (!/^\+\d{7,15}$/.test(e164)) return { ok: false };
-  return { ok: true, value: e164 };
-}
-
 export async function POST(req: Request) {
   const auth = await requireOrg();
   if (!auth) return unauthorized();
@@ -53,11 +46,24 @@ export async function POST(req: Request) {
 
   await svc.from("organization").update({ settings: { ...settings, ownerProfile } }).eq("id", auth.orgId);
 
-  // best-effort: keep the display name on the auth user in sync (never blocks)
-  if (full_name) {
-    try { const sb = await createClient(); await sb.auth.updateUser({ data: { full_name } }); } catch { /* non-fatal */ }
+  // Land the number on the AUTH identity if it has none yet — this is what makes an
+  // existing account recognized on WhatsApp (the bridge). No SMS round-trip; a
+  // number already claimed elsewhere fails silently and just stays as the contact.
+  let authPhoneSet = false;
+  if (phone && user && !user.phone) {
+    const res = await setAccountPhone(svc, user.id, phone);
+    authPhoneSet = res.ok;
   }
 
-  void logEvent("profile_updated", { hasPhone: !!ownerProfile.phone }, { orgId: auth.orgId, path: "/billing" });
+  // best-effort: keep the display name on the auth user in sync + release the phone
+  // backfill gate once a number is on file (even if the auth-phone set was rejected).
+  const metaPatch: Record<string, unknown> = {};
+  if (full_name) metaPatch.full_name = full_name;
+  if (phone) metaPatch.phone_captured = true;
+  if (Object.keys(metaPatch).length) {
+    try { const sb = await createClient(); await sb.auth.updateUser({ data: metaPatch }); } catch { /* non-fatal */ }
+  }
+
+  void logEvent("profile_updated", { hasPhone: !!ownerProfile.phone, authPhoneSet }, { orgId: auth.orgId, path: "/billing" });
   return NextResponse.json({ ok: true, ownerProfile });
 }

@@ -3,6 +3,7 @@ import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/analytics";
+import { normalizePhone, setAccountPhone } from "@/lib/accountPhone";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +31,36 @@ export async function POST(req: Request) {
   if (!full_name || !business_name) return badRequest("name and business are required");
 
   const user = await getUser();
-  const phone = user?.phone ? `+${user.phone}` : "";
+  const svc = createServiceClient();
+
+  // Resolve the account phone: a phone-OTP signup already has a verified auth
+  // phone (keep it); otherwise take the number they typed on the form. Every
+  // account gets a phone — it's what the WhatsApp↔web bridge matches a person on.
+  let phone = user?.phone ? `+${user.phone}` : "";
+  if (!phone) {
+    const n = normalizePhone(body.phone);
+    if (!n.ok) return badRequest("Enter a valid phone number with country code, e.g. +1 512 555 0142");
+    phone = n.value ?? "";
+  }
+  if (!phone) return badRequest("Your phone number is required so Rani can recognize you on WhatsApp.");
+
+  // Land the number on the AUTH identity (no SMS round-trip) so the bridge works.
+  // If Supabase rejects it (already claimed by another account), we don't fail —
+  // the number is still kept as the contact below and phone_captured releases the
+  // gate, so the user is never locked out.
+  let authPhoneSet = false;
+  if (user && !user.phone) {
+    const res = await setAccountPhone(svc, user.id, phone);
+    authPhoneSet = res.ok;
+  } else if (user?.phone) {
+    authPhoneSet = true;
+  }
 
   // 1) persist name/business to the auth user — this flips profile_complete, which
   //    releases the first-run gate, so it MUST be its own call. Do it first.
+  //    phone_captured releases the backfill gate even when authPhoneSet failed.
   const supabase = await createClient();
-  const meta = { full_name, business_name, profile_complete: true };
+  const meta = { full_name, business_name, profile_complete: true, phone_captured: true };
   try {
     await supabase.auth.updateUser({ data: meta });
   } catch {
@@ -60,7 +85,6 @@ export async function POST(req: Request) {
   //    belongs to the inviter's org (which therefore has >1 member); for them we
   //    must NOT rename the org or overwrite its ownerProfile — just release the
   //    first-run gate (step 1 above already set their personal name).
-  const svc = createServiceClient();
   try {
     const { count } = await svc
       .from("org_membership")
@@ -89,6 +113,6 @@ export async function POST(req: Request) {
     // non-fatal — org already exists; a rename/contact stash failing shouldn't block onboarding
   }
 
-  void logEvent("profile_completed", { hasPhone: !!phone }, { orgId: auth.orgId, path: "/welcome" });
+  void logEvent("profile_completed", { hasPhone: !!phone, authPhoneSet }, { orgId: auth.orgId, path: "/welcome" });
   return NextResponse.json({ ok: true, orgId: auth.orgId, emailLinked });
 }

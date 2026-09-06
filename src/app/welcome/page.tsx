@@ -17,10 +17,14 @@ export default async function WelcomePage() {
   if (!user) redirect("/login");
 
   const md = (user.user_metadata ?? {}) as Record<string, unknown>;
-  if (md.profile_complete === true) redirect("/onboarding");
+  const hasPhone = !!user.phone || md.phone_captured === true;
+  // Fully set up AND has a phone → into the app. A profile-complete user who still
+  // has no phone falls through to the form in phone-only backfill mode.
+  if (md.profile_complete === true && hasPhone) redirect("/onboarding");
 
   return (
     <WelcomeForm
+      needPhoneOnly={md.profile_complete === true}
       prefill={{
         name: (md.full_name as string) ?? "",
         business: (md.business_name as string) ?? "",

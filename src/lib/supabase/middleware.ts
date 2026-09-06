@@ -60,25 +60,37 @@ export async function updateSession(request: NextRequest) {
   // surfaces, /welcome itself, and the public Explore front door. Skipped entirely
   // on the embedded (SSO) surface, whose users are provisioned differently.
   if (user && !embedded) {
-    const complete = (user.user_metadata as Record<string, unknown> | null)?.profile_complete === true;
+    const md = (user.user_metadata as Record<string, unknown> | null) ?? {};
+    const complete = md.profile_complete === true;
+    // "A phone on every account": the number that unifies a person's WhatsApp and
+    // web assistant threads (see conversation.ts). phone_captured releases the gate
+    // even when Supabase rejected the number as an auth identity (already claimed),
+    // so a user is never locked out here.
+    const phoneKnown = !!user.phone || md.phone_captured === true;
     const p = request.nextUrl.pathname;
     const exempt =
       p.startsWith("/welcome") || p.startsWith("/login") || p.startsWith("/auth") ||
       p.startsWith("/api") || p.startsWith("/explore");
+    const toWelcome = () => {
+      const to = request.nextUrl.clone();
+      to.pathname = "/welcome";
+      to.search = "";
+      const redirect = NextResponse.redirect(to);
+      response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
+      return redirect;
+    };
     if (!complete && !exempt) {
       // An INVITED teammate already belongs to a set-up workspace (via org_membership)
       // — they must NOT be pushed through "set up your business". Only route genuinely
       // new owners (no workspace they can see) to /welcome. RLS scopes this to the
       // user's own orgs, and it only runs for not-yet-complete users, so it's cheap.
       const { data: ws } = await supabase.from("workspace").select("id").limit(1).maybeSingle();
-      if (!ws) {
-        const to = request.nextUrl.clone();
-        to.pathname = "/welcome";
-        to.search = "";
-        const redirect = NextResponse.redirect(to);
-        response.cookies.getAll().forEach((c) => redirect.cookies.set(c));
-        return redirect;
-      }
+      if (!ws) return toWelcome();
+    } else if (complete && !phoneKnown && !exempt) {
+      // Backfill: a fully set-up account with no phone on file is routed to /welcome,
+      // which renders the phone-only capture step (needPhoneOnly). Cheap — just reads
+      // the claims already on `user`, no DB query.
+      return toWelcome();
     }
   }
 
