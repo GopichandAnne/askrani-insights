@@ -16,11 +16,15 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
  */
 export async function llmCompetitorRelevance(
   target: { name: string; vertical: string; category?: string; subtype?: string[] },
-  cands: { name: string; category?: string; distanceKm?: number }[],
+  cands: { name: string; category?: string; distanceKm?: number; subtype?: string[]; scale?: string }[],
 ): Promise<Map<number, { relevance: number; reason: string }> | null> {
   if (!isLlmConfigured() || !cands.length) return null;
+  // Give the model the very things the prompt asks it to judge on: each candidate's
+  // SPECIALTY tokens (cuisine / product focus / service line) in [brackets] and a
+  // coarse SCALE hint — so a Korean megamart isn't scored like a desi grocer, and a
+  // national chain doesn't win a local business's set on category+proximity alone.
   const list = cands
-    .map((c, i) => `[${i}] ${c.name}${c.category ? ` — ${c.category}` : ""}${c.distanceKm != null ? ` (${c.distanceKm}km)` : ""}`)
+    .map((c, i) => `[${i}] ${c.name}${c.category ? ` — ${c.category}` : ""}${c.subtype?.length ? ` [${c.subtype.join("/")}]` : ""}${c.distanceKm != null ? ` · ${c.distanceKm}km` : ""}${c.scale ? ` · ${c.scale}` : ""}`)
     .join("\n");
   const SCHEMA = {
     type: "object", additionalProperties: false,
@@ -41,7 +45,7 @@ export async function llmCompetitorRelevance(
     required: ["scores"],
   };
   const SYSTEM =
-    "You judge whether nearby businesses are genuine LIKE-FOR-LIKE local competitors to a given business — the kind a customer would realistically choose between. Score each 0..1: 1 = direct competitor (same specialty AND similar format/positioning), ~0.5 = same broad category but a different niche, 0 = not really a competitor. Judge by SPECIALTY (cuisine for restaurants, service line for salons/med-spas, product mix for grocery), format/service model, and positioning — the way a knowledgeable local would. Proximity alone is NOT enough. Score EVERY candidate by its [index].";
+    "You judge whether nearby businesses are genuine LIKE-FOR-LIKE local competitors to a given business — the kind a customer would realistically choose between. Score each 0..1: 1 = direct competitor (same specialty AND similar format/positioning), ~0.5 = same broad category but a different niche, 0 = not really a competitor. Judge SPECIALTY FIRST (cuisine for restaurants, product focus for grocery, service line for salons/med-spas): a DIFFERENT specialty in the same broad category is NOT like-for-like — an Indian/desi grocery vs a Korean or general supermarket is ~0.35–0.45, not high. Each candidate lists its specialty in [brackets] and a scale hint; weigh format/positioning too. For a LOCAL business, DISCOUNT large national chains unless they're a true head-to-head. Proximity and popularity alone are NOT enough. Score EVERY candidate by its [index].";
   try {
     const { data } = await getLlm().callStructured<{ scores: unknown }>({
       system: SYSTEM,
@@ -587,11 +591,19 @@ export async function autoDiscoverCompetitors(
     .filter((c) => !isSelf(c))
     .filter((c) => inferVertical(c as any) === vertical);
 
+  // A coarse scale hint from normalized review-volume (prominence is relative to the
+  // biggest in this candidate set), so the ranker can spot likely large/chain rivals.
+  const scaleHint = (p?: number): string => {
+    const v = Math.max(0, Math.min(1, p ?? 0));
+    return v >= 0.6 ? "very high review volume (likely large/chain)" : v >= 0.25 ? "moderate review volume" : "low review volume (small/local)";
+  };
+
   // Intelligent like-for-like: let the model judge which are true competitors
-  // (vertical-agnostic). Falls back to the keyword cuisine/format score if off.
+  // (vertical-agnostic), now fed each candidate's SPECIALTY + SCALE (the criteria the
+  // prompt judges on). Falls back to the keyword cuisine/format score if off.
   const llm = await llmCompetitorRelevance(
     { name: target.name, vertical, category: target.category, subtype },
-    filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm })),
+    filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm, subtype: extractSubtype(c as any), scale: scaleHint(c.prominence) })),
   );
   const scoredAll = filtered
     .map((c, i) => {
@@ -599,7 +611,10 @@ export async function autoDiscoverCompetitors(
         const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
         const prominence = Math.max(0, Math.min(1, c.prominence ?? 0));
         const r = llm.get(i) ?? { relevance: 0.3, reason: "" };
-        const score = Number((0.5 * r.relevance + 0.32 * geoOverlap + 0.18 * prominence).toFixed(4));
+        // Rebalanced toward like-for-like: relevance dominates, prominence (raw
+        // popularity) is curbed so a big national chain no longer auto-tops a local's
+        // set on category + proximity. The ranker also now sees scale to judge this.
+        const score = Number((0.62 * r.relevance + 0.28 * geoOverlap + 0.10 * prominence).toFixed(4));
         return {
           cand: c,
           score,
@@ -608,7 +623,7 @@ export async function autoDiscoverCompetitors(
             rationale: r.reason,
             geo_overlap: Number(geoOverlap.toFixed(3)),
             prominence: Number(prominence.toFixed(3)),
-            note: "discovery v4: intelligent LLM like-for-like + geo + prominence",
+            note: "discovery v5: LLM like-for-like (specialty+scale fed) + geo, prominence curbed",
           } as Record<string, unknown>,
         };
       }
