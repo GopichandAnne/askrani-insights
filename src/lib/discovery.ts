@@ -5,6 +5,28 @@ import { extractSubtype, subtypeSimilarity, extractFormat, formatSimilarity, inf
 import { getVerticalProfile } from "@/lib/verticalprofile";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
+// Metro / area tokens stripped when deriving a brand's stem, so branches of one
+// brand collapse to the same key. Deliberately NOT direction words (would eat
+// brand tokens like "North Star") — only real place names + state markers.
+const BRAND_LOC = /\b(austin|cedar park|round rock|pflugerville|leander|georgetown|kyle|buda|manor|hutto|lakeway|bee cave|dripping springs|frisco|plano|irving|richardson|dallas|fort worth|houston|san antonio|atx|dfw|texas|tx)\b/gi;
+
+/**
+ * Brand stem for grouping multi-location competitors: the name minus its location
+ * suffix / metro token / store number. "India Bazaar Austin - Cedar Park" and
+ * "India Bazaar Round Rock" → "india bazaar"; "Desi District - Cedar Park" and
+ * "Desi District" → "desi district". Category words are KEPT (so "Asian Grocery" and
+ * "Asian Supermarket" stay distinct — different businesses, not branches). Returns
+ * null when nothing distinctive remains, so we never over-merge on a bare token.
+ */
+export function brandKey(name: string): string | null {
+  let s = String(name ?? "").toLowerCase();
+  s = s.replace(/\s[-–|·].*$/, " ");            // drop everything after a dash/pipe (usually the location)
+  s = s.replace(BRAND_LOC, " ");                 // embedded metro/area tokens
+  s = s.replace(/\b(store|no|#)\s*\d+\b/gi, " ");// "Store 12", "#3"
+  s = s.replace(/[^a-z0-9]+/g, " ").trim();
+  return s.length >= 3 ? s.split(/\s+/).slice(0, 4).join(" ") : null;
+}
+
 /**
  * Competitor DIMENSION CLASSIFIER — the model's job is semantic judgment on named
  * dimensions, NOT a single blended number. For each candidate it rates the overlaps
@@ -295,8 +317,8 @@ export async function upsertBusiness(
   // listing at the same address).
   const placeId = typeof cand.raw?.id === "string" ? (cand.raw.id as string) : undefined;
 
-  const SEL = "id, canonical_name, attributes";
-  let existing: { id: string; canonical_name: string | null; attributes: any } | null = null;
+  const SEL = "id, canonical_name, attributes, brand_key";
+  let existing: { id: string; canonical_name: string | null; attributes: any; brand_key?: string | null } | null = null;
   if (placeId) {
     const { data } = await svc.from("business").select(SEL).filter("attributes->>place_id", "eq", placeId).limit(1).maybeSingle();
     existing = (data as any) ?? null;
@@ -328,6 +350,7 @@ export async function upsertBusiness(
         vertical,
         category: cand.category ?? vertical,
         confidence: 0.7,
+        brand_key: brandKey(cand.name),
         attributes: {
           ...(placeId ? { place_id: placeId } : {}),
           ...(cand.geo ? { geo: cand.geo } : {}),
@@ -356,6 +379,8 @@ export async function upsertBusiness(
 
     const patch: Record<string, unknown> = {};
     if (dirty) patch.attributes = nextAttrs;
+    // Backfill brand_key for businesses created before the location-aware model.
+    if (!existing.brand_key) { const bk = brandKey(cand.name); if (bk) patch.brand_key = bk; }
     // Replace a domain-ish stored name ("desicircleusa.com") with a real display
     // name when this candidate has one.
     if (looksLikeDomain(existing.canonical_name) && !looksLikeDomain(cand.name) && cand.name.trim())
@@ -755,6 +780,19 @@ export async function autoDiscoverCompetitors(
     deduped.push(s);
   }
 
+  // Branch dedup: multi-location brands (India Bazaar Cedar Park / Round Rock, Desi
+  // District, …) are the common case for our ICP — collapse a brand to ONE row, the
+  // nearest/highest-threat branch (deduped is sorted by threat desc), so a set never
+  // lists the same brand twice. Distinct names (Asian Grocery vs Asian Supermarket)
+  // keep different keys and are untouched.
+  const seenBrand = new Set<string>();
+  const branchDeduped: typeof deduped = [];
+  for (const s of deduped) {
+    const bk = brandKey(s.cand.name);
+    if (bk) { if (seenBrand.has(bk)) continue; seenBrand.add(bk); }
+    branchDeduped.push(s);
+  }
+
   // Threshold + diversity, not a hard top-N: a rural business with 3 real rivals
   // shouldn't get 9 invented ones. Primary = a genuine threat AND substitutable;
   // secondary = meaningful overlap but weaker; everything below the floor is dropped.
@@ -762,7 +800,7 @@ export async function autoDiscoverCompetitors(
   const HARD_CAP = Math.max(opts.limit ?? 15, PRIMARY_MAX + 3);
   const primary: typeof deduped = [];
   const secondary: typeof deduped = [];
-  for (const s of deduped) {
+  for (const s of branchDeduped) {
     if (primary.length + secondary.length >= HARD_CAP) break;
     // Only DIRECT substitutes can be primary; occasion competitors (same job, different
     // specialty) are meaningful but belong in secondary, not the head-to-head set.
@@ -772,8 +810,8 @@ export async function autoDiscoverCompetitors(
   }
   // Sparse market: thresholds can leave nothing — never show an empty market when
   // real candidates exist, so promote the top few by threat into primary.
-  if (!primary.length && deduped.length) {
-    const top = deduped.slice(0, Math.min(3, deduped.length));
+  if (!primary.length && branchDeduped.length) {
+    const top = branchDeduped.slice(0, Math.min(3, branchDeduped.length));
     primary.push(...top);
     for (const t of top) { const idx = secondary.indexOf(t); if (idx >= 0) secondary.splice(idx, 1); }
   }

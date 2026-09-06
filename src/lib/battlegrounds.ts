@@ -1,6 +1,7 @@
 import { staleCached } from "@/lib/staleCache";
 import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
+import { pickCompetitivePrice, scopeForChannel, type ScopedOffer } from "@/lib/pricescope";
 
 /**
  * Grocery price BATTLEGROUNDS — grocery competition is category/item-specific, not a
@@ -26,20 +27,32 @@ export async function generateBattlegrounds(ws: WorkspaceRow, db?: RlsClient): P
 
   const { data: offers } = await supabase
     .from("offer")
-    .select("business_id, entity_text, pricing")
+    .select("business_id, entity_text, pricing, provenance, observed_at, valid_to, validity_end")
     .in("business_id", [ids.targetId, ...ids.competitorIds])
     .order("observed_at", { ascending: false })
     .limit(5000);
 
-  // latest price per (business, normalized item) — first seen wins (ordered desc).
-  const priceOf = new Map<string, Map<string, number>>();
+  // Gather every priced offer per (business, item), then pick the COMPETITIVE price
+  // via scope precedence — a branch's local flyer/delivery price beats the same
+  // business's corporate-website list price (pricescope.ts). No overwriting.
+  const bag = new Map<string, Map<string, ScopedOffer[]>>();
   for (const o of (offers ?? []) as any[]) {
     const amt = Number(o.pricing?.amount);
     if (!Number.isFinite(amt) || amt <= 0) continue;
     const item = norm(o.entity_text);
     if (!item || item.length < 3) continue;
-    const m = priceOf.get(o.business_id) ?? priceOf.set(o.business_id, new Map()).get(o.business_id)!;
-    if (!m.has(item)) m.set(item, amt);
+    const prov = (o.provenance as any) ?? {};
+    const m = bag.get(o.business_id) ?? bag.set(o.business_id, new Map()).get(o.business_id)!;
+    (m.get(item) ?? m.set(item, []).get(item)!).push({
+      amount: amt, scope: prov.scope ?? scopeForChannel(prov.channel), channel: prov.channel,
+      observedAt: o.observed_at, validTo: o.valid_to, validityEnd: o.validity_end,
+    });
+  }
+  const priceOf = new Map<string, Map<string, number>>();
+  for (const [biz, items] of bag) {
+    const m = new Map<string, number>();
+    for (const [item, offs] of items) { const best = pickCompetitivePrice(offs); if (best) m.set(item, best.amount); }
+    priceOf.set(biz, m);
   }
   const mine = priceOf.get(ids.targetId);
   if (!mine || mine.size === 0) return emptyBg(at);

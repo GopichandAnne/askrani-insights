@@ -7,6 +7,7 @@ import { collectApifyPlatform, platformActorConfigured, APIFY_PLATFORMS } from "
 import { collectLocalNews, extractCity } from "@/lib/news";
 import { findSocialHandles, findDeliveryUrls, findDirectoryUrls, reverseGeoCity } from "@/lib/social-discovery";
 import { generateRecommendations, type BusinessOffers } from "@/lib/recommend/engine";
+import { scopeForChannel, refineScopeFromText } from "@/lib/pricescope";
 
 /**
  * Autonomous collection worker — the guide's per-business monitoring pass
@@ -77,8 +78,13 @@ async function insertOffers(
   contentItemId: string,
   offers: PipelineOffer[],
   nowIso: string,
+  channel: string = "unknown",
+  sourceText?: string,
 ): Promise<number> {
   if (!offers.length) return 0;
+  // location vs brand — drives price precedence; refined by the post text so a
+  // shared account's "all locations" promo isn't mistaken for a local-only price.
+  const scope = refineScopeFromText(scopeForChannel(channel), sourceText);
   // Dedup WITHIN this extraction: delivery actors and menu pages return the same
   // item many times (once per section / customization / size), so a single scrape
   // can carry 4000 rows for a 260-item menu. Collapse to one row per
@@ -101,7 +107,9 @@ async function insertOffers(
     validity_start: o.validity_start,
     validity_end: o.validity_end,
     confidence: o.confidence,
-    provenance: o.provenance,
+    // channel + scope ride in provenance (jsonb) — no migration, no hot-path hazard;
+    // price precedence (pricescope.ts) reads them to pick the local competitive price.
+    provenance: { ...(o.provenance && typeof o.provenance === "object" ? (o.provenance as Record<string, unknown>) : {}), channel, scope },
     observed_at: nowIso,
     valid_from: nowIso,
   }));
@@ -338,7 +346,7 @@ export async function collectBusiness(
           const ci = await upsertObsContentItem(svc, businessId, obs, nowIso);
           const out = await runExtraction(obs, { vertical, name: biz.canonical_name });
           aiItems++;
-          n += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+          n += await insertOffers(svc, businessId, ci, out.offers, nowIso, "website", obs.text);
         } catch (e) {
           errors.push(`website ${obs.sourceUrl}: ${(e as Error).message}`);
         }
@@ -403,7 +411,7 @@ export async function collectBusiness(
         const found = await findSocialHandles(
           biz.canonical_name, socialCity,
           { instagram: !haveIg, facebook: !haveFb, tiktok: !haveTt },
-          { website: biz.website ?? undefined, city: socialCity },
+          { website: biz.website ?? undefined, city: socialCity, address: attrs.address as string | undefined, phone: biz.phone ?? undefined },
         );
         for (const [platform, url] of Object.entries(found)) {
           if (platform === "searched" || platform === "confidence" || !url || typeof url !== "string") continue;
@@ -606,7 +614,7 @@ export async function collectBusiness(
         try {
           const out = await runExtraction(vid, { vertical, name: biz.canonical_name });
           aiItems++;
-          result.offersWritten += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+          result.offersWritten += await insertOffers(svc, businessId, ci, out.offers, nowIso, "youtube", vid.text);
         } catch {
           /* best-effort */
         }
@@ -661,7 +669,7 @@ export async function collectBusiness(
         try {
           const out = await runExtraction(post, { vertical, name: biz.canonical_name });
           aiItems++;
-          offers += await insertOffers(svc, businessId, ci, out.offers, nowIso);
+          offers += await insertOffers(svc, businessId, ci, out.offers, nowIso, platform, post.text);
         } catch {
           /* extraction best-effort */
         }

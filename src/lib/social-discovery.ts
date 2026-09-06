@@ -184,7 +184,7 @@ const PREFIX: Record<SocialHost, string> = { "instagram.com": "https://www.insta
 
 export type HandleConfidence = "high" | "medium";
 /** Context used to VERIFY a candidate actually belongs to this business. */
-export interface VerifyCtx { website?: string; city?: string }
+export interface VerifyCtx { website?: string; city?: string; address?: string; phone?: string }
 
 function domainOf(website?: string): string {
   if (!website) return "";
@@ -200,12 +200,12 @@ function domainOf(website?: string): string {
  *  definitive ("high"); the city or a distinctive name token in the page is
  *  corroborating. Best-effort — a blocked/empty fetch yields no signal (we do NOT
  *  treat that as disproof; the LLM geo-judge already gated the pick). */
-async function verifyProfile(url: string, name: string, ctx: VerifyCtx): Promise<{ backlink: boolean; geoOrName: boolean }> {
+async function verifyProfile(url: string, name: string, ctx: VerifyCtx): Promise<{ backlink: boolean; geoOrName: boolean; strong: boolean }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 6000);
   try {
     const res = await fetch(url, { headers: { "user-agent": UA, accept: "text/html" }, signal: ctrl.signal });
-    if (!res.ok) return { backlink: false, geoOrName: false };
+    if (!res.ok) return { backlink: false, geoOrName: false, strong: false };
     const html = (await res.text()).toLowerCase();
     const flat = html.replace(/[^a-z0-9]/g, "");
     const dom = domainOf(ctx.website);
@@ -213,9 +213,16 @@ async function verifyProfile(url: string, name: string, ctx: VerifyCtx): Promise
     const cityTok = (ctx.city ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     const hasCity = cityTok.length >= 3 && flat.includes(cityTok);
     const hasName = nameTokens(name).some((tk) => flat.includes(tk));
-    return { backlink, geoOrName: hasCity || hasName };
+    // Branch-identity evidence (P2): the store's street number (with the city, to
+    // avoid a stray-number coincidence) or its phone's last 7 digits appearing in the
+    // profile is very strong proof this account is THIS branch — as good as a backlink.
+    const streetNo = (ctx.address ?? "").match(/\b\d{3,6}\b/)?.[0];
+    const hasAddr = !!streetNo && hasCity && flat.includes(streetNo);
+    const phone7 = (ctx.phone ?? "").replace(/\D/g, "").slice(-7);
+    const hasPhone = phone7.length >= 7 && flat.includes(phone7);
+    return { backlink, geoOrName: hasCity || hasName, strong: hasAddr || hasPhone };
   } catch {
-    return { backlink: false, geoOrName: false };
+    return { backlink: false, geoOrName: false, strong: false };
   } finally {
     clearTimeout(t);
   }
@@ -245,7 +252,8 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   // Verify the pick like a human would: open the profile, look for a link back to
   // the business site (definitive) or its city/name. Backlink → high confidence.
   const v = await verifyProfile(`${PREFIX[host]}${chosen}`, name, ctx);
-  return { handle: chosen, confidence: v.backlink ? "high" : "medium" };
+  // Backlink OR a hard address/phone match → high confidence (trusted, auto-verified).
+  return { handle: chosen, confidence: v.backlink || v.strong ? "high" : "medium" };
 }
 
 // ── Intelligent delivery store-URL discovery ────────────────────────────────
