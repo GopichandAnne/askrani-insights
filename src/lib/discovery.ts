@@ -200,6 +200,56 @@ export function scoreCompetitor(
   };
 }
 
+/**
+ * Pure SIMILARITY (substitutability) — how interchangeable two businesses are,
+ * with NO geo or prominence mixed in (those belong to THREAT, not similarity).
+ * The deterministic counterpart to the LLM's like-for-like relevance, used when
+ * the model is unavailable. Renormalizes over whichever specialty signals exist.
+ */
+export function pureSimilarity(
+  target: { category?: string; subtype?: string[]; format?: string[] },
+  cand: ProfileCandidate,
+): { similarity: number; components: Record<string, unknown> } {
+  const categorySim = jaccard(tokens(target.category), tokens(cand.category)) || 0.4;
+  const targetSubtype = target.subtype ?? [];
+  const candSubtype = extractSubtype(cand as any);
+  const hasSubtype = targetSubtype.length > 0;
+  const subtypeSim = hasSubtype ? subtypeSimilarity(targetSubtype, candSubtype) : 0;
+  const targetFormat = target.format ?? [];
+  const candFormat = extractFormat(cand as any);
+  const hasFormat = targetFormat.length > 0;
+  const formatSim = hasFormat ? formatSimilarity(targetFormat, candFormat) : 0;
+
+  let similarity: number;
+  if (hasSubtype && hasFormat) similarity = 0.55 * subtypeSim + 0.25 * formatSim + 0.20 * categorySim;
+  else if (hasSubtype) similarity = 0.70 * subtypeSim + 0.30 * categorySim;
+  else if (hasFormat) similarity = 0.60 * formatSim + 0.40 * categorySim;
+  else similarity = categorySim;
+
+  return {
+    similarity,
+    components: {
+      subtype_similarity: hasSubtype ? Number(subtypeSim.toFixed(3)) : null,
+      subtype_matched: hasSubtype ? candSubtype.filter((s) => targetSubtype.includes(s)) : [],
+      format_similarity: hasFormat ? Number(formatSim.toFixed(3)) : null,
+      format_matched: hasFormat ? candFormat.filter((f) => targetFormat.includes(f)) : [],
+      category_similarity: Number(categorySim.toFixed(3)),
+    },
+  };
+}
+
+/**
+ * THREAT — how much this business should actually worry about a competitor NOW.
+ * A rival is only a threat to the extent it's substitutable (similarity) AND
+ * reachable in the trade area (geo) AND has local presence (prominence). So a
+ * highly-similar chain 11mi away scores lower than a similar rival next door, and
+ * a non-similar business is never a big threat however close/popular. Momentum &
+ * promo-aggression fold in post-collection.
+ */
+export function threatScore(similarity: number, geoOverlap: number, prominence: number): number {
+  return Number((similarity * (0.30 + 0.50 * geoOverlap + 0.20 * prominence)).toFixed(4));
+}
+
 type Svc = ReturnType<typeof createServiceClient>;
 
 /** Upsert a business (+ location + website/social identities). Match by website
@@ -605,54 +655,85 @@ export async function autoDiscoverCompetitors(
     { name: target.name, vertical, category: target.category, subtype },
     filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm, subtype: extractSubtype(c as any), scale: scaleHint(c.prominence) })),
   );
+  // Two scores per candidate, not one: SIMILARITY (how substitutable) and THREAT
+  // (how much to worry now = similarity × proximity × presence). Same shape whether
+  // the LLM ranked it or the deterministic fallback did.
   const scoredAll = filtered
     .map((c, i) => {
+      const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
+      const prominence = Math.max(0, Math.min(1, c.prominence ?? 0));
+      let similarity: number;
+      let base: Record<string, unknown>;
       if (llm) {
-        const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
-        const prominence = Math.max(0, Math.min(1, c.prominence ?? 0));
         const r = llm.get(i) ?? { relevance: 0.3, reason: "" };
-        // Rebalanced toward like-for-like: relevance dominates, prominence (raw
-        // popularity) is curbed so a big national chain no longer auto-tops a local's
-        // set on category + proximity. The ranker also now sees scale to judge this.
-        const score = Number((0.62 * r.relevance + 0.28 * geoOverlap + 0.10 * prominence).toFixed(4));
-        return {
-          cand: c,
-          score,
-          components: {
-            llm_relevance: Number(r.relevance.toFixed(3)),
-            rationale: r.reason,
-            geo_overlap: Number(geoOverlap.toFixed(3)),
-            prominence: Number(prominence.toFixed(3)),
-            note: "discovery v5: LLM like-for-like (specialty+scale fed) + geo, prominence curbed",
-          } as Record<string, unknown>,
-        };
+        similarity = r.relevance;
+        base = { llm_relevance: Number(similarity.toFixed(3)), rationale: r.reason };
+      } else {
+        const det = pureSimilarity({ category: target.category, subtype, format }, c);
+        similarity = det.similarity;
+        base = det.components;
       }
-      return { cand: c, ...scoreCompetitor({ category: target.category, subtype, format }, c, baseRadius) };
+      const threat = threatScore(similarity, geoOverlap, prominence);
+      return {
+        cand: c,
+        similarity: Number(similarity.toFixed(4)),
+        threat,
+        score: threat, // selection + edge.score = threat (who to monitor now)
+        components: {
+          ...base,
+          similarity: Number(similarity.toFixed(3)),
+          threat,
+          geo_overlap: Number(geoOverlap.toFixed(3)),
+          prominence: Number(prominence.toFixed(3)),
+          note: "discovery v6: similarity (substitutability) + threat (similarity×proximity×presence); price/occasion fold in post-collection",
+        } as Record<string, unknown>,
+      };
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.threat - a.threat);
 
-  // Dedup near-identical competitor names (Google + OSM often list the same store
-  // twice), keeping the highest-scored, then cap to the limit.
+  // Dedup near-identical names (Google + OSM list the same store twice), keeping the
+  // highest-threat copy.
   const seenNames = new Set<string>();
-  const scored: typeof scoredAll = [];
+  const deduped: typeof scoredAll = [];
   for (const s of scoredAll) {
     const k = s.cand.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     if (!k || seenNames.has(k)) continue;
     seenNames.add(k);
-    scored.push(s);
-    if (scored.length >= limit) break;
+    deduped.push(s);
   }
 
+  // Threshold + diversity, not a hard top-N: a rural business with 3 real rivals
+  // shouldn't get 9 invented ones. Primary = a genuine threat AND substitutable;
+  // secondary = meaningful overlap but weaker; everything below the floor is dropped.
+  const PRIMARY_MAX = 7, SECONDARY_MAX = 10;
+  const HARD_CAP = Math.max(opts.limit ?? 15, PRIMARY_MAX + 3);
+  const primary: typeof deduped = [];
+  const secondary: typeof deduped = [];
+  for (const s of deduped) {
+    if (primary.length + secondary.length >= HARD_CAP) break;
+    if (primary.length < PRIMARY_MAX && s.threat >= 0.42 && s.similarity >= 0.5) primary.push(s);
+    else if (secondary.length < SECONDARY_MAX && (s.threat >= 0.28 || s.similarity >= 0.55)) secondary.push(s);
+  }
+  // Sparse market: thresholds can leave nothing — never show an empty market when
+  // real candidates exist, so promote the top few by threat into primary.
+  if (!primary.length && deduped.length) {
+    const top = deduped.slice(0, Math.min(3, deduped.length));
+    primary.push(...top);
+    for (const t of top) { const idx = secondary.indexOf(t); if (idx >= 0) secondary.splice(idx, 1); }
+  }
+  const chosen = [
+    ...primary.map((s) => ({ s, relation: "primary" as const, tier: "priority" as const })),
+    ...secondary.map((s) => ({ s, relation: "secondary" as const, tier: "standard" as const })),
+  ];
+
   const rows: CompetitorRow[] = [];
-  for (const [i, s] of scored.entries()) {
+  for (const { s, relation, tier } of chosen) {
     const compId = await upsertBusiness(
       svc,
       { name: s.cand.name, website: s.cand.website, geo: s.cand.geo, category: s.cand.category, raw: s.cand.raw },
       vertical,
     );
     if (compId === target.businessId) continue;
-    const relation = i < 5 ? "primary" : "secondary";
-    const tier = i < 5 ? "priority" : "standard";
     const why = (s.components as any).rationale as string | undefined;
     const matched = (s.components as any).subtype_matched as string[] | undefined;
     const fmt = (s.components as any).format_matched as string[] | undefined;

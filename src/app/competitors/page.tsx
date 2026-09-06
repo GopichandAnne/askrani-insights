@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CompetitorsMap } from "@/components/CompetitorsMap";
 import { CompetitorCards } from "@/components/CompetitorCards";
+import { ConfirmMarket } from "@/components/ConfirmMarket";
 import { MarketTabs } from "@/components/MarketTabs";
 import { competitorCards } from "@/lib/competitors";
 import { getOrMakePriceGaps, type PriceGap } from "@/lib/pricegaps";
@@ -31,8 +32,9 @@ export default async function CompetitorsPage() {
   const [{ data: edges }, { data: target }, cardData, priceGaps] = await Promise.all([
     supabase
       .from("competitor_edge")
-      .select("id,relation,score,competitor:competitor_id(canonical_name,attributes)")
+      .select("id,relation,score,competitor_id,score_components,competitor:competitor_id(canonical_name,attributes)")
       .eq("workspace_id", state.workspace.id)
+      .is("active_to", null)
       .order("score", { ascending: false }),
     state.workspace.target_business_id
       ? supabase.from("business").select("canonical_name,attributes").eq("id", state.workspace.target_business_id).maybeSingle()
@@ -56,6 +58,15 @@ export default async function CompetitorsPage() {
   }
   const mapped = points.filter((p) => p.id !== "target").length;
 
+  // primary competitors for the "did we get your market right?" confirm step (target mode only)
+  const primaryComps = (edges ?? [])
+    .filter((e) => e.relation === "primary" && (e as any).competitor_id)
+    .map((e) => ({
+      id: (e as any).competitor_id as string,
+      name: ((e.competitor as any)?.canonical_name as string) ?? "Competitor",
+      match: typeof (e as any).score_components?.similarity === "number" ? (e as any).score_components.similarity : Number(e.score),
+    }));
+
   return (
     <div className="animate-fade-in space-y-6">
       <div>
@@ -69,6 +80,9 @@ export default async function CompetitorsPage() {
       </div>
 
       <MarketTabs />
+
+      {/* confirm-your-market — cleans the set + banks labeled training data (target mode) */}
+      {!area && <ConfirmMarket competitors={primaryComps} />}
 
       {/* primary: per-competitor cards */}
       <CompetitorCards data={cardData} gapsByRival={gapsByRival} />
