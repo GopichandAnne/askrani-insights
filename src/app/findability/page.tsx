@@ -6,6 +6,8 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
 import { Sparkline } from "@/components/Sparkline";
+import { AiPageCard } from "@/components/AiPageCard";
+import { AIPAGE_PUBLISH_CREDITS } from "@/lib/aipage";
 import { FindabilityRefreshButton } from "@/components/FindabilityRefreshButton";
 import { FindabilityKeywords } from "@/components/FindabilityKeywords";
 import { AiFindabilityCard } from "@/components/AiFindabilityCard";
@@ -37,6 +39,9 @@ export default async function FindabilityPage() {
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Findability" />;
   const report: FindabilityReport = await getOrMakeFindabilityReport(state.workspace);
   const ai = await getAiFindability(state.workspace);
+  const app = (process.env.NEXT_PUBLIC_APP_URL || "https://insights.askrani.ai").replace(/\/$/, "");
+  const aiPage = (state.workspace.goals as Record<string, any> | null)?.aiPage;
+  const aiPageInit = { published: !!aiPage?.published, url: aiPage?.slug ? `${app}/m/${aiPage.slug}` : undefined, updatedAt: aiPage?.updatedAt };
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -50,6 +55,8 @@ export default async function FindabilityPage() {
         </div>
         <FindabilityRefreshButton workspaceId={state.workspace.id} credits={FINDABILITY_REFRESH_CREDITS} />
       </div>
+
+      <AiPageCard initial={aiPageInit} cost={AIPAGE_PUBLISH_CREDITS} />
 
       {report.empty ? (
         <div className="card border-dashed">
