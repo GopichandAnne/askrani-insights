@@ -3,6 +3,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { ActOnIt } from "@/components/ActOnIt";
+import { MakeThisButton } from "@/components/MakeThisButton";
 import { withinBudget } from "@/lib/pillarBudget";
 import { collectionActive } from "@/lib/jobs";
 import { getOrMakeFestivalPlanner } from "@/lib/festival";
@@ -72,8 +73,9 @@ export default async function FestivalsPage() {
                     <li key={j} className="flex gap-2 text-sm text-ink"><span className="text-brand" aria-hidden>→</span><span>{m}</span></li>
                   ))}
                 </ul>
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                   <ActOnIt kind={p.act.kind} move={p.act.move} context={p.act.context} label="Draft the campaign" small />
+                  <MakeThisButton idea={`${p.occasion} campaign — ${p.moves.join("; ")}`} context={`Festival · ${p.occasion}`} />
                 </div>
               </div>
             ))}

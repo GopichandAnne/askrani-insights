@@ -238,6 +238,35 @@ export async function sendAlertEmail(
   return sendEmail(to, subject, html);
 }
 
+/**
+ * Notify the team of a content-creation request (the "have our team make this" add-on).
+ * Env-gated on CONTENT_OPS_EMAIL — a no-op until set, so the request still records
+ * in-app. This is the demand-probe queue: one email per request, the team follows up
+ * with a quote + where to send the owner's clips/photos.
+ */
+export async function notifyContentRequest(
+  business: string,
+  idea: string,
+  capture: "share" | "shoot",
+  kind: string,
+  note: string,
+  contact: string | null,
+): Promise<boolean> {
+  const to = process.env.CONTENT_OPS_EMAIL;
+  if (!to || !emailConfigured()) return false;
+  const mode = capture === "shoot" ? "wants an on-site shoot" : `will share a ${kind} for us to edit`;
+  const subject = `🎬 Content request — ${business} (${capture === "shoot" ? "on-site shoot" : "edit from " + kind})`;
+  const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#111827">
+    <h2 style="margin:0 0 8px">Content request from ${escapeHtml(business)}</h2>
+    <p style="margin:4px 0"><b>Idea:</b> ${escapeHtml(idea)}</p>
+    <p style="margin:4px 0"><b>Owner:</b> ${escapeHtml(mode)}</p>
+    ${note ? `<p style="margin:4px 0"><b>Note:</b> ${escapeHtml(note)}</p>` : ""}
+    ${contact ? `<p style="margin:4px 0"><b>Contact:</b> ${escapeHtml(contact)}</p>` : ""}
+    <p style="margin:12px 0 0;color:#6b7280;font-size:12px">Follow up with a quote and where to send their ${kind}.</p>
+  </div>`;
+  return sendEmail(to, subject, html);
+}
+
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 }

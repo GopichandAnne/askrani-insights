@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ContentIdea, ContentType, ContentFormat } from "@/lib/contentplan";
 import { DraftButton } from "@/components/DraftButton";
+import { MakeThisButton } from "@/components/MakeThisButton";
 
 const TYPE_META: Record<ContentType, { label: string; chip: string }> = {
   promotional: { label: "Promo", chip: "bg-coral/15 text-coral-dark" },
@@ -52,6 +53,9 @@ function IdeaCard({ idea }: { idea: ContentIdea }) {
         <DraftButton move={`${idea.hook} — a ${idea.type.replace(/_/g, " ")} post about ${idea.offering}`} context={`Offerings content plan · ${idea.format}`} />
         {idea.cta && <span className="text-xs text-ink-faint">→ {idea.cta}</span>}
       </div>
+
+      {/* need-triggered done-for-you: only shows for visual formats (captureNeed) */}
+      <MakeThisButton idea={`${idea.hook} — about ${idea.offering}`} context={`Content plan · ${idea.format}`} format={idea.format} />
     </div>
   );
 }
