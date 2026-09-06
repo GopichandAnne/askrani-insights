@@ -3,6 +3,7 @@ import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { PillarBuilding } from "@/components/PillarBuilding";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { ActOnIt } from "@/components/ActOnIt";
+import { MakeThisButton } from "@/components/MakeThisButton";
 import { withinBudget } from "@/lib/pillarBudget";
 import { collectionActive } from "@/lib/jobs";
 import { getOrMakeRivalReviews } from "@/lib/rivalreviews";
@@ -72,8 +73,10 @@ export default async function RivalsPage() {
                       <p className="mt-0.5 text-sm text-ink">{g.angle}</p>
                     </div>
                   )}
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                     <ActOnIt kind="content" move={g.angle || `Win customers frustrated by ${g.theme} at competitors`} context={g.evidence} label="Draft the post" small />
+                    {/* subtle, need-triggered — hidden unless the move needs a visual */}
+                    <MakeThisButton idea={g.angle || `Win customers on ${g.theme}`} context={`Rival opening · ${g.theme}`} />
                   </div>
                 </div>
               ))}
