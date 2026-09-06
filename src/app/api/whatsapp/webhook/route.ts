@@ -5,7 +5,7 @@ import { sendWhatsAppText, whatsappConfigured, downloadWhatsAppMedia } from "@/l
 import { transcribeAudio } from "@/lib/transcribe";
 import { answerFromData, routeToBusiness } from "@/lib/assistant";
 import { applyAssistantAction } from "@/lib/assistantActions";
-import { readConversation, appendConversation, recentTurns, waParticipant } from "@/lib/conversation";
+import { readConversation, appendConversation, recentTurns, resolveWaParticipant } from "@/lib/conversation";
 import { readWaSession, writeWaSession, type WaSession } from "@/lib/wasession";
 
 /**
@@ -121,9 +121,10 @@ async function handle(m: Inbound) {
 
   // ── answer, grounded, with recent context ─────────────────────────────────
   const switched = candidates.length > 1 && session.workspaceId && session.workspaceId !== active.id;
-  // Context from THIS SENDER's persistent thread (keyed by their number), so Rani
-  // remembers across sessions — not just the 24h WhatsApp session, and per person.
-  const pid = waParticipant(m.from);
+  // Context from THIS PERSON's persistent thread. We resolve the sender's number to
+  // their auth account so their WhatsApp thread is the SAME thread as their web chat
+  // (cross-channel, per person); an unknown number gets a stable per-number thread.
+  const pid = await resolveWaParticipant(svc, orgId, m.from);
   const convo = await readConversation(svc, active.id, pid);
   const { answer, action } = await answerFromData(
     { id: active.id, name: active.name, vertical: active.vertical, target_business_id: active.target_business_id },
