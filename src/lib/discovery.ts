@@ -6,26 +6,29 @@ import { getVerticalProfile } from "@/lib/verticalprofile";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 
 /**
- * Intelligent like-for-like judgment — instead of matching competitors by keyword
- * cuisine/format aliases, ask the model (as a human would) which nearby businesses
- * are genuine competitors the target's customers would choose between. Works for
- * ANY vertical (cuisine for food, service line for salons/med-spas, product mix
- * for grocery) without maintaining alias lists. Returns a 0..1 relevance + reason
- * per candidate index, or null if the LLM is unavailable (caller falls back to
- * the deterministic keyword score).
+ * Competitor DIMENSION CLASSIFIER — the model's job is semantic judgment on named
+ * dimensions, NOT a single blended number. For each candidate it rates the overlaps
+ * a real substitution decision turns on (cuisine/product, format, occasion/daypart,
+ * customer), classifies the RELATIONSHIP (direct / occasion / inspiration /
+ * not_competitor), and gives its evidence. Deterministic code then turns those
+ * dimensions into the similarity score (vertical-weighted) — so scoring is auditable
+ * and the weights can later be learned from owner labels. Returns null if the LLM is
+ * off (caller falls back to the deterministic pureSimilarity).
  */
-export async function llmCompetitorRelevance(
+export type CompRelationship = "direct" | "occasion" | "inspiration" | "not_competitor";
+export interface CandClassification {
+  cuisine: number; format: number; occasion: number; customer: number;
+  relationship: CompRelationship; reason: string;
+}
+export async function llmCompetitorClassify(
   target: { name: string; vertical: string; category?: string; subtype?: string[] },
   cands: { name: string; category?: string; distanceKm?: number; subtype?: string[]; scale?: string }[],
-): Promise<Map<number, { relevance: number; reason: string }> | null> {
+): Promise<Map<number, CandClassification> | null> {
   if (!isLlmConfigured() || !cands.length) return null;
-  // Give the model the very things the prompt asks it to judge on: each candidate's
-  // SPECIALTY tokens (cuisine / product focus / service line) in [brackets] and a
-  // coarse SCALE hint — so a Korean megamart isn't scored like a desi grocer, and a
-  // national chain doesn't win a local business's set on category+proximity alone.
   const list = cands
     .map((c, i) => `[${i}] ${c.name}${c.category ? ` — ${c.category}` : ""}${c.subtype?.length ? ` [${c.subtype.join("/")}]` : ""}${c.distanceKm != null ? ` · ${c.distanceKm}km` : ""}${c.scale ? ` · ${c.scale}` : ""}`)
     .join("\n");
+  const dim = (desc: string) => ({ type: "number", description: desc });
   const SCHEMA = {
     type: "object", additionalProperties: false,
     properties: {
@@ -35,38 +38,58 @@ export async function llmCompetitorRelevance(
           type: "object", additionalProperties: false,
           properties: {
             i: { type: "integer", description: "the candidate's [index]" },
-            relevance: { type: "number", description: "0..1 like-for-like competitor score" },
-            reason: { type: "string", description: "≤10 words why" },
+            cuisine: dim("0..1 overlap of specialty — cuisine for restaurants, product focus for grocery, service line for salons. A different specialty in the same category is LOW (~0.3)."),
+            format: dim("0..1 overlap of format/service model (fast-casual vs fine-dining, truck, buffet, delivery-first, store size)."),
+            occasion: dim("0..1 overlap of the purchase OCCASION/daypart they win (weekday lunch, family dinner, late-night, catering, quick delivery)."),
+            customer: dim("0..1 overlap of the actual customers/community they serve."),
+            relationship: { type: "string", enum: ["direct", "occasion", "inspiration", "not_competitor"], description: "direct = customers choose between them; occasion = different specialty but competes for the same occasion; inspiration = admirable but not a local substitute; not_competitor = neither." },
+            reason: { type: "string", description: "≤12 words of evidence." },
           },
-          required: ["i", "relevance"],
+          required: ["i", "cuisine", "format", "occasion", "customer", "relationship"],
         },
       },
     },
     required: ["scores"],
   };
   const SYSTEM =
-    "You judge whether nearby businesses are genuine LIKE-FOR-LIKE local competitors to a given business — the kind a customer would realistically choose between. Score each 0..1: 1 = direct competitor (same specialty AND similar format/positioning), ~0.5 = same broad category but a different niche, 0 = not really a competitor. Judge SPECIALTY FIRST (cuisine for restaurants, product focus for grocery, service line for salons/med-spas): a DIFFERENT specialty in the same broad category is NOT like-for-like — an Indian/desi grocery vs a Korean or general supermarket is ~0.35–0.45, not high. Each candidate lists its specialty in [brackets] and a scale hint; weigh format/positioning too. For a LOCAL business, DISCOUNT large national chains unless they're a true head-to-head. Proximity and popularity alone are NOT enough. Score EVERY candidate by its [index].";
+    "You classify how each nearby business competes with a given LOCAL business. For each candidate rate four 0..1 overlaps — cuisine/product, format, occasion/daypart, customer — and set the relationship. Judge SPECIALTY FIRST: a different specialty in the same broad category means LOW cuisine overlap (an Indian/desi grocery vs a Korean or general supermarket ~0.3), even next door. Two businesses can have low cuisine overlap yet high OCCASION overlap (both win the weekday lunch-under-$15 crowd) — capture that in the occasion dimension and relationship='occasion'. DISCOUNT large national chains for a local business. Mark far-away or aspirational businesses 'inspiration', and unrelated ones 'not_competitor'. Ground every rating in the specialty/scale shown. Classify EVERY candidate by its [index].";
   try {
     const { data } = await getLlm().callStructured<{ scores: unknown }>({
       system: SYSTEM,
-      text: `Owner's business: "${target.name}" — ${target.vertical}${target.category ? ` (${target.category})` : ""}${target.subtype?.length ? `, specialty: ${target.subtype.join("/")}` : ""}.\n\nNearby candidates (same vertical):\n${list}\n\nScore each candidate's like-for-like relevance.`,
-      schema: SCHEMA, tier: "classify", maxTokens: 1600,
+      text: `Owner's business: "${target.name}" — ${target.vertical}${target.category ? ` (${target.category})` : ""}${target.subtype?.length ? `, specialty: ${target.subtype.join("/")}` : ""}.\n\nNearby candidates (same vertical):\n${list}\n\nClassify each candidate.`,
+      schema: SCHEMA, tier: "classify", maxTokens: 2600,
     });
     let rows: any[] = Array.isArray((data as any).scores) ? (data as any).scores : [];
     if (!rows.length && typeof (data as any).scores === "string") {
       try { const p = JSON.parse((data as any).scores); rows = Array.isArray(p) ? p : Array.isArray(p?.scores) ? p.scores : []; } catch { /* not JSON */ }
     }
     if (!rows.length) return null;
-    const m = new Map<number, { relevance: number; reason: string }>();
+    const clamp01 = (n: unknown) => Math.max(0, Math.min(1, Number(n)));
+    const RELS = new Set<CompRelationship>(["direct", "occasion", "inspiration", "not_competitor"]);
+    const m = new Map<number, CandClassification>();
     for (const r of rows) {
       const i = Number(r.i);
-      const rel = Math.max(0, Math.min(1, Number(r.relevance)));
-      if (Number.isInteger(i) && Number.isFinite(rel)) m.set(i, { relevance: rel, reason: String(r.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 140) });
+      if (!Number.isInteger(i)) continue;
+      const relationship = RELS.has(r.relationship) ? (r.relationship as CompRelationship) : "direct";
+      m.set(i, {
+        cuisine: clamp01(r.cuisine), format: clamp01(r.format), occasion: clamp01(r.occasion), customer: clamp01(r.customer),
+        relationship, reason: String(r.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 140),
+      });
     }
     return m.size ? m : null;
   } catch {
     return null;
   }
+}
+
+/** Turn the classifier's dimension overlaps into a similarity score — vertical-
+ *  weighted, so competition semantics differ by vertical even though the infra
+ *  doesn't. Price folds in post-collection (Phase 2). */
+export function similarityFromDims(vertical: string, d: CandClassification): number {
+  const s = vertical === "grocery"
+    ? 0.45 * d.cuisine + 0.25 * d.customer + 0.20 * d.format + 0.10 * d.occasion
+    : 0.45 * d.cuisine + 0.20 * d.format + 0.20 * d.occasion + 0.15 * d.customer;
+  return Math.max(0, Math.min(1, s));
 }
 
 /**
@@ -625,6 +648,31 @@ export async function autoDiscoverCompetitors(
     cands = [...byName.values()];
   }
 
+  // Candidate-generation expansion (Phase 1b): the vertical query finds direct
+  // look-alikes, but occasion/delivery rivals surface under how CUSTOMERS search —
+  // and the ranker can never pick a competitor discovery never found. Add a couple of
+  // bounded intent passes for food verticals and union them in; the classifier then
+  // sorts direct vs occasion.
+  if (vertical === "restaurant" || vertical === "grocery") {
+    const cuisine = subtype[0];
+    const intents = (vertical === "restaurant"
+      ? [cuisine ? `${cuisine} delivery` : null, cuisine ? `${cuisine} lunch` : "lunch near me"]
+      : [cuisine ? `${cuisine} grocery delivery` : null, "grocery delivery"]
+    ).filter(Boolean) as string[];
+    const byName = new Map(cands.map((c) => [c.name.toLowerCase().trim(), c]));
+    for (const q of intents.slice(0, 2)) {
+      try {
+        const extra = await discoverCandidates({ query: q, near: { ...geo, radiusKm: baseRadius }, vertical, limit: 20 });
+        for (const c of extra) {
+          const k = c.name.toLowerCase().trim();
+          if (byName.has(k)) continue;
+          byName.set(k, { ...c, distanceKm: c.distanceKm ?? (c.geo ? Number(haversineKm(geo, c.geo).toFixed(2)) : undefined) });
+        }
+      } catch { /* best-effort recall */ }
+    }
+    cands = [...byName.values()];
+  }
+
   const targetName = target.name.toLowerCase().trim();
 
   // Vertical consistency: the like-for-like passes are free-text and can pull in
@@ -648,26 +696,29 @@ export async function autoDiscoverCompetitors(
     return v >= 0.6 ? "very high review volume (likely large/chain)" : v >= 0.25 ? "moderate review volume" : "low review volume (small/local)";
   };
 
-  // Intelligent like-for-like: let the model judge which are true competitors
-  // (vertical-agnostic), now fed each candidate's SPECIALTY + SCALE (the criteria the
-  // prompt judges on). Falls back to the keyword cuisine/format score if off.
-  const llm = await llmCompetitorRelevance(
+  // The model classifies each candidate on named dimensions + relationship; code
+  // scores. Falls back to the deterministic pureSimilarity when the LLM is off.
+  const cls = await llmCompetitorClassify(
     { name: target.name, vertical, category: target.category, subtype },
     filtered.map((c) => ({ name: c.name, category: c.category, distanceKm: c.distanceKm, subtype: extractSubtype(c as any), scale: scaleHint(c.prominence) })),
   );
   // Two scores per candidate, not one: SIMILARITY (how substitutable) and THREAT
-  // (how much to worry now = similarity × proximity × presence). Same shape whether
-  // the LLM ranked it or the deterministic fallback did.
+  // (how much to worry now = similarity × proximity × presence), plus the RELATIONSHIP
+  // (direct vs occasion). inspiration / not_competitor are dropped from the set.
+  type Scored = { cand: ProfileCandidate; similarity: number; threat: number; score: number; relationship: CompRelationship; components: Record<string, unknown> };
   const scoredAll = filtered
-    .map((c, i) => {
+    .map((c, i): Scored | null => {
       const geoOverlap = c.distanceKm != null ? 1 - Math.min(c.distanceKm / baseRadius, 1) : 0.5;
       const prominence = Math.max(0, Math.min(1, c.prominence ?? 0));
       let similarity: number;
+      let relationship: CompRelationship = "direct";
       let base: Record<string, unknown>;
-      if (llm) {
-        const r = llm.get(i) ?? { relevance: 0.3, reason: "" };
-        similarity = r.relevance;
-        base = { llm_relevance: Number(similarity.toFixed(3)), rationale: r.reason };
+      if (cls) {
+        const d = cls.get(i);
+        if (!d || d.relationship === "not_competitor" || d.relationship === "inspiration") return null; // not a monitored rival
+        similarity = similarityFromDims(vertical, d);
+        relationship = d.relationship;
+        base = { cuisine_overlap: Number(d.cuisine.toFixed(3)), format_overlap: Number(d.format.toFixed(3)), occasion_overlap: Number(d.occasion.toFixed(3)), customer_overlap: Number(d.customer.toFixed(3)), relationship, rationale: d.reason };
       } else {
         const det = pureSimilarity({ category: target.category, subtype, format }, c);
         similarity = det.similarity;
@@ -679,16 +730,18 @@ export async function autoDiscoverCompetitors(
         similarity: Number(similarity.toFixed(4)),
         threat,
         score: threat, // selection + edge.score = threat (who to monitor now)
+        relationship,
         components: {
           ...base,
           similarity: Number(similarity.toFixed(3)),
           threat,
           geo_overlap: Number(geoOverlap.toFixed(3)),
           prominence: Number(prominence.toFixed(3)),
-          note: "discovery v6: similarity (substitutability) + threat (similarity×proximity×presence); price/occasion fold in post-collection",
+          note: "discovery v7: dimension classifier → similarity + threat; relationship-aware; price folds in post-collection",
         } as Record<string, unknown>,
       };
     })
+    .filter((s): s is Scored => s !== null)
     .sort((a, b) => b.threat - a.threat);
 
   // Dedup near-identical names (Google + OSM list the same store twice), keeping the
@@ -711,7 +764,10 @@ export async function autoDiscoverCompetitors(
   const secondary: typeof deduped = [];
   for (const s of deduped) {
     if (primary.length + secondary.length >= HARD_CAP) break;
-    if (primary.length < PRIMARY_MAX && s.threat >= 0.42 && s.similarity >= 0.5) primary.push(s);
+    // Only DIRECT substitutes can be primary; occasion competitors (same job, different
+    // specialty) are meaningful but belong in secondary, not the head-to-head set.
+    const canBePrimary = s.relationship !== "occasion";
+    if (canBePrimary && primary.length < PRIMARY_MAX && s.threat >= 0.42 && s.similarity >= 0.5) primary.push(s);
     else if (secondary.length < SECONDARY_MAX && (s.threat >= 0.28 || s.similarity >= 0.55)) secondary.push(s);
   }
   // Sparse market: thresholds can leave nothing — never show an empty market when
