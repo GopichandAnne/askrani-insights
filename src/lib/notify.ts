@@ -190,6 +190,54 @@ export async function sendBriefEmail(
   return sendEmail(to, subject, html, attachments);
 }
 
+// ── The real-time ALERT email — a tight, urgent push for the 1-3 signals that
+//    just changed and need action now (competitor cut a price, launched a deal,
+//    you slipped on a key search). Distinct from the weekly brief: no "everything
+//    is steady" footer, an urgent subject, straight to the items + deep-links. ────
+export function renderAlertEmail(
+  business: string,
+  items: AttentionItem[],
+  links: { board?: string; byId?: Record<string, string> },
+): { subject: string; html: string } {
+  const app = APP_URL();
+  const lead = items[0]?.headline ?? "Something in your market just changed";
+  const subject = items.length > 1 ? `⚡ ${business}: ${items.length} urgent changes` : `⚡ ${business}: ${lead}`;
+  const linkFor = (it: AttentionItem) => links.byId?.[it.id] ?? `${app}${it.href ?? "/brief"}`;
+  const rows = items.map((it) => briefItemRow(it, linkFor(it))).join("");
+  const boardUrl = links.board ?? `${app}/brief`;
+  const intro = items.length > 1
+    ? `${items.length} things just changed in your market and are worth acting on now.`
+    : `Something just changed in your market and is worth acting on now.`;
+
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+    <div style="max-width:560px;margin:0 auto;padding:24px 20px">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:16px;overflow:hidden">
+        <div style="background:#fff;border-bottom:1px solid #eef0f2;padding:16px 24px"><table role="presentation" border="0" cellpadding="0" cellspacing="0"><tr><td style="vertical-align:middle"><img src="https://api.askrani.ai/storage/v1/object/public/branding/RaniLogo.png" alt="Ask Rani" width="55" height="80" style="height:80px;width:auto;display:block;border:0"></td><td style="vertical-align:middle;padding-left:14px;font-size:23px;font-weight:800;color:#0f766e;letter-spacing:.2px">Ask Rani</td></tr></table></div>
+        <div style="padding:22px 24px">
+          <div style="display:inline-block;background:#fff7ed;color:#c2410c;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;border:1px solid #fed7aa">⚡ Act now</div>
+          <h1 style="font-size:21px;color:#111827;margin:10px 0 3px;font-weight:800">${escapeHtml(business)}</h1>
+          <div style="font-size:15px;color:#374151">${escapeHtml(intro)}</div>
+          <table role="presentation" width="100%" style="border-collapse:collapse;margin-top:6px">${rows}</table>
+          <div style="margin-top:20px"><a href="${boardUrl}" style="display:inline-block;background:#c2410c;color:#fff;text-decoration:none;font-size:14px;font-weight:700;padding:12px 22px;border-radius:999px">See it &amp; act →</a></div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#9ca3af;margin-top:16px;text-align:center">Rani watches ${escapeHtml(business)} and only pings you when something needs action &middot; <a href="https://askrani.ai" style="color:#9ca3af">askrani.ai</a></div>
+    </div>
+  </body></html>`;
+  return { subject, html };
+}
+
+export async function sendAlertEmail(
+  to: string,
+  business: string,
+  items: AttentionItem[],
+  links: { board?: string; byId?: Record<string, string> },
+): Promise<boolean> {
+  if (!items.length) return false;
+  const { subject, html } = renderAlertEmail(business, items, links);
+  return sendEmail(to, subject, html);
+}
+
 function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 }
