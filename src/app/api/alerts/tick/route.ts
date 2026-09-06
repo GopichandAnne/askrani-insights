@@ -91,7 +91,8 @@ export async function GET(req: Request) {
     if (whatsappConfigured()) {
       const wa = whatsAppRecipient(goals);
       // WhatsApp proactive send needs a deep-link token (the template's URL button).
-      if (wa && boardUrl && (await sendWhatsAppBrief(wa, w.name, alertBoard(decision.board, decision.alerts), boardUrl))) { whatsapped++; channels.push("whatsapp"); }
+      // Uses a dedicated alert template if registered (WHATSAPP_ALERT_TEMPLATE), else the brief's.
+      if (wa && boardUrl && (await sendWhatsAppBrief(wa, w.name, alertBoard(decision.board, decision.alerts), boardUrl, process.env.WHATSAPP_ALERT_TEMPLATE))) { whatsapped++; channels.push("whatsapp"); }
     }
 
     // Stamp cooldown + min-gap + log even if no channel was configured, so we don't

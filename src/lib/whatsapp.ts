@@ -108,11 +108,13 @@ async function uploadMedia(pdf: Buffer, filename: string): Promise<string | null
  * button variable. Requires the deep-link secret (no deep-link → caller sends the
  * PDF report instead), so a "Open my brief" button is never dead.
  */
-export async function sendWhatsAppBrief(to: string, business: string, board: AttentionBoard, deepLinkUrl: string): Promise<boolean> {
+export async function sendWhatsAppBrief(to: string, business: string, board: AttentionBoard, deepLinkUrl: string, templateOverride?: string): Promise<boolean> {
   if (!whatsappConfigured()) return false;
   const token = (deepLinkUrl.split("token=")[1] ?? "").split("&")[0];
   if (!token) return false;
-  const template = process.env.WHATSAPP_BRIEF_TEMPLATE || "market_brief";
+  // Same body+URL-button shape as the brief; a real-time alert can use a dedicated
+  // template (WHATSAPP_ALERT_TEMPLATE) for urgent copy, falling back to the brief's.
+  const template = templateOverride || process.env.WHATSAPP_BRIEF_TEMPLATE || "market_brief";
   const lang = process.env.WHATSAPP_LANG || "en_US";
 
   const top = board.items.slice(0, 3).map((i) => i.headline).join("; ");
