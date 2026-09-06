@@ -338,6 +338,7 @@ export interface FindabilityReport {
   keywordCount: number;
   recommendation: string | null; // "what to do" — the single most valuable action (TL;DR over the playbook)
   playbook: PlaybookPlay[];      // per-term plays: ranked levers to outrank the rival ahead + one-tap act
+  trend: { d: string; score: number }[]; // score over time (oldest→newest, last ~12 captures)
 }
 
 interface Snap { keyword_id: string; term: string; intent: Intent; your_rank: number | null; confidence: boolean; top_competitor: string | null; competitor_ranks: Record<string, number>; captured_on: string }
@@ -365,7 +366,7 @@ function subScores(snaps: Snap[], weights: Map<string, number>) {
 const emptyReport = (): FindabilityReport => ({
   at: new Date().toISOString(), empty: true, capturedOn: null, score: 0, scoreDelta: null,
   breakdown: { position: 0, coverage: 0, momentum: 50 }, avgPosition: null, avgPositionDelta: null,
-  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0, recommendation: null, playbook: [],
+  coverage: { inTop3: 0, total: 0 }, biggestSlip: null, keywords: [], share: [], keywordCount: 0, recommendation: null, playbook: [], trend: [],
 });
 
 // ── the playbook — a TL;DR action + per-term plays to outrank the rival ahead ─
@@ -515,6 +516,26 @@ export async function buildFindabilityReport(ws: WorkspaceRow): Promise<Findabil
     ...[...compTop3].map(([name, cnt]) => ({ name, isYou: false, topThree: cnt, total }))]
     .sort((a, b) => b.topThree - a.topThree).slice(0, 6);
 
+  // Score trend across the loaded window (oldest→newest) — same 0-100 formula per
+  // capture day, momentum measured vs the previous day in the series. Sourced from
+  // the snapshots already loaded above (no extra query). Powers the sparkline.
+  const daysAsc = [...new Set(snaps.map((s) => s.captured_on))].sort();
+  const trend: { d: string; score: number }[] = [];
+  let prevByKw: Map<string, number | null> | null = null;
+  for (const day of daysAsc) {
+    const daySnaps = snaps.filter((s) => s.captured_on === day);
+    const ss = subScores(daySnaps, weights);
+    let mom = 50;
+    if (prevByKw) {
+      const ds: number[] = [];
+      for (const s of daySnaps) { const pr = prevByKw.get(s.keyword_id); if (pr != null && s.your_rank != null) ds.push(pr - s.your_rank); }
+      const ad = ds.length ? ds.reduce((a, b) => a + b, 0) / ds.length : 0;
+      mom = ds.length ? clamp(Math.round(50 + ad * 8)) : 50;
+    }
+    trend.push({ d: day, score: Math.round(0.55 * ss.position + 0.25 * ss.coverage + 0.2 * mom) });
+    prevByKw = new Map(daySnaps.map((s) => [s.keyword_id, s.your_rank]));
+  }
+
   const { recommendation, plays } = await makePlaybook(ws, keywords, share);
 
   return {
@@ -522,6 +543,7 @@ export async function buildFindabilityReport(ws: WorkspaceRow): Promise<Findabil
     breakdown: { position: c.position, coverage: c.coverage, momentum },
     avgPosition: c.avg, avgPositionDelta: p && p.avg != null && c.avg != null ? p.avg - c.avg : null,
     coverage: { inTop3: c.inTop3, total }, biggestSlip, keywords, share, keywordCount: cur.length, recommendation, playbook: plays,
+    trend: trend.slice(-12),
   };
 }
 
@@ -536,8 +558,22 @@ export interface FindabilityBrief {
   score: number; scoreDelta: number | null; biggestSlip: FindabilityReport["biggestSlip"];
   topRival: string | null; coverage: { inTop3: number; total: number }; recommendation: string | null; capturedOn: string | null;
 }
+function briefFromReport(r: FindabilityReport): FindabilityBrief {
+  return { score: r.score, scoreDelta: r.scoreDelta, biggestSlip: r.biggestSlip, topRival: r.share.find((s) => !s.isYou)?.name ?? null, coverage: r.coverage, recommendation: r.recommendation, capturedOn: r.capturedOn };
+}
 export async function computeFindabilityBrief(ws: WorkspaceRow): Promise<FindabilityBrief | null> {
   const r = await buildFindabilityReport(ws);
-  if (r.empty) return null;
-  return { score: r.score, scoreDelta: r.scoreDelta, biggestSlip: r.biggestSlip, topRival: r.share.find((s) => !s.isYou)?.name ?? null, coverage: r.coverage, recommendation: r.recommendation, capturedOn: r.capturedOn };
+  return r.empty ? null : briefFromReport(r);
+}
+
+/**
+ * Warm BOTH caches from a single build (one LLM playbook call) — the full report on
+ * goals.findability AND the compact brief on goals.findabilityBrief. Called by the
+ * weekly tick so the score is always fresh (the /findability page + scorecard load
+ * instantly instead of building lazily on the owner's first visit). Returns the
+ * report so the caller can also bank the score into the trend history.
+ */
+export async function refreshFindabilityCaches(ws: WorkspaceRow): Promise<{ report: FindabilityReport; brief: FindabilityBrief | null }> {
+  const report = await buildFindabilityReport(ws);
+  return { report, brief: report.empty ? null : briefFromReport(report) };
 }

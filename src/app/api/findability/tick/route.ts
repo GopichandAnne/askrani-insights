@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { refreshFindability, computeFindabilityBrief } from "@/lib/findability";
+import { refreshFindability, refreshFindabilityCaches } from "@/lib/findability";
 import { refreshAiFindability } from "@/lib/aifindability";
 import { planOfOrg, cadenceForPlan } from "@/lib/credits";
 import { type WorkspaceRow } from "@/lib/workspace";
@@ -53,10 +53,11 @@ async function run(req: Request) {
       // activated but produced nothing (keyword-gen failed) must retry next tick,
       // not stamp lastFindabilityAt and skip the workspace for a cadence period.
       if (r.activated && r.snapshots > 0) {
-        // Cache the compact brief on goals for the weekly digest (buildDigest reads
-        // goals.findabilityBrief — no scrape/LLM at digest time).
-        const brief = await computeFindabilityBrief(ws);
-        await svc.from("workspace").update({ goals: { ...goals, lastFindabilityAt: new Date().toISOString(), findabilityBrief: brief } }).eq("id", ws.id);
+        // Warm BOTH caches from one build: the full report on goals.findability (so the
+        // /findability page + scorecard load instantly + current, not lazily on the
+        // owner's first visit) AND the compact brief the digest reads. One LLM pass.
+        const { report, brief } = await refreshFindabilityCaches(ws);
+        await svc.from("workspace").update({ goals: { ...goals, lastFindabilityAt: new Date().toISOString(), findabilityBrief: brief, ...(report.empty ? {} : { findability: report }) } }).eq("id", ws.id);
         // AI findability shares the same keyword set — refresh it here too, but only
         // when a search-grounded engine is configured (else it just returns empty).
         if (process.env.PERPLEXITY_API_KEY) {

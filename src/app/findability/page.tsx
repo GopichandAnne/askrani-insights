@@ -5,6 +5,7 @@ import { getAiFindability } from "@/lib/aifindability";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { ActOnIt } from "@/components/ActOnIt";
 import { FindabilityMeter } from "@/components/FindabilityMeter";
+import { Sparkline } from "@/components/Sparkline";
 import { FindabilityRefreshButton } from "@/components/FindabilityRefreshButton";
 import { FindabilityKeywords } from "@/components/FindabilityKeywords";
 import { AiFindabilityCard } from "@/components/AiFindabilityCard";
@@ -93,6 +94,13 @@ export default async function FindabilityPage() {
                         ? `#${report.biggestSlip.from} → #${report.biggestSlip.to ?? "—"}`
                         : `now ${report.biggestSlip.to != null ? `#${report.biggestSlip.to}` : "not ranking"}`}
                     </p>
+                  </div>
+                )}
+                {report.trend.length >= 2 && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Trend</p>
+                    <div className="mt-1"><Sparkline points={report.trend.map((t) => t.score)} /></div>
+                    <p className="mt-0.5 text-xs text-ink-faint">score over {report.trend.length} scans</p>
                   </div>
                 )}
               </div>
