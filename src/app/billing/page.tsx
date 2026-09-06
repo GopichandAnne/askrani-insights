@@ -5,7 +5,9 @@ import { creditsSummary, PLANS, getStripeCustomer } from "@/lib/credits";
 import { isStripeConfigured, CATALOG } from "@/lib/stripe";
 import { BillingActions, type BuyItem } from "@/components/BillingActions";
 import { ProfileCard } from "@/components/ProfileCard";
+import { BusinessTypeCard } from "@/components/BusinessTypeCard";
 import { TeamCard } from "@/components/TeamCard";
+import { activeWorkspace } from "@/lib/workspace";
 import { isSuperAdmin } from "@/lib/auth";
 import { createServiceClient } from "@/lib/supabase/server";
 
@@ -32,6 +34,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const toItem = (k: string): BuyItem => ({ key: k, label: CATALOG[k].label, priceUsd: CATALOG[k].priceUsd, credits: CATALOG[k].credits, mode: CATALOG[k].mode, plan: CATALOG[k].plan });
   const buyPlans = stripeReady ? ["starter", "growth", "pro"].filter((k) => CATALOG[k].price).map(toItem) : [];
   const buyTopups = stripeReady ? ["topup_500", "topup_1500", "topup_5000"].filter((k) => CATALOG[k].price).map(toItem) : [];
+
+  // active workspace (for the editable business-type card)
+  const wsState = await activeWorkspace();
+  const activeVertical = wsState.status === "ok" ? wsState.workspace.vertical : null;
 
   // owner profile (name / phone / email) for the editable "Your details" card
   const svc = createServiceClient();
@@ -81,6 +87,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
       {/* your details — name + editable contact phone (WhatsApp-ready, none sent yet) */}
       <ProfileCard initial={profileInitial} />
+
+      {/* business type — owner can correct the auto-detected vertical in place */}
+      {activeVertical && <BusinessTypeCard current={activeVertical} />}
 
       {/* team — owners can add/manage owners & members (WhatsApp intentionally out this version) */}
       {(auth.role === "owner" || isSuperAdmin(user)) && <TeamCard />}
