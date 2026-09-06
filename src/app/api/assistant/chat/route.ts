@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { activeWorkspace } from "@/lib/workspace";
+import { getUser } from "@/lib/auth";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { answerFromData } from "@/lib/assistant";
 import { applyAssistantAction } from "@/lib/assistantActions";
@@ -18,15 +19,18 @@ export const maxDuration = 60;
 
 export async function GET() {
   const state = await activeWorkspace();
-  if (state.status !== "ok") return NextResponse.json({ turns: [] });
-  const turns = await readConversation(createServiceClient(), state.workspace.id);
+  const user = await getUser();
+  if (state.status !== "ok" || !user) return NextResponse.json({ turns: [] });
+  const turns = await readConversation(createServiceClient(), state.workspace.id, user.id);
   return NextResponse.json({ turns: turns.map((t) => ({ role: t.role, text: t.text })) });
 }
 
 export async function POST(req: Request) {
   const state = await activeWorkspace();
-  if (state.status !== "ok") return NextResponse.json({ error: "no_workspace" }, { status: 401 });
+  const user = await getUser();
+  if (state.status !== "ok" || !user) return NextResponse.json({ error: "no_workspace" }, { status: 401 });
   const ws = state.workspace;
+  const pid = user.id; // per-user thread
 
   const body = (await req.json().catch(() => ({}))) as { message?: string };
   const message = typeof body.message === "string" ? body.message.slice(0, 1000) : "";
@@ -35,9 +39,9 @@ export async function POST(req: Request) {
   const supabase = await createClient();
   const svcAdmin = createServiceClient();
 
-  // The persistent per-workspace thread (shared with WhatsApp) is the source of
-  // truth for context — the conversation carries across sessions, reloads, channels.
-  const history = recentTurns(await readConversation(svcAdmin, ws.id), 10);
+  // This user's persistent thread is the source of truth for context — it carries
+  // across their sessions, reloads and channels (their own thread, not shared).
+  const history = recentTurns(await readConversation(svcAdmin, ws.id, pid), 10);
 
   const { answer, grounded, sources, action } = await answerFromData(
     { id: ws.id, name: ws.name, vertical: ws.vertical, target_business_id: ws.target_business_id },
@@ -54,8 +58,8 @@ export async function POST(req: Request) {
     if (!res.ok) finalAnswer = res.note ? `I couldn't do that — ${res.note}` : "I couldn't make that change — please try again.";
   }
 
-  // Remember this exchange for next time (this session, a reload, or WhatsApp).
-  await appendConversation(svcAdmin, ws.id, [{ role: "user", text: message }, { role: "assistant", text: finalAnswer }]);
+  // Remember this exchange for next time (this user's own thread).
+  await appendConversation(svcAdmin, ws.id, pid, [{ role: "user", text: message }, { role: "assistant", text: finalAnswer }]);
 
   return NextResponse.json({ answer: finalAnswer, grounded, sources: sources ?? [], changed });
 }
