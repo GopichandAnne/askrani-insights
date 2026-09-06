@@ -23,6 +23,9 @@ const ICONS = {
   edge: <svg {...I}><path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9z" /></svg>,
   explore: <svg {...I}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>,
   findability: <svg {...I}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none" /></svg>,
+  rivals: <svg {...I}><circle cx="12" cy="12" r="7" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /></svg>,
+  inspiration: <svg {...I}><path d="m12 3 2.4 5.2 5.6.6-4.2 3.8 1.2 5.6L12 21l-5 2.6 1.2-5.6L4 8.8l5.6-.6L12 3Z" /></svg>,
+  festival: <svg {...I}><path d="M4 21 12 5l8 16" /><path d="M4 21h16" /><path d="M12 5V3" /><path d="M8.5 13h7" /></svg>,
   market: <svg {...I}><path d="M3 9l1.5-5h15L21 9" /><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9" /><path d="M3 9h18" /><path d="M9 13h6" /></svg>,
   scorecard: <svg {...I}><path d="M4 20V12" /><path d="M9.5 20V6" /><path d="M15 20v-5" /><path d="M20.5 20V9" /></svg>,
   plan: <svg {...I}><path d="M6 3v18" /><path d="M6 4h11l-1.6 3.5L17 11H6" /><path d="M9 20h7" /></svg>,
@@ -40,7 +43,7 @@ const ICONS = {
   more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
 };
 const SHORT: Record<string, string> = {
-  "/": "Week", "/scorecard": "Score", "/plan": "Plan", "/you": "You", "/edge": "Edge", "/explore": "Watch", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
+  "/": "Week", "/scorecard": "Score", "/plan": "Plan", "/you": "You", "/edge": "Edge", "/explore": "Watch", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/rivals": "Openings", "/inspiration": "Inspire", "/festivals": "Festivals", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
   "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin", "/assistant": "Ask",
 };
 

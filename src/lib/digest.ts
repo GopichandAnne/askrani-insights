@@ -158,6 +158,41 @@ export function buildDigest(
     }
   }
 
+  // ── Rival review-mining — what customers PUNISH competitors for = openings ──
+  const rivalRev = goals.rivalReviews as any | undefined;
+  if (rivalRev && !rivalRev.failed) {
+    for (const g of ((rivalRev.gaps ?? []) as any[]).slice(0, 2)) {
+      const theme = clean(g.theme);
+      if (!theme) continue;
+      const rivals = ((g.rivals ?? []) as any[]).map(clean).filter(Boolean);
+      push({
+        id: `rivalgap:${theme.slice(0, 30).toLowerCase()}`,
+        severity: "opportunity", pillar: "Rival gap", icon: "🎯",
+        title: `Rivals get punished for ${theme}`,
+        detail: clean(g.angle) || clean(g.evidence) || (rivals.length ? `A recurring complaint about ${rivals.slice(0, 2).join(", ")} — an opening for you.` : "A recurring complaint in competitor reviews — an opening for you."),
+        act: { kind: "content", move: clean(g.angle) || `Win customers frustrated by "${theme}" at ${rivals[0] ?? "rivals"}`, context: clean(g.evidence) },
+        href: "/rivals",
+      });
+    }
+  }
+
+  // ── Festival planner — the soonest fitting occasion, so prep starts in time ──
+  const festival = goals.festival as any | undefined;
+  if (festival && !festival.failed) {
+    const soon = ((festival.plans ?? []) as any[]).filter((p) => typeof p.inDays === "number" && p.inDays <= 30)[0];
+    if (soon && clean(soon.occasion)) {
+      const moves = ((soon.moves ?? []) as any[]).map(clean).filter(Boolean);
+      push({
+        id: `festival:${clean(soon.occasion).slice(0, 30).toLowerCase()}`,
+        severity: "opportunity", pillar: "Festival", icon: "🎉",
+        title: `${clean(soon.occasion)} is in ${soon.inDays} day${soon.inDays === 1 ? "" : "s"}`,
+        detail: clean(soon.why) || moves[0] || "A fitting occasion is coming up — plan a campaign before it's here.",
+        act: soon.act?.move ? { kind: (soon.act.kind || "promo"), move: clean(soon.act.move), context: clean(soon.act.context) } : { kind: "promo", move: `Plan a ${clean(soon.occasion)} campaign`, context: moves.join("; ") },
+        href: "/festivals",
+      });
+    }
+  }
+
   // ── Competitor promotions vs. weekly flyer prices ─────────────────────────
   //  Caption deals (goals.deals) are real PROMOTIONS (BOGO, % off, specials).
   //  Flyer items (goals.flyerDeals) are a rival's itemized weekly-ad PRICES — a

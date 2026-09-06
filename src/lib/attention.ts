@@ -18,7 +18,7 @@ import { OBJECTIVES, type AttnMode } from "@/lib/attention-prefs";
 export type AttnClass = "A" | "B" | "C"; // A = needs attention, B = opportunity, C = context
 export type AttnKind =
   | "competitor_price" | "your_pricing" | "competitor_deal" | "competitor_launch"
-  | "reputation" | "findability" | "social" | "demand" | "menu" | "ads" | "content" | "listings" | "other";
+  | "reputation" | "findability" | "social" | "demand" | "menu" | "ads" | "content" | "listings" | "rival_gap" | "occasion" | "other";
 
 export interface AttentionItem {
   id: string;
@@ -52,7 +52,7 @@ export interface AttentionBoard {
 // Competitor & pricing lead — that's what owners told us they check daily.
 const KIND_WEIGHT: Record<AttnKind, number> = {
   competitor_price: 100, your_pricing: 92, competitor_deal: 84, competitor_launch: 82,
-  reputation: 66, findability: 60, demand: 54, menu: 52, social: 46, ads: 44,
+  rival_gap: 70, reputation: 66, findability: 60, occasion: 58, demand: 54, menu: 52, social: 46, ads: 44,
   listings: 34, content: 26, other: 30,
 };
 const CLS_BASE: Record<AttnClass, number> = { A: 30, B: 12, C: 0 };
@@ -95,6 +95,7 @@ const PILLAR_KIND: Record<string, AttnKind> = {
   "Reputation": "reputation", "Listings": "listings",
   "Findability": "findability", "Social": "social", "Competitor ads": "ads",
   "Unmet demand": "demand", "What's winning": "menu", "Content": "content",
+  "Rival gap": "rival_gap", "Festival": "occasion",
 };
 const clsFromSeverity = (sev: DigestItem["severity"]): AttnClass => (sev === "alert" ? "A" : sev === "opportunity" ? "B" : "C");
 
@@ -107,6 +108,8 @@ function actionsFor(kind: AttnKind, act?: ActSpec): string[] {
     case "reputation": return act?.kind === "reply" ? ["Reply", "Ignore"] : ["Post about it", "See"];
     case "findability": return ["Improve my page", "See searches"];
     case "social": return ["Make my version", "Ignore"];
+    case "rival_gap": return ["Make my move", "See rivals", "Ignore"];
+    case "occasion": return ["Plan the campaign", "Ignore"];
     case "demand": return ["Promote it", "Ignore"];
     case "menu": return ["Announce it", "Ignore"];
     case "ads": return ["Create a promo", "Ignore"];

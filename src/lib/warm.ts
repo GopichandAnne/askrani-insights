@@ -14,6 +14,9 @@ import { generateReviewPulse, pulseIsGood } from "@/lib/pulse";
 import { generateSocialPulse, socialPulseIsGood } from "@/lib/socialpulse";
 import { minePriceHints, priceHintsIsGood } from "@/lib/pricehints";
 import { generateContentPlan, contentPlanIsGood } from "@/lib/contentplan";
+import { generateRivalReviews, rivalReviewsIsGood } from "@/lib/rivalreviews";
+import { generateInspiration, inspirationIsGood } from "@/lib/inspiration";
+import { generateFestivalPlanner, festivalIsGood } from "@/lib/festival";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -68,6 +71,16 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // offerings (offer table). Reads goals.winning/myDeals as best-effort momentum
     // hints (prior cycle's is fine); the offerings themselves are the ground truth.
     { key: "contentPlan", run: () => generateContentPlan(row, db), good: (v) => contentPlanIsGood(v) && !v?.failed },
+    // Mine the COMPETITORS' reviews for recurring complaints (openings to win their
+    // customers) + praise (bars to match). Reads their content_item reviews — no new
+    // scrape; runs late so it doesn't contend with the heavier pillars above.
+    { key: "rivalReviews", run: () => generateRivalReviews(row, db), good: (v) => rivalReviewsIsGood(v) && !v?.failed },
+    // Inspiration watchlist — moves to emulate from businesses the owner starred.
+    // Cheap no-op when the watchlist is empty; reads their social posts otherwise.
+    { key: "inspiration", run: () => generateInspiration(row, db), good: (v) => inspirationIsGood(v) && !v?.failed },
+    // Context-aware festival planner — reads offerings, so runs after the offering-
+    // grounded pillars; picks the upcoming occasions that fit + drafts campaigns.
+    { key: "festival", run: () => generateFestivalPlanner(row, db), good: (v) => festivalIsGood(v) && !v?.failed },
     // NOTE (2026-09-04): the dental priceAnchors + insurance pillars were removed
     // here when dental's special surfaces were disabled (see collect.ts
     // DIRECTORY_VERTICALS). buildPriceAnchors/buildInsuranceCompare still exist and
