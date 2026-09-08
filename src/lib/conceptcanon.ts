@@ -95,37 +95,50 @@ export async function resolveConcepts(ws: WorkspaceRow, items: { kind: string; t
   if (!isLlmConfigured()) return { tags, llmFailed: true, added: 0 };
 
   const list = [...uniq.entries()];
-  const vocab = [...new Set(Object.values(cached).map((c) => c.concept))].slice(0, 80);
-  const lines = list.map(([, v], j) => `${j}\t[${v.kind}] ${v.text.replace(/\s+/g, " ").trim().slice(0, 120)}`).join("\n");
+  // BATCH the LLM calls: a workspace with hundreds of unseen concepts (e.g. a
+  // 400-event grocery store) overflows a single call → it fails, nothing caches,
+  // and it fails identically forever (a doom loop). Batching lets the map build
+  // incrementally: a failed batch loses only itself, and each run advances the
+  // cache so the next run resolves more. The running vocab carries new concepts
+  // forward so later batches reuse earlier ones (clustering stays consistent).
+  const BATCH = 100;
+  const runningVocab = new Set(Object.values(cached).map((c) => c.concept));
+  const newAssign: Record<string, ConceptAssign> = {};
+  let anyBatchOk = false;
 
+  for (let start = 0; start < list.length; start += BATCH) {
+    const chunk = list.slice(start, start + BATCH);
+    const vocab = [...runningVocab].slice(0, 100);
+    const lines = chunk.map(([, v], j) => `${j}\t[${v.kind}] ${v.text.replace(/\s+/g, " ").trim().slice(0, 120)}`).join("\n");
+    try {
+      const call = () => getLlm().callStructured<{ map: { i: number; concept: string; demand_type: DemandType }[] }>({
+        system: systemPrompt(vocab), text: lines, schema: SCHEMA, tier: "classify", maxTokens: 9000,
+      });
+      const { data } = await call().catch(() => call());
+      const out = new Map((Array.isArray(data.map) ? data.map : []).map((x) => [x.i, x]));
+      chunk.forEach(([key, v], j) => {
+        const r = out.get(j);
+        const concept = String(r?.concept ?? "").replace(/\s+/g, " ").trim();
+        if (!concept) return;
+        const dt: DemandType = (["offering", "quality", "other", "na"] as const).includes(r!.demand_type) ? r!.demand_type : "na";
+        const tag: ConceptAssign = { concept, demand_type: dt };
+        newAssign[key] = tag;
+        runningVocab.add(concept);
+        for (const idx of v.idxs) tags[idx] = tag;
+      });
+      anyBatchOk = true;
+    } catch { /* skip this batch; other batches still advance the cache */ }
+  }
+  if (!Object.keys(newAssign).length) return { tags, llmFailed: true, added: 0 };
+
+  // persist: fresh read-merge-write; EXISTING assignments win (frozen), new ones added
   try {
-    const call = () => getLlm().callStructured<{ map: { i: number; concept: string; demand_type: DemandType }[] }>({
-      system: systemPrompt(vocab), text: lines, schema: SCHEMA, tier: "classify", maxTokens: 9000,
-    });
-    const { data } = await call().catch(() => call());
-    const out = new Map((Array.isArray(data.map) ? data.map : []).map((x) => [x.i, x]));
-
-    const newAssign: Record<string, ConceptAssign> = {};
-    list.forEach(([key, v], j) => {
-      const r = out.get(j);
-      const concept = String(r?.concept ?? "").replace(/\s+/g, " ").trim();
-      if (!concept) return;
-      const dt: DemandType = (["offering", "quality", "other", "na"] as const).includes(r!.demand_type) ? r!.demand_type : "na";
-      const tag: ConceptAssign = { concept, demand_type: dt };
-      newAssign[key] = tag;
-      for (const idx of v.idxs) tags[idx] = tag;
-    });
-    if (!Object.keys(newAssign).length) return { tags, llmFailed: true, added: 0 };
-
-    // persist: fresh read-merge-write; EXISTING assignments win (frozen), new ones added
     const svc = createServiceClient();
     const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
     const prev = ((cur?.goals as { conceptCanon?: ConceptCanon } | null)?.conceptCanon?.assign ?? {}) as Record<string, ConceptAssign>;
     const merged = { ...newAssign, ...prev };
     const report: ConceptCanon = { assign: merged, at: new Date().toISOString(), size: Object.keys(merged).length };
     await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), conceptCanon: report } }).eq("id", ws.id);
-    return { tags, llmFailed: false, added: Object.keys(newAssign).length };
-  } catch {
-    return { tags, llmFailed: true, added: 0 };
-  }
+  } catch { /* tags already resolved this run; persistence retries next run */ }
+  return { tags, llmFailed: !anyBatchOk, added: Object.keys(newAssign).length };
 }
