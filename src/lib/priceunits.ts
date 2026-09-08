@@ -109,3 +109,42 @@ export function kviPriceGaps(obs: KviObservation[], targetBrand: string, opts: {
   }
   return gaps.sort((a, b) => b.overPct - a.overPct);
 }
+
+export interface KviLead {
+  canon: string; family: UnitFamily;
+  targetPerBase: number; marketMedian: number;
+  underPct: number;        // how far BELOW the market median the target is (%)
+  beats: string[];         // distinct rival brands the target undercuts
+  basis: number;           // distinct brands compared (incl. target)
+}
+
+/**
+ * KVI price LEADERSHIP — the positive inverse of kviPriceGaps: staples where the
+ * target is materially BELOW the market median (a promotable price advantage). Same
+ * precision bar: target price + >=2 rival brands in the same item x family.
+ */
+export function kviPriceLeads(obs: KviObservation[], targetBrand: string, opts: { minUnderPct?: number; minRivals?: number } = {}): KviLead[] {
+  const minUnderPct = opts.minUnderPct ?? 10;
+  const minRivals = opts.minRivals ?? 2;
+  const byKey = new Map<string, KviObservation[]>();
+  for (const o of obs) { const k = `${o.canon}|${o.family}`; (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(o); }
+
+  const leads: KviLead[] = [];
+  for (const rows of byKey.values()) {
+    const perBrand = new Map<string, number>();
+    for (const r of rows) { const cur = perBrand.get(r.brand); if (cur == null || r.perBase < cur) perBrand.set(r.brand, r.perBase); }
+    const t = perBrand.get(targetBrand);
+    if (t == null) continue;
+    const rivals = [...perBrand.entries()].filter(([b]) => b !== targetBrand);
+    if (rivals.length < minRivals) continue;
+    const mkt = median(rivals.map(([, p]) => p));
+    const underPct = ((mkt - t) / mkt) * 100;
+    if (underPct < minUnderPct) continue;
+    leads.push({
+      canon: rows[0].canon, family: rows[0].family,
+      targetPerBase: t, marketMedian: mkt, underPct: Math.round(underPct),
+      beats: rivals.filter(([, p]) => p > t).map(([b]) => b), basis: perBrand.size,
+    });
+  }
+  return leads.sort((a, b) => b.underPct - a.underPct);
+}

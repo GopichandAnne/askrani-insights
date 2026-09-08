@@ -7,7 +7,7 @@ import { rivalStandingCaps, targetStandingCaps } from "@/lib/standingoffers";
 import { conceptKey } from "@/lib/conceptcanon";
 import { readSaturation } from "@/lib/saturation";
 import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "@/lib/groceryflags";
-import { flyerKviGaps, type FlyerDeal } from "@/lib/kviprices";
+import { flyerKviGaps, flyerKviLeads, type FlyerDeal } from "@/lib/kviprices";
 import { inferUnitBasis } from "@/lib/unitbasis";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
@@ -50,9 +50,11 @@ export interface FallingBehindFlag {
   seen: string[];        // distinct dates
   score: number;
 }
+export interface PriceWin { item: string; youPerBase: number; marketMedian: number; underPct: number; family: string; beats: number }
 export interface FallingBehind {
   flags: FallingBehindFlag[];
   qualityBars: string[]; // execution complaints routed OUT of opportunities (context)
+  priceWins: PriceWin[];  // grocery: staples you beat the market on (a promotable strength)
   eventsRead: number;
   at: string;
   empty?: boolean;
@@ -60,7 +62,7 @@ export interface FallingBehind {
 }
 
 const KINDS = ["deal", "demand", "winning_format", "breakout"] as const;
-const empty = (at: string, failed = false): FallingBehind => ({ flags: [], qualityBars: [], eventsRead: 0, at, empty: true, ...(failed ? { failed: true } : {}) });
+const empty = (at: string, failed = false): FallingBehind => ({ flags: [], qualityBars: [], priceWins: [], eventsRead: 0, at, empty: true, ...(failed ? { failed: true } : {}) });
 
 export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): Promise<FallingBehind> {
   const at = new Date().toISOString();
@@ -176,6 +178,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
 
   const flags: FallingBehindFlag[] = [];
   const qualityBars: string[] = [];
+  let priceWins: PriceWin[] = [];
   for (const a of byC.values()) {
     // the owner already offers this (menu-derived or owner-confirmed) → not an opening
     if (targetConcepts.has(conceptKey(a.concept))) continue;
@@ -248,6 +251,10 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     const distinctItems = [...new Set([...myDeals, ...compDeals].map((d) => canonItem(String(d.item ?? ""))).filter((c) => c.length >= 3))];
     const basisMap = await inferUnitBasis(ws, distinctItems);
     const priceGaps = flyerKviGaps(myDeals, compDeals, targetKey, canonItem, brandOfRival, basisMap, { minOverPct: 12, minRivals: 2 });
+    // the positive inverse — staples you beat the market on (a promotable strength)
+    priceWins = flyerKviLeads(myDeals, compDeals, targetKey, canonItem, brandOfRival, basisMap, { minUnderPct: 12, minRivals: 2 })
+      .slice(0, 6)
+      .map((w) => ({ item: w.canon, youPerBase: w.targetPerBase, marketMedian: w.marketMedian, underPct: w.underPct, family: w.family, beats: w.beats.length }));
     for (const g of priceGaps.slice(0, 4)) {
       const per = g.family === "weight" ? "/lb" : g.family === "volume" ? "/floz" : g.family === "count" ? "/ct" : "";
       flags.push({
@@ -261,13 +268,13 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   }
 
   flags.sort((x, y) => y.score - x.score);
-  if (!flags.length && !qualityBars.length) return empty(at);
-  return { flags: flags.slice(0, 8), qualityBars: qualityBars.slice(0, 12), eventsRead: ev.length, at };
+  if (!flags.length && !qualityBars.length && !priceWins.length) return empty(at);
+  return { flags: flags.slice(0, 8), qualityBars: qualityBars.slice(0, 12), priceWins, eventsRead: ev.length, at };
 }
 
 export function fallingBehindIsGood(r: FallingBehind): boolean {
   if (r.failed) return false;
-  return !!(r.flags.length || r.empty);
+  return !!(r.flags.length || r.priceWins.length || r.empty);
 }
 
 export function getOrMakeFallingBehind(ws: WorkspaceRow, maxAgeHours = 24): Promise<FallingBehind> {
