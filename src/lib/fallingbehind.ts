@@ -3,6 +3,7 @@ import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { isLlmConfigured } from "@/lib/extraction/llm";
 import { resolveConcepts } from "@/lib/conceptcanon";
 import { resolveEntities, resolveNameToBrand, type EntityRecord } from "@/lib/entityresolve";
+import { rivalStandingCaps } from "@/lib/standingoffers";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -86,43 +87,86 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   };
   const targetKey = brandOfRival(ws.name);
 
-  // Resolve every event onto the cached canonical concept map (stable run-to-run;
-  // LLM only for unseen surface forms). A mature map keeps working even if the LLM
-  // is down; only a cold cache + failed LLM yields nothing.
-  const { tags, llmFailed } = await resolveConcepts(ws, ev.map((r) => ({ kind: r.kind, text: clean(r.title) })));
-  if (llmFailed && tags.every((t) => !t)) return empty(at, true);
+  // Standing offerings: distil each competitor's menu into a few move-level
+  // capabilities (cached), so a move a rival OFFERS but hasn't promoted lately still
+  // counts as supply — the fix for demand-gaps that were really observation gaps.
+  const competitors = ((bizRows ?? []) as { id: string; canonical_name: string }[])
+    .filter((b) => brandOfRival(b.canonical_name) !== targetKey)
+    .map((b) => ({ id: b.id, name: b.canonical_name }));
+  const nameById = new Map(competitors.map((c) => [c.id, c.name]));
+  const capsByBiz = await rivalStandingCaps(ws, competitors, supabase);
+  const capItems: { businessId: string; text: string }[] = [];
+  for (const [bid, caps] of Object.entries(capsByBiz)) for (const cap of caps) capItems.push({ businessId: bid, text: cap });
 
-  interface Agg { concept: string; rivals: Map<string, string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string> }
+  // Resolve events + standing capabilities onto the shared cached concept map
+  // (stable run-to-run; LLM only for unseen surface forms). A mature map keeps
+  // working even if the LLM is down; only a cold cache + failed LLM yields nothing.
+  const { tags, llmFailed } = await resolveConcepts(ws, [
+    ...ev.map((r) => ({ kind: r.kind, text: clean(r.title) })),
+    ...capItems.map((c) => ({ kind: "offering", text: c.text })),
+  ]);
+  if (llmFailed && tags.every((t) => !t)) return empty(at, true);
+  const capOffset = ev.length;
+
+  interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string> }
   const byC = new Map<string, Agg>();
+  const getAgg = (concept: string): Agg => {
+    const key = concept.toLowerCase().trim();
+    let a = byC.get(key);
+    if (!a) { a = { concept: clean(concept), rivals: new Map(), promo: new Set(), standing: new Set(), offeringDates: new Set(), qualityHits: 0, supplyEx: [], demandEx: [], dates: new Set() }; byC.set(key, a); }
+    return a;
+  };
+
   ev.forEach((r, i) => {
     const m = tags[i]; if (!m?.concept) return;
-    const key = m.concept.toLowerCase().trim(); if (!key) return;
-    const a: Agg = byC.get(key) ?? { concept: clean(m.concept), rivals: new Map<string, string>(), offeringDates: new Set<string>(), qualityHits: 0, supplyEx: [], demandEx: [], dates: new Set<string>() };
+    const a = getAgg(m.concept);
     a.dates.add(r.first_seen_on);
     if (r.kind === "demand") {
       if (m.demand_type === "offering") { a.offeringDates.add(r.first_seen_on); if (a.demandEx.length < 2) a.demandEx.push(clean(r.title)); }
       else if (m.demand_type === "quality") a.qualityHits++;
     } else {
       const ck = r.rival ? brandOfRival(r.rival) : "";
-      if (ck && ck !== targetKey && !a.rivals.has(ck)) a.rivals.set(ck, clean(r.rival || ""));
+      if (ck && ck !== targetKey) { if (!a.rivals.has(ck)) a.rivals.set(ck, clean(r.rival || "")); a.promo.add(ck); } // actively promoting
       if (a.supplyEx.length < 2) a.supplyEx.push(`${clean(r.rival || "A rival")}: ${clean(r.title).slice(0, 70)}`);
     }
-    byC.set(key, a);
+  });
+  // standing offerings → supply presence (brand resolved directly from business id)
+  capItems.forEach((c, j) => {
+    const m = tags[capOffset + j]; if (!m?.concept) return;
+    const brand = res.brandOf.get(c.businessId); if (!brand || brand === targetKey) return;
+    const a = getAgg(m.concept);
+    if (!a.rivals.has(brand)) a.rivals.set(brand, nameById.get(c.businessId) || "A rival");
+    a.standing.add(brand);
+    if (a.supplyEx.length < 2) a.supplyEx.push(`${nameById.get(c.businessId) || "A rival"} (on menu): ${c.text}`);
   });
 
+  const C = Math.max(1, competitors.length);
   const flags: FallingBehindFlag[] = [];
   const qualityBars: string[] = [];
   for (const a of byC.values()) {
     const rivalCount = a.rivals.size;
+    const promoCount = a.promo.size;
     const demandDates = a.offeringDates.size;
     const recurring = demandDates >= 2;
+    const saturation = rivalCount / C;
     // execution-only concept (gripes, nobody "supplies" it, no offering wish) → a bar, not an opportunity
     if (a.qualityHits && !demandDates && !rivalCount) { qualityBars.push(a.concept); continue; }
 
     let tag: FbTag | null = null, score = 0;
-    if (demandDates >= 1 && rivalCount >= 1) { tag = "demand_moving"; score = 120 + rivalCount * 12 + demandDates * 6 + (recurring ? 20 : 0); }
-    else if (rivalCount >= 2) { tag = "behind"; score = 70 + rivalCount * 12; }
-    else if (recurring) { tag = "demand_gap"; score = 45 + demandDates * 6; }
+    if (demandDates >= 1 && rivalCount >= 1) {
+      // demand + supply, and STILL a gap while supply is not yet saturated = the real opening
+      tag = "demand_moving"; score = 120 + demandDates * 6 + (recurring ? 20 : 0) + Math.round((1 - saturation) * 24) + promoCount * 8;
+    } else if (promoCount >= 2) {
+      // rivals actively PROMOTING it (not just listing it) → a real "you're behind"
+      tag = "behind"; score = 80 + promoCount * 12;
+    } else if (rivalCount >= 2) {
+      // supply is menu-only (nobody promoting, no demand). Near-universal = table stakes
+      // you almost certainly also offer (target offerings unknown) → drop, don't flag.
+      if (saturation >= 0.5) continue;
+      tag = "behind"; score = 38 + rivalCount * 5;
+    } else if (recurring) {
+      tag = "demand_gap"; score = 45 + demandDates * 6;
+    }
     if (!tag) continue;
 
     flags.push({
