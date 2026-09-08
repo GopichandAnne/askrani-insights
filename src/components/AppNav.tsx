@@ -6,13 +6,10 @@ import { useEffect, useState } from "react";
 import { RaniWordmark, RaniMark } from "@/components/RaniSpinner";
 import { CommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher, type WsOption } from "@/components/WorkspaceSwitcher";
+import { navHit, type NavSection, type NavMember } from "@/components/nav-config";
 
-export interface NavItem {
-  href: string;
-  label: string;
-  icon: keyof typeof ICONS;
-  match?: string[]; // extra path prefixes that should highlight this item (grouping)
-}
+/** Legacy flat-nav item type, kept exported for any external importer. */
+export interface NavItem { href: string; label: string; icon: keyof typeof ICONS; match?: string[] }
 
 const I = { width: 20, height: 20, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const ICONS = {
@@ -35,16 +32,21 @@ const ICONS = {
   offers: <svg {...I}><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12.2V4a1 1 0 0 1 1-1h8.2a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8Z" /><circle cx="7.5" cy="7.5" r="1.3" /></svg>,
   competitors: <svg {...I}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 5.2A3.2 3.2 0 0 1 16 11" /><path d="M17.5 14.5A5.5 5.5 0 0 1 20.5 20" /></svg>,
   channels: <svg {...I}><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="12" cy="12" r="3.4" /><circle cx="17" cy="7" r="1.2" fill="currentColor" stroke="none" /></svg>,
-  recommendations: <svg {...I}><path d="M9 18h6" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg>,
   report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
   assistant: <svg {...I}><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" /><path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" /></svg>,
   add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
+  watch: <svg {...I}><circle cx="12" cy="12" r="3" /><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /></svg>,
+  grow: <svg {...I}><path d="M12 20v-9" /><path d="M12 11c0-3 2.5-5 6-5 0 3.5-2.5 5-6 5Z" /><path d="M12 13c0-2.5-2-4.5-5-4.5 0 3 2 4.5 5 4.5Z" /></svg>,
   more: <svg {...I}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" /></svg>,
-};
+} as const;
+type IconKey = keyof typeof ICONS;
+const icon = (k?: string) => ICONS[(k as IconKey)] ?? ICONS.more;
+
+// Short rail labels for the secondary (More) destinations.
 const SHORT: Record<string, string> = {
-  "/": "Week", "/scorecard": "Score", "/plan": "Plan", "/you": "You", "/edge": "Edge", "/explore": "Watch", "/around": "Around", "/content": "Content", "/winning": "Winning", "/market": "Market", "/findability": "Found", "/rivals": "Openings", "/inspiration": "Inspire", "/festivals": "Festivals", "/feed": "Changes", "/offers": "Offers", "/competitors": "Rivals", "/channels": "Channels",
-  "/recommendations": "Actions", "/reports": "Report", "/billing": "Billing", "/onboarding": "New", "/admin": "Admin", "/assistant": "Ask",
+  "/": "Week", "/scorecard": "Position", "/you": "You", "/channels": "Channels",
+  "/reports": "Report", "/billing": "Billing", "/explore": "Explore", "/onboarding": "New", "/admin": "Admin",
 };
 
 function useCommandKey(setOpen: (f: (o: boolean) => boolean) => void) {
@@ -76,17 +78,21 @@ function CreditsPill({ credits }: { credits: number | null }) {
   );
 }
 
-export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId = "", credits = null }: { items: NavItem[]; email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string; credits?: number | null }) {
+export function AppNav({
+  sections, more, home = "/", email, admin, workspaces = [], activeWorkspaceId = "", credits = null,
+}: {
+  sections: NavSection[]; more: NavMember[]; home?: string;
+  email?: string; admin?: boolean; workspaces?: WsOption[]; activeWorkspaceId?: string; credits?: number | null;
+}) {
   const pathname = usePathname() || "/";
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   useCommandKey(setOpen);
-  // close the mobile "More" sheet on navigation
   useEffect(() => { setMenu(false); }, [pathname]);
-  const isActive = (n: NavItem) => {
-    const hrefs = [n.href, ...(n.match ?? [])];
-    return hrefs.some((h) => (h === "/" ? pathname === "/" : pathname === h || pathname.startsWith(h + "/")));
-  };
+
+  const sectionActive = (s: NavSection) => navHit(pathname, [s.href, ...s.match]);
+  const memberActive = (m: NavMember) => navHit(pathname, [m.href, ...(m.match ?? [])]);
+  const moreActive = more.some(memberActive);
 
   const AskTrigger = ({ className = "" }: { className?: string }) => (
     <button
@@ -99,25 +105,24 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
     </button>
   );
 
+  const railClass = "flex w-full flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium transition-all hover:bg-brand-soft hover:text-brand-deep data-[active=true]:bg-brand-gradient data-[active=true]:text-white data-[active=true]:shadow-brand";
+
   return (
     <>
-      {/* ── Desktop icon rail ───────────────────────────────────────── */}
+      {/* ── Desktop icon rail: the 4 surfaces lead; secondary under a divider ── */}
       <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-20 p-2 lg:flex">
         <div className="glass flex h-full w-full flex-col items-center rounded-3xl py-3">
-          <Link href="/" aria-label="Ask Rani Insights home" className="mb-2 shrink-0"><RaniMark size={32} /></Link>
-          {/* min-h-0 + overflow lets the item list SCROLL on short viewports instead
-              of clipping the bottom tabs (and the pinned Sign-out below) off-screen. */}
+          <Link href={home} aria-label="Ask Rani Insights home" className="mb-2 shrink-0"><RaniMark size={32} /></Link>
           <nav className="flex w-full min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {items.map((n) => (
-              <Link
-                key={n.href}
-                href={n.href}
-                data-active={isActive(n)}
-                title={n.label}
-                className="flex w-full flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium text-ink-faint transition-all hover:bg-brand-soft hover:text-brand-deep data-[active=true]:bg-brand-gradient data-[active=true]:text-white data-[active=true]:shadow-brand"
-              >
-                {ICONS[n.icon]}
-                <span>{SHORT[n.href] ?? n.label}</span>
+            {sections.map((s) => (
+              <Link key={s.key} href={s.href} data-active={sectionActive(s)} title={s.label} className={`${railClass} text-ink-faint`}>
+                {icon(s.icon)}<span>{s.label}</span>
+              </Link>
+            ))}
+            <div className="my-1.5 h-px w-8 shrink-0 bg-line/50" aria-hidden />
+            {more.map((m) => (
+              <Link key={m.href} href={m.href} data-active={memberActive(m)} title={m.label} className={`${railClass} text-ink-faint/70`}>
+                {icon(m.icon)}<span>{SHORT[m.href] ?? m.label}</span>
               </Link>
             ))}
           </nav>
@@ -145,7 +150,7 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
         </div>
       </header>
 
-      {/* ── Desktop bottom Ask bar (thumb/pointer reach, chat-style) ─── */}
+      {/* ── Desktop bottom Ask bar ──────────────────────────────────── */}
       <div className="no-print pointer-events-none fixed bottom-0 right-0 z-30 hidden lg:left-20 lg:block">
         <div className="pointer-events-auto mx-auto max-w-2xl px-8 pb-5">
           <AskTrigger className="w-full shadow-glow" />
@@ -155,64 +160,47 @@ export function AppNav({ items, email, admin, workspaces = [], activeWorkspaceId
       {/* ── Mobile top bar ──────────────────────────────────────────── */}
       <header className="no-print sticky top-0 z-40 lg:hidden">
         <div className="glass-strong flex items-center gap-2 px-4 py-2.5">
-          <Link href="/" aria-label="home" className="shrink-0"><RaniMark size={26} /></Link>
+          <Link href={home} aria-label="home" className="shrink-0"><RaniMark size={26} /></Link>
           {workspaces.length > 0 && <WorkspaceSwitcher workspaces={workspaces} activeId={activeWorkspaceId} />}
           <span className="ml-auto"><CreditsPill credits={credits} /></span>
         </div>
       </header>
 
-      {/* ── Mobile bottom stack: Ask bar (thumb-reachable) + tab bar ── */}
+      {/* ── Mobile bottom: Ask bar + four-surface tab bar + More ────── */}
       <div className="no-print fixed inset-x-0 bottom-0 z-40 lg:hidden">
         <div className="mx-auto max-w-xl px-3 pb-1.5">
           <AskTrigger className="w-full shadow-glow" />
         </div>
         <nav>
-        <div className="glass-strong mx-auto flex max-w-xl items-center justify-around gap-0.5 px-1.5 py-1.5">
-          {items.slice(0, 5).map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              aria-label={n.label}
-              data-active={isActive(n)}
-              className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
-            >
-              <span className={isActive(n) ? "text-brand" : ""}>{ICONS[n.icon]}</span>
-              <span>{SHORT[n.href] ?? n.label.split(" ")[0]}</span>
-            </Link>
-          ))}
-          {items.length > 5 && (
-            <button
-              onClick={() => setMenu(true)}
-              aria-label="More"
-              aria-expanded={menu}
-              data-active={items.slice(5).some(isActive)}
-              className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep"
-            >
-              <span className={items.slice(5).some(isActive) ? "text-brand" : ""}>{ICONS.more}</span>
+          <div className="glass-strong mx-auto flex max-w-xl items-center justify-around gap-0.5 px-1.5 py-1.5">
+            {sections.map((s) => (
+              <Link key={s.key} href={s.href} aria-label={s.label} data-active={sectionActive(s)}
+                className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep">
+                <span className={sectionActive(s) ? "text-brand" : ""}>{icon(s.icon)}</span>
+                <span>{s.label}</span>
+              </Link>
+            ))}
+            <button onClick={() => setMenu(true)} aria-label="More" aria-expanded={menu} data-active={moreActive}
+              className="flex flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 text-[10px] font-medium text-ink-faint data-[active=true]:text-brand-deep">
+              <span className={moreActive ? "text-brand" : ""}>{ICONS.more}</span>
               <span>More</span>
             </button>
-          )}
-        </div>
+          </div>
         </nav>
       </div>
 
-      {/* ── Mobile "More" sheet — everything not in the bottom 5 ─────── */}
+      {/* ── Mobile "More" sheet ─────────────────────────────────────── */}
       {menu && (
         <div className="no-print fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="More menu">
           <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setMenu(false)} />
           <div className="absolute inset-x-0 bottom-0 animate-fade-in rounded-t-3xl glass-strong p-4 pb-6">
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-line" aria-hidden />
             <div className="grid grid-cols-3 gap-2">
-              {items.slice(5).map((n) => (
-                <Link
-                  key={n.href}
-                  href={n.href}
-                  onClick={() => setMenu(false)}
-                  data-active={isActive(n)}
-                  className="flex flex-col items-center gap-1.5 rounded-2xl bg-white/50 p-3 text-[11px] font-medium text-ink-soft transition-colors hover:bg-brand-soft data-[active=true]:bg-brand-gradient data-[active=true]:text-white"
-                >
-                  {ICONS[n.icon]}
-                  <span className="text-center leading-tight">{n.label}</span>
+              {more.map((m) => (
+                <Link key={m.href} href={m.href} onClick={() => setMenu(false)} data-active={memberActive(m)}
+                  className="flex flex-col items-center gap-1.5 rounded-2xl bg-white/50 p-3 text-[11px] font-medium text-ink-soft transition-colors hover:bg-brand-soft data-[active=true]:bg-brand-gradient data-[active=true]:text-white">
+                  {icon(m.icon)}
+                  <span className="text-center leading-tight">{m.label}</span>
                 </Link>
               ))}
             </div>
@@ -240,19 +228,10 @@ export function MarketingBar({ signedOut = true }: { signedOut?: boolean }) {
       <div className="glass-strong mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <Link href="/" aria-label="Ask Rani Insights home"><RaniWordmark /></Link>
         <div className="flex items-center gap-2">
-          <a
-            href="https://askrani.ai"
-            className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline"
-          >
-            ← Ask Rani
-          </a>
-          <Link href="/onboarding" className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline">
-            Try it free
-          </Link>
+          <a href="https://askrani.ai" className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline">← Ask Rani</a>
+          <Link href="/onboarding" className="hidden rounded-full px-4 py-2 text-sm font-medium text-ink-soft hover:text-brand sm:inline">Try it free</Link>
           {signedOut && (
-            <Link href="/login" className="btn btn-primary px-5 py-2">
-              Sign in <RaniMark size={16} />
-            </Link>
+            <Link href="/login" className="btn btn-primary px-5 py-2">Sign in <RaniMark size={16} /></Link>
           )}
         </div>
       </div>

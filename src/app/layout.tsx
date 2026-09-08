@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import { getUser, isSuperAdmin, ensureOrgForUser } from "@/lib/auth";
-import { AppNav, MarketingBar, type NavItem } from "@/components/AppNav";
+import { AppNav, MarketingBar } from "@/components/AppNav";
+import { SectionTabs } from "@/components/SectionTabs";
+import { SECTIONS_NORMAL, MORE_NORMAL, SECTIONS_AREA, MORE_AREA } from "@/components/nav-config";
 import { RaniWordmark } from "@/components/RaniSpinner";
 import { listWorkspaces, activeWorkspace } from "@/lib/workspace";
 import { isAreaMode } from "@/lib/subject";
@@ -19,46 +21,6 @@ export const metadata: Metadata = {
     "Understand what local businesses are doing, why it matters, and what to do next. By Ask Rani.",
 };
 
-// Order matters: the first five are the mobile bottom-tab primaries (the daily
-// owner surfaces); the rest live under "More" on mobile / lower on the desktop rail.
-const NAV: NavItem[] = [
-  { href: "/", label: "This Week", icon: "today", match: ["/edge"] },
-  { href: "/scorecard", label: "You vs Market", icon: "scorecard" },
-  { href: "/plan", label: "Your plan", icon: "plan" },
-  { href: "/you", label: "You", icon: "you" },
-  { href: "/content", label: "Content", icon: "content" },
-  { href: "/winning", label: "What's winning", icon: "winning" },
-  { href: "/market", label: "Market", icon: "market", match: ["/feed", "/offers", "/competitors"] },
-  { href: "/findability", label: "Findability", icon: "findability" },
-  { href: "/rivals", label: "Rival openings", icon: "rivals" },
-  { href: "/inspiration", label: "Inspiration", icon: "inspiration" },
-  { href: "/festivals", label: "Festivals", icon: "festival" },
-  { href: "/assistant", label: "Ask Rani", icon: "assistant" },
-  { href: "/around", label: "Around me", icon: "around" },
-  { href: "/channels", label: "Channels", icon: "channels" },
-  { href: "/reports", label: "Report", icon: "report" },
-  { href: "/billing", label: "Billing", icon: "billing" },
-  // ── ways to start watching something new (on-ramps) ──
-  { href: "/explore", label: "Watch a market", icon: "explore" },
-  { href: "/onboarding", label: "New workspace", icon: "add" },
-];
-
-// Area workspaces have no "you" — market surfaces only, and Your Edge reframes to
-// "the opening here". Market is home; the you-relative tabs (This Week, You) drop.
-const AREA_NAV: NavItem[] = [
-  { href: "/market", label: "Market", icon: "market", match: ["/", "/feed", "/offers", "/competitors"] },
-  { href: "/edge", label: "The opening", icon: "today" },
-  { href: "/winning", label: "What's winning", icon: "winning" },
-  { href: "/assistant", label: "Ask Rani", icon: "assistant" },
-  { href: "/around", label: "Around", icon: "around" },
-  { href: "/content", label: "Content", icon: "content" },
-  { href: "/reports", label: "Report", icon: "report" },
-  { href: "/billing", label: "Billing", icon: "billing" },
-  // ── ways to start watching something new (on-ramps) ──
-  { href: "/explore", label: "Watch a market", icon: "explore" },
-  { href: "/onboarding", label: "New workspace", icon: "add" },
-];
-
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getUser();
   const admin = isSuperAdmin(user);
@@ -70,8 +32,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   // Area workspaces get a market-only nav (no "you" surfaces).
   const areaMode = active?.status === "ok" && isAreaMode(active.workspace);
-  const baseNav = areaMode ? AREA_NAV : NAV;
-  const nav = admin ? [...baseNav, { href: "/admin", label: "Admin", icon: "admin" as const }] : baseNav;
+  const sections = areaMode ? SECTIONS_AREA : SECTIONS_NORMAL;
+  const more = admin
+    ? [...(areaMode ? MORE_AREA : MORE_NORMAL), { href: "/admin", label: "Admin", icon: "admin" }]
+    : (areaMode ? MORE_AREA : MORE_NORMAL);
+  const home = sections[0].href;
 
   // remaining monitoring credits (shown in the nav)
   let credits: number | null = null;
@@ -98,7 +63,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           // ── Signed-in app shell: glass sidebar + content ──────────────
           <div className="min-h-screen">
             <AppNav
-              items={nav}
+              sections={sections}
+              more={more}
+              home={home}
               email={user.email || (user.phone ? `+${user.phone}` : "Account")}
               admin={admin}
               workspaces={workspaces.map((w) => ({ id: w.id, name: w.name, vertical: w.vertical }))}
@@ -109,6 +76,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <CreditBanner />
               {activeId && <CollectionBanner workspaceId={activeId} />}
               <EphemeralBanner />
+              <SectionTabs sections={sections} />
               {children}
             </main>
           </div>
