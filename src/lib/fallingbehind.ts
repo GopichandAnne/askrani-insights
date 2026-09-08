@@ -2,7 +2,8 @@ import { staleCached } from "@/lib/staleCache";
 import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { isLlmConfigured } from "@/lib/extraction/llm";
 import { resolveConcepts } from "@/lib/conceptcanon";
-import type { WorkspaceRow } from "@/lib/workspace";
+import { resolveEntities, resolveNameToBrand, type EntityRecord } from "@/lib/entityresolve";
+import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
  * "You're falling behind" — the V2 defensive opportunity detector (P0.5).
@@ -29,12 +30,6 @@ import type { WorkspaceRow } from "@/lib/workspace";
  */
 
 const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
-
-// Crude entity normalizer — merges "Shah Ghouse Biryani | Austin" → "shah ghouse
-// biryani", branch/city suffixes and punctuation. A Fellegi-Sunter resolver with
-// geo/phone/address splitters is the eventual upgrade; this held on real data.
-const canonRival = (s: string) =>
-  (s || "").toLowerCase().replace(/\s*[|\-–]\s*(austin|cedar park|round rock|texas|tx)\b.*$/i, "").replace(/[^a-z0-9]+/g, " ").trim();
 
 export type FbTag = "behind" | "demand_moving" | "demand_gap";
 export interface FallingBehindFlag {
@@ -75,7 +70,22 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   if (!ev.length) return empty(at);
   if (!isLlmConfigured()) return empty(at);
 
-  const targetKey = canonRival(ws.name);
+  // Fellegi-Sunter entity resolution over the workspace's businesses (name + phone
+  // + geo + address), so rival names dedupe to canonical BRANDS — branches of one
+  // chain count once, and geo/phone splitters keep distinct look-alikes separate.
+  const ids = await workspaceBusinessIds(ws, supabase);
+  const { data: bizRows } = await supabase.from("business").select("id, canonical_name, phone, attributes").in("id", ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"]);
+  const records: EntityRecord[] = ((bizRows ?? []) as { id: string; canonical_name: string; phone: string | null; attributes: Record<string, unknown> | null }[])
+    .map((b) => ({ id: b.id, name: b.canonical_name, phone: b.phone, address: (b.attributes?.address as string) ?? null, geo: (b.attributes?.geo as { lat: number; lng: number }) ?? null }));
+  const res = resolveEntities(records);
+  const brandCache = new Map<string, string>();
+  const brandOfRival = (name: string): string => {
+    const key = clean(name).toLowerCase();
+    let b = brandCache.get(key); if (b == null) { b = resolveNameToBrand(name, res); brandCache.set(key, b); }
+    return b;
+  };
+  const targetKey = brandOfRival(ws.name);
+
   // Resolve every event onto the cached canonical concept map (stable run-to-run;
   // LLM only for unseen surface forms). A mature map keeps working even if the LLM
   // is down; only a cold cache + failed LLM yields nothing.
@@ -93,7 +103,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
       if (m.demand_type === "offering") { a.offeringDates.add(r.first_seen_on); if (a.demandEx.length < 2) a.demandEx.push(clean(r.title)); }
       else if (m.demand_type === "quality") a.qualityHits++;
     } else {
-      const ck = canonRival(r.rival || "");
+      const ck = r.rival ? brandOfRival(r.rival) : "";
       if (ck && ck !== targetKey && !a.rivals.has(ck)) a.rivals.set(ck, clean(r.rival || ""));
       if (a.supplyEx.length < 2) a.supplyEx.push(`${clean(r.rival || "A rival")}: ${clean(r.title).slice(0, 70)}`);
     }
