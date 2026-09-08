@@ -3,7 +3,8 @@ import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { isLlmConfigured } from "@/lib/extraction/llm";
 import { resolveConcepts } from "@/lib/conceptcanon";
 import { resolveEntities, resolveNameToBrand, type EntityRecord } from "@/lib/entityresolve";
-import { rivalStandingCaps } from "@/lib/standingoffers";
+import { rivalStandingCaps, targetStandingCaps } from "@/lib/standingoffers";
+import { conceptKey } from "@/lib/conceptcanon";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -98,15 +99,27 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const capItems: { businessId: string; text: string }[] = [];
   for (const [bid, caps] of Object.entries(capsByBiz)) for (const cap of caps) capItems.push({ businessId: bid, text: cap });
 
-  // Resolve events + standing capabilities onto the shared cached concept map
-  // (stable run-to-run; LLM only for unseen surface forms). A mature map keeps
-  // working even if the LLM is down; only a cold cache + failed LLM yields nothing.
+  // The TARGET's own standing offerings (menu-derived) + owner-confirmed "we do
+  // this" (goals.weOffer) → the target-gap: concepts the owner ALREADY offers are
+  // not openings, so we exclude them from flags (and this gates invest-stakes).
+  const targetCaps = await targetStandingCaps(ws, { id: ids.targetId, name: ws.name }, supabase);
+  const weOffer = (((ws.goals as { weOffer?: string[] } | null)?.weOffer) ?? []).map((s) => conceptKey(String(s)));
+
+  // Resolve events + rival standing caps + target caps onto the shared cached
+  // concept map (stable run-to-run; LLM only for unseen surface forms). A mature
+  // map keeps working even if the LLM is down; only a cold cache + failed yields nothing.
   const { tags, llmFailed } = await resolveConcepts(ws, [
     ...ev.map((r) => ({ kind: r.kind, text: clean(r.title) })),
     ...capItems.map((c) => ({ kind: "offering", text: c.text })),
+    ...targetCaps.map((t) => ({ kind: "offering", text: t })),
   ]);
   if (llmFailed && tags.every((t) => !t)) return empty(at, true);
   const capOffset = ev.length;
+  const targetOffset = ev.length + capItems.length;
+
+  // concept keys the owner already offers → excluded from flags
+  const targetConcepts = new Set<string>(weOffer);
+  targetCaps.forEach((_, j) => { const m = tags[targetOffset + j]; if (m?.concept) targetConcepts.add(conceptKey(m.concept)); });
 
   interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string> }
   const byC = new Map<string, Agg>();
@@ -144,6 +157,8 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const flags: FallingBehindFlag[] = [];
   const qualityBars: string[] = [];
   for (const a of byC.values()) {
+    // the owner already offers this (menu-derived or owner-confirmed) → not an opening
+    if (targetConcepts.has(conceptKey(a.concept))) continue;
     const rivalCount = a.rivals.size;
     const promoCount = a.promo.size;
     const demandDates = a.offeringDates.size;
