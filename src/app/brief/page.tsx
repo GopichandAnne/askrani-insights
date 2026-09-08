@@ -1,10 +1,12 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { getOrMakeAttention } from "@/lib/attention";
+import { buildScorecard } from "@/lib/scorecard";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { collectionActive } from "@/lib/jobs";
 import { AttentionView } from "@/components/AttentionView";
 import { AttentionControls } from "@/components/AttentionControls";
+import { BriefPosition } from "@/components/BriefPosition";
 import { RecentAlerts } from "@/components/RecentAlerts";
 import type { AlertLogEntry } from "@/lib/alerts";
 
@@ -24,7 +26,13 @@ export default async function BriefPage() {
   const ws = state.workspace;
   if (await collectionActive(ws.id)) return <CollectingScreen workspaceId={ws.id} title="Today" />;
 
-  const board = await getOrMakeAttention({ id: ws.id, name: ws.name, vertical: ws.vertical });
+  // Attention board (decisions) + competitive scorecard (where you stand), in
+  // parallel. The scorecard is a self-healing read; if it throws we still render
+  // the decision surface — the brief must never fail on the position strip.
+  const [board, sc] = await Promise.all([
+    getOrMakeAttention({ id: ws.id, name: ws.name, vertical: ws.vertical }),
+    buildScorecard(ws).catch(() => null),
+  ]);
   const alertLog = ((ws.goals as Record<string, unknown> | null)?.alertLog as AlertLogEntry[]) ?? [];
 
   return (
@@ -34,6 +42,7 @@ export default async function BriefPage() {
         <h1 className="mt-1 font-display text-3xl font-extrabold tracking-tight">{board.headline}</h1>
         <p className="mt-1 text-sm text-ink-soft">{board.statusLine}</p>
       </div>
+      {sc && <BriefPosition sc={sc} />}
       <RecentAlerts log={alertLog} />
       <AttentionControls mode={board.mode} objective={board.objective} />
       <AttentionView board={board} />
