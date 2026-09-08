@@ -1,4 +1,5 @@
 import { comparablePrice, kviPriceGaps, type KviObservation, type KviGap } from "@/lib/priceunits";
+import { unitBasisKey, type UnitBasis } from "@/lib/unitbasis";
 
 /**
  * Grocery G1 wired to the RIGHT price store — goals.flyerDeals (competitor) +
@@ -20,20 +21,12 @@ export interface FlyerDeal { item?: string; price?: string; rival?: string }
 
 const parsePrice = (s?: string): number | null => { const m = String(s ?? "").match(/(\d+(?:\.\d{1,2})?)/); return m ? Number(m[1]) : null; };
 
-// price-per-unit if a size parses, else a raw per-listing price
-function priced(item: string, priceStr?: string): { perBase: number; family: KviObservation["family"] } | null {
-  const amount = parsePrice(priceStr);
-  if (amount == null || amount <= 0) return null;
-  const bare = item.match(/\b(lbs?|oz|gallons?|gal|quarts?|qt|pints?|pt|l|ml|dozen|dz|ct|each|ea)\s*$/i);
-  const cp = comparablePrice(item, { amount, unit: bare ? `per ${bare[1]}` : undefined });
-  if (cp) return { perBase: cp.perBase, family: cp.family };
-  return { perBase: amount, family: "listing" };
-}
-
 /**
- * Compute KVI price gaps from flyer deals. `canon` collapses item-name variants to
- * a shared label (pass the workspace's priceCanon-backed normalizer); `resolveBrand`
- * maps a rival NAME to its canonical brand (entity resolution, so branches dedupe).
+ * Compute KVI price gaps from flyer deals. `canon` collapses item-name variants to a
+ * shared label (priceCanon-backed); `resolveBrand` maps a rival NAME to its canonical
+ * brand (entity resolution, so branches dedupe); `basisMap` (keyed by canonical item)
+ * is the inferred unit basis so an implicit price is read on the RIGHT basis (produce
+ * per lb, herbs per bunch, eggs per dozen) and only compared to the same basis.
  */
 export function flyerKviGaps(
   myDeals: FlyerDeal[],
@@ -41,14 +34,25 @@ export function flyerKviGaps(
   targetBrand: string,
   canon: (item: string) => string,
   resolveBrand: (rivalName: string) => string,
+  basisMap: Record<string, UnitBasis>,
   opts: { minOverPct?: number; minRivals?: number } = {},
 ): KviGap[] {
   const obs: KviObservation[] = [];
   const add = (item: string, priceStr: string | undefined, brand: string) => {
     const it = String(item ?? "").trim(); if (!it || !brand) return;
-    const p = priced(it, priceStr); if (!p) return;
+    const amount = parsePrice(priceStr); if (amount == null || amount <= 0) return;
     const c = canon(it); if (c.length < 3) return;
-    obs.push({ brand, canon: c, perBase: p.perBase, family: p.family });
+
+    // 1) explicit pack/size in the name → true price-per-unit
+    const bare = it.match(/\b(lbs?|oz|gallons?|gal|quarts?|qt|pints?|pt|l|ml|dozen|dz|ct|each|ea)\s*$/i);
+    const cp = comparablePrice(it, { amount, unit: bare ? `per ${bare[1]}` : undefined });
+    if (cp) { obs.push({ brand, canon: c, perBase: cp.perBase, family: cp.family }); return; }
+
+    // 2) no explicit unit → interpret on the item's INFERRED basis (produce=weight/lb,
+    //    herb=count/bunch, eggs=count/dozen…). Same canon+family → same basis, so raw
+    //    prices are comparable; unknown item → "listing" fallback.
+    const bs = basisMap[unitBasisKey(c)];
+    obs.push({ brand, canon: c, perBase: amount, family: bs ? bs.family : "listing" });
   };
   for (const d of myDeals ?? []) add(d.item ?? "", d.price, targetBrand);
   for (const d of compDeals ?? []) { const b = resolveBrand(d.rival ?? ""); if (b && b !== targetBrand) add(d.item ?? "", d.price, b); }

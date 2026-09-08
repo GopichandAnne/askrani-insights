@@ -8,6 +8,7 @@ import { conceptKey } from "@/lib/conceptcanon";
 import { readSaturation } from "@/lib/saturation";
 import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "@/lib/groceryflags";
 import { flyerKviGaps, type FlyerDeal } from "@/lib/kviprices";
+import { inferUnitBasis } from "@/lib/unitbasis";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -242,7 +243,11 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     const priceCanonMap = ((goals.priceCanon as { canon?: Record<string, string> } | null)?.canon ?? {}) as Record<string, string>;
     const normItem = (s: string) => s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\b\d+(?:\.\d+)?\s*(?:lbs?|oz|kg|g|l|ml|ct|pk|pack|gallon|quart|pint|dozen)\b/g, " ").replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
     const canonItem = (it: string) => { const n = normItem(it); return priceCanonMap[n] ?? n; };
-    const priceGaps = flyerKviGaps(myDeals, compDeals, targetKey, canonItem, brandOfRival, { minOverPct: 12, minRivals: 2 });
+    // infer how each staple is sold (produce→lb, herb→bunch, eggs→dozen…) so implicit
+    // flyer prices compare on the right basis, cached on goals.unitBasis
+    const distinctItems = [...new Set([...myDeals, ...compDeals].map((d) => canonItem(String(d.item ?? ""))).filter((c) => c.length >= 3))];
+    const basisMap = await inferUnitBasis(ws, distinctItems);
+    const priceGaps = flyerKviGaps(myDeals, compDeals, targetKey, canonItem, brandOfRival, basisMap, { minOverPct: 12, minRivals: 2 });
     for (const g of priceGaps.slice(0, 4)) {
       const per = g.family === "weight" ? "/lb" : g.family === "volume" ? "/floz" : g.family === "count" ? "/ct" : "";
       flags.push({
