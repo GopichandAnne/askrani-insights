@@ -6,6 +6,7 @@ import { resolveEntities, resolveNameToBrand, type EntityRecord } from "@/lib/en
 import { rivalStandingCaps, targetStandingCaps } from "@/lib/standingoffers";
 import { conceptKey } from "@/lib/conceptcanon";
 import { readSaturation } from "@/lib/saturation";
+import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "@/lib/groceryflags";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -161,6 +162,16 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   for (const bid of Object.keys(capsByBiz)) { const b = res.brandOf.get(bid); if (b) menuCoveredBrands.add(b); }
   const totalBrands = competitorBrands.size, coveredN = menuCoveredBrands.size;
 
+  // Grocery branch (G0): grocery competition is products/prices/festivals, not
+  // restaurant-style "moves" — so classify grocery concepts and keep only real
+  // grocery openings (festival basket / trending / distinctive specialty / category
+  // promotion), dropping commodity staples ("2 rivals sell flour") and facility
+  // gripes that otherwise flood the feed as junk flags.
+  const grocery = ws.vertical === "grocery";
+  const gKind: Record<string, GroceryKind> = grocery
+    ? await classifyGroceryConcepts(ws, [...byC.values()].map((a) => a.concept))
+    : {};
+
   const flags: FallingBehindFlag[] = [];
   const qualityBars: string[] = [];
   for (const a of byC.values()) {
@@ -177,7 +188,20 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     const openBoost = Math.round((1 - sat.saturation) * 28); // the more open the gap, the better the opening
 
     let tag: FbTag | null = null, score = 0;
-    if (demandDates >= 1) {
+    if (grocery) {
+      // grocery: keep only recognized grocery opportunities; drop commodity/facility/other
+      const kind = gKind[conceptKey(a.concept)] ?? "other";
+      if (!GROCERY_OPPORTUNITY.has(kind)) continue;
+      if (rivalCount < 1 && demandDates < 1) continue;      // need some observed evidence
+      if (kind === "trending") {
+        // an emerging product few carry yet = early-mover opening
+        tag = "demand_moving"; score = 110 + demandDates * 6 + rivalCount * 4 + openBoost;
+      } else {
+        // festival basket / specialty / category promotion you're not matching
+        if (sat.state === "saturated") continue;            // everyone does it → table stakes
+        tag = "behind"; score = 68 + promoCount * 10 + rivalCount * 4 + Math.floor(openBoost / 2) + (kind === "festival" ? 12 : 0);
+      }
+    } else if (demandDates >= 1) {
       if (sat.state === "early" || sat.state === "contested") {
         // demand + an OPEN supply gap (few/some rivals) = the prime opening
         tag = "demand_moving"; score = 120 + demandDates * 6 + (recurring ? 20 : 0) + openBoost + promoCount * 8;
