@@ -5,6 +5,7 @@ import { resolveConcepts } from "@/lib/conceptcanon";
 import { resolveEntities, resolveNameToBrand, type EntityRecord } from "@/lib/entityresolve";
 import { rivalStandingCaps, targetStandingCaps } from "@/lib/standingoffers";
 import { conceptKey } from "@/lib/conceptcanon";
+import { readSaturation } from "@/lib/saturation";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -153,7 +154,13 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     if (a.supplyEx.length < 2) a.supplyEx.push(`${nameById.get(c.businessId) || "A rival"} (on menu): ${c.text}`);
   });
 
-  const C = Math.max(1, competitors.length);
+  // Brand-level totals + menu coverage for the saturation estimator.
+  const competitorBrands = new Set<string>();
+  for (const c of competitors) { const b = res.brandOf.get(c.id); if (b) competitorBrands.add(b); }
+  const menuCoveredBrands = new Set<string>();
+  for (const bid of Object.keys(capsByBiz)) { const b = res.brandOf.get(bid); if (b) menuCoveredBrands.add(b); }
+  const totalBrands = competitorBrands.size, coveredN = menuCoveredBrands.size;
+
   const flags: FallingBehindFlag[] = [];
   const qualityBars: string[] = [];
   for (const a of byC.values()) {
@@ -163,25 +170,30 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     const promoCount = a.promo.size;
     const demandDates = a.offeringDates.size;
     const recurring = demandDates >= 2;
-    const saturation = rivalCount / C;
     // execution-only concept (gripes, nobody "supplies" it, no offering wish) → a bar, not an opportunity
     if (a.qualityHits && !demandDates && !rivalCount) { qualityBars.push(a.concept); continue; }
 
+    const sat = readSaturation(rivalCount, totalBrands, coveredN);
+    const openBoost = Math.round((1 - sat.saturation) * 28); // the more open the gap, the better the opening
+
     let tag: FbTag | null = null, score = 0;
-    if (demandDates >= 1 && rivalCount >= 1) {
-      // demand + supply, and STILL a gap while supply is not yet saturated = the real opening
-      tag = "demand_moving"; score = 120 + demandDates * 6 + (recurring ? 20 : 0) + Math.round((1 - saturation) * 24) + promoCount * 8;
-    } else if (promoCount >= 2) {
-      // rivals actively PROMOTING it (not just listing it) → a real "you're behind"
-      tag = "behind"; score = 80 + promoCount * 12;
-    } else if (rivalCount >= 2) {
-      // supply is menu-only (nobody promoting, no demand). Near-universal = table stakes
-      // you almost certainly also offer (target offerings unknown) → drop, don't flag.
-      if (saturation >= 0.5) continue;
-      tag = "behind"; score = 38 + rivalCount * 5;
-    } else if (recurring) {
-      tag = "demand_gap"; score = 45 + demandDates * 6;
+    if (demandDates >= 1) {
+      if (sat.state === "early" || sat.state === "contested") {
+        // demand + an OPEN supply gap (few/some rivals) = the prime opening
+        tag = "demand_moving"; score = 120 + demandDates * 6 + (recurring ? 20 : 0) + openBoost + promoCount * 8;
+      } else if (sat.state === "saturated") {
+        // demand but nearly everyone already does it → table stakes, weak (owner likely has it too)
+        tag = "behind"; score = 50 + promoCount * 8;
+      } else if (recurring) {
+        // demand but no observed adopter: a real virgin gap only if we can SEE menus (visible);
+        // otherwise it's an observation gap → keep as a low-confidence early signal.
+        tag = "demand_gap"; score = sat.visible ? 58 + demandDates * 6 : 30 + demandDates * 4;
+      }
+    } else if (promoCount >= 2 && sat.state !== "saturated") {
+      // no demand, but rivals are actively PROMOTING it and the gap isn't saturated → you're behind
+      tag = "behind"; score = 80 + promoCount * 12 + Math.floor(openBoost / 2);
     }
+    // everything else (menu-only, saturated-no-demand, unknown-visibility supply) → drop: not a real opening
     if (!tag) continue;
 
     flags.push({
