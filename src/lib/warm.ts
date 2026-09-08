@@ -17,6 +17,7 @@ import { generateContentPlan, contentPlanIsGood } from "@/lib/contentplan";
 import { generateRivalReviews, rivalReviewsIsGood } from "@/lib/rivalreviews";
 import { generateInspiration, inspirationIsGood } from "@/lib/inspiration";
 import { generateFestivalPlanner, festivalIsGood } from "@/lib/festival";
+import { generateFallingBehind, fallingBehindIsGood } from "@/lib/fallingbehind";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -81,6 +82,11 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // Context-aware festival planner — reads offerings, so runs after the offering-
     // grounded pillars; picks the upcoming occasions that fit + drafts campaigns.
     { key: "festival", run: () => generateFestivalPlanner(row, db), good: (v) => festivalIsGood(v) && !v?.failed },
+    // "You're falling behind" — the V2 defensive detector. Reads the ACCUMULATED
+    // market_event log (this cycle's artifacts are banked later by recordMarketEvents
+    // in the tail, so the freshest cycle lands on the next warm — fine for a detector
+    // over multi-week history). One LLM pass; self-heals on failure.
+    { key: "fallingBehind", run: () => generateFallingBehind(row, db), good: (v) => fallingBehindIsGood(v) && !v?.failed },
     // NOTE (2026-09-04): the dental priceAnchors + insurance pillars were removed
     // here when dental's special surfaces were disabled (see collect.ts
     // DIRECTORY_VERTICALS). buildPriceAnchors/buildInsuranceCompare still exist and
