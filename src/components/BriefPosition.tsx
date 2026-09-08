@@ -30,9 +30,9 @@ export function BriefPosition({ sc }: { sc: Scorecard }) {
       </div>
 
       <div className="grid gap-5 sm:grid-cols-[190px_1fr] sm:items-center">
-        {/* rings hero — condensed */}
+        {/* rings hero — condensed; a touch larger on phones where it's the lead element */}
         <div>
-          <div className="mx-auto max-w-[190px]"><ScoreRings metrics={sc.metrics} score={you} /></div>
+          <div className="mx-auto w-full max-w-[220px] sm:max-w-[190px]"><ScoreRings metrics={sc.metrics} score={you} /></div>
           <p className="mt-1 text-center font-mono text-[10px] font-bold uppercase tracking-wider text-ink-faint">
             Position score / 100{rank ? ` · #${rank} of ${total}` : ""}
           </p>
