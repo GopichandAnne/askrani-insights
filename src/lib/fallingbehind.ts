@@ -1,6 +1,7 @@
 import { staleCached } from "@/lib/staleCache";
 import { createClient, type RlsClient } from "@/lib/supabase/server";
-import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { isLlmConfigured } from "@/lib/extraction/llm";
+import { resolveConcepts } from "@/lib/conceptcanon";
 import type { WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -20,10 +21,11 @@ import type { WorkspaceRow } from "@/lib/workspace";
  *      biased LOW, so an offering-demand item with few/no observed rivals stays
  *      LOW-confidence ("early signal"), never an invest-stakes flag.
  *
- * Grounded strictly in market_event — no new scrape, one LLM call. Hardened like
- * the other pillars: a failed AI read is flagged (never cached final) so it
- * self-heals next refresh. Concept clustering re-runs per regeneration for now
- * (a cached canonical map, priceCanon-style, is a documented follow-up).
+ * Grounded strictly in market_event — no new scrape. Concept assignment goes
+ * through the FROZEN, additive concept-canon map (lib/conceptcanon.ts), so the
+ * output is stable run-to-run and the LLM only fires for surface forms it hasn't
+ * seen. Hardened like the other pillars: a failed AI read is flagged (never cached
+ * final) so it self-heals next refresh.
  */
 
 const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
@@ -56,31 +58,6 @@ export interface FallingBehind {
   failed?: boolean;
 }
 
-const SCHEMA = {
-  type: "object", additionalProperties: false,
-  properties: {
-    map: {
-      type: "array",
-      description: "One entry per numbered input line.",
-      items: {
-        type: "object", additionalProperties: false,
-        properties: {
-          i: { type: "integer", description: "the line number" },
-          concept: { type: "string", description: "action-granularity concept label, REUSED across demand and supply lines that describe the same owner move" },
-          demand_type: { type: "string", enum: ["offering", "quality", "other", "na"], description: "for [demand] lines only; 'na' for every non-demand line" },
-        },
-        required: ["i", "concept", "demand_type"],
-      },
-    },
-  },
-  required: ["map"],
-};
-
-const SYSTEM =
-  "You canonicalize local-business market signals for a competitive detector. For EACH numbered input line return one `concept` and a `demand_type`.\n" +
-  "CONCEPT = action granularity: the level where one concept = one distinct move an owner could make. Use the SAME concept label whether a phrase came from a customer review (demand) or a competitor promo (supply), so they can be matched. Examples that MUST share a concept: 'Catering for large events' + 'party trays 20% off' + 'large-group combo' => 'catering / large-group orders'; '$0 delivery fee first order' + 'wish delivery were free' => 'free/discounted delivery'; 'new veg thali' + 'wish they had more vegetarian' => 'vegetarian options'. Group festival/occasion specials as 'festival / occasion special'; individual grocery produce items as 'grocery produce assortment'.\n" +
-  "demand_type (ONLY for [demand] lines; use 'na' otherwise): 'offering' = a wish for a PRODUCT/SERVICE/FORMAT/CUISINE/OCCASION the business could ADD or promote (an opportunity); 'quality' = a complaint about EXECUTION of existing operations (cleanliness, speed, consistency, spice accuracy, freshness, service — NOT an opportunity); 'other' = neither.";
-
 const KINDS = ["deal", "demand", "winning_format", "breakout"] as const;
 const empty = (at: string, failed = false): FallingBehind => ({ flags: [], qualityBars: [], eventsRead: 0, at, empty: true, ...(failed ? { failed: true } : {}) });
 
@@ -98,24 +75,17 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   if (!ev.length) return empty(at);
   if (!isLlmConfigured()) return empty(at);
 
-  const items = ev.map((r, i) => `${i}\t[${r.kind}] ${clean(r.title).slice(0, 120)}`).join("\n");
   const targetKey = canonRival(ws.name);
-
-  let map: { i: number; concept: string; demand_type: string }[];
-  try {
-    const call = () => getLlm().callStructured<{ map: typeof map }>({ system: SYSTEM, text: items, schema: SCHEMA, tier: "classify", maxTokens: 8000 });
-    const { data } = await call().catch(() => call());
-    map = Array.isArray(data.map) ? data.map : [];
-    if (!map.length) return empty(at, true);
-  } catch {
-    return empty(at, true);
-  }
-  const info = new Map(map.map((m) => [m.i, m]));
+  // Resolve every event onto the cached canonical concept map (stable run-to-run;
+  // LLM only for unseen surface forms). A mature map keeps working even if the LLM
+  // is down; only a cold cache + failed LLM yields nothing.
+  const { tags, llmFailed } = await resolveConcepts(ws, ev.map((r) => ({ kind: r.kind, text: clean(r.title) })));
+  if (llmFailed && tags.every((t) => !t)) return empty(at, true);
 
   interface Agg { concept: string; rivals: Map<string, string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string> }
   const byC = new Map<string, Agg>();
   ev.forEach((r, i) => {
-    const m = info.get(i); if (!m?.concept) return;
+    const m = tags[i]; if (!m?.concept) return;
     const key = m.concept.toLowerCase().trim(); if (!key) return;
     const a: Agg = byC.get(key) ?? { concept: clean(m.concept), rivals: new Map<string, string>(), offeringDates: new Set<string>(), qualityHits: 0, supplyEx: [], demandEx: [], dates: new Set<string>() };
     a.dates.add(r.first_seen_on);
