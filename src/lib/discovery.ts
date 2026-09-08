@@ -710,9 +710,17 @@ export async function autoDiscoverCompetitors(
     if (c.name.toLowerCase().trim() === targetName) return true;
     return c.distanceKm != null && c.distanceKm < 0.3 && nameRelevance(target.name, c.name) >= 0.55;
   };
+  // A local competitor must be LOCATABLE and inside the trade area. Intent/text
+  // searches (and famous-name chains) can surface a same-cuisine business with no
+  // geo, or a global namesake in another city/country (e.g. "Indian Coffee House
+  // Jabalpur/Dubai" for an Austin restaurant) — those come back with no distanceKm
+  // (or a huge one) and would otherwise get the neutral 0.5 geo-overlap and slip in.
+  // Drop anything unlocatable or beyond a sane radius so a namesake never enters.
+  const MAX_COMPETITOR_KM = Math.max(baseRadius * 2.5, 20);
   const filtered = cands
     .filter((c) => !isSelf(c))
-    .filter((c) => inferVertical(c as any) === vertical);
+    .filter((c) => inferVertical(c as any) === vertical)
+    .filter((c) => c.distanceKm != null && c.distanceKm <= MAX_COMPETITOR_KM);
 
   // A coarse scale hint from normalized review-volume (prominence is relative to the
   // biggest in this candidate set), so the ranker can spot likely large/chain rivals.
