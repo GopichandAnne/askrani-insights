@@ -13,7 +13,7 @@
  * coverage exists.
  */
 
-export type UnitFamily = "weight" | "volume" | "count";
+export type UnitFamily = "weight" | "volume" | "count" | "listing"; // "listing" = raw per-listing price (flyer items with no explicit unit — produce specials, per-lb by convention)
 export interface PerUnitPrice { perBase: number; family: UnitFamily; baseUnit: "lb" | "floz" | "ct" }
 
 // factor = how many BASE units in one of this unit (base: weight→lb, volume→floz, count→ct)

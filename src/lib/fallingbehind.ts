@@ -7,6 +7,7 @@ import { rivalStandingCaps, targetStandingCaps } from "@/lib/standingoffers";
 import { conceptKey } from "@/lib/conceptcanon";
 import { readSaturation } from "@/lib/saturation";
 import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "@/lib/groceryflags";
+import { flyerKviGaps, type FlyerDeal } from "@/lib/kviprices";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -228,6 +229,32 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
       seen: [...a.dates].sort(), score,
     });
   }
+
+  // Grocery G1: KVI price-position from flyer prices (goals.flyerDeals / myFlyerDeals) —
+  // "you're priced above market on <staple>". Uses priceCanon to collapse item-name
+  // variants and entity resolution to dedupe rival brands; only fires on the target's
+  // own price + >=2 rival brands + a material over-market gap. Never excluded by
+  // target-gap (a price gap on something you DO sell is the whole point).
+  if (grocery) {
+    const goals = (ws.goals as Record<string, unknown> | null) ?? {};
+    const myDeals = ((goals.myFlyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
+    const compDeals = ((goals.flyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
+    const priceCanonMap = ((goals.priceCanon as { canon?: Record<string, string> } | null)?.canon ?? {}) as Record<string, string>;
+    const normItem = (s: string) => s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\b\d+(?:\.\d+)?\s*(?:lbs?|oz|kg|g|l|ml|ct|pk|pack|gallon|quart|pint|dozen)\b/g, " ").replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+    const canonItem = (it: string) => { const n = normItem(it); return priceCanonMap[n] ?? n; };
+    const priceGaps = flyerKviGaps(myDeals, compDeals, targetKey, canonItem, brandOfRival, { minOverPct: 12, minRivals: 2 });
+    for (const g of priceGaps.slice(0, 4)) {
+      const per = g.family === "weight" ? "/lb" : g.family === "volume" ? "/floz" : g.family === "count" ? "/ct" : "";
+      flags.push({
+        concept: `Priced above market: ${g.canon}`, tag: "behind",
+        rivals: g.rivalsCheaper.slice(0, 6), rivalCount: g.rivalsCheaper.length,
+        demandDates: 0, recurring: false,
+        evidence: `You ~$${g.targetPerBase.toFixed(2)}${per} vs market ~$${g.marketMedian.toFixed(2)}${per} (+${g.overPct}%); cheapest ${g.cheapest.brand} $${g.cheapest.perBase.toFixed(2)}${per}`,
+        seen: [], score: 100 + Math.min(60, g.overPct),
+      });
+    }
+  }
+
   flags.sort((x, y) => y.score - x.score);
   if (!flags.length && !qualityBars.length) return empty(at);
   return { flags: flags.slice(0, 8), qualityBars: qualityBars.slice(0, 12), eventsRead: ev.length, at };
