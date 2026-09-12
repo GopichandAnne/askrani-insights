@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { vocabGet, vocabPut } from "@/lib/vocab";
 
 /**
  * Price CANONICALIZATION — the intelligent half of the like-for-like Price score.
@@ -10,7 +11,15 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
  * synonyms, other languages, spelling/portion variants — into a canonical label,
  * vertical-aware and with NO hardcoded vocab. The scorecard then builds its shared
  * basket on these canonical labels, so the comparison is truly apples-to-apples.
- * Cached on workspace.goals.priceCanon; refreshed weekly from the warm hook.
+ *
+ * GLOBAL per-vertical: name→label equivalences (beetroot=chukandar=beets) are a
+ * stable fact of the VERTICAL, identical for every business in it, so they live in
+ * the shared vocabulary (concept_vocab, kind='price_canon'). buildPriceCanon seeds
+ * from the global map first, groups the rest, writes new equivalences back to the
+ * global table (frozen/additive), and caches the MERGED map on goals.priceCanon so
+ * a new store inherits the vertical's accumulated synonyms and its consumers
+ * (scorecard, fallingbehind) read it unchanged. Degrades to per-workspace when
+ * migration 0076 isn't applied. Refreshed weekly from the warm hook.
  */
 
 export interface PriceCanon { canon: Record<string, string>; at: string; groups: number }
@@ -68,7 +77,21 @@ export async function buildPriceCanon(ws: WorkspaceRow, db?: any): Promise<Price
     (byName.get(key) ?? byName.set(key, new Set()).get(key)!).add((o as any).business_id);
   }
   const names = [...byName.entries()].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0])).slice(0, 150).map(([n]) => n);
-  if (names.length < 4) return empty;
+
+  // GLOBAL seed: pull the vertical's already-known equivalences for these items, so a
+  // new store inherits them and we only spend the LLM on genuinely new groupings.
+  const globalCanon = await vocabGet<{ label: string }>(ws.vertical, "price_canon", names.map(norm));
+  const canon: Record<string, string> = {};
+  for (const [k, v] of Object.entries(globalCanon)) if (v?.label) canon[k] = v.label;
+
+  const seededReport = async (groups: number): Promise<PriceCanon> => {
+    const report: PriceCanon = { canon, at, groups };
+    const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+    await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), priceCanon: report } }).eq("id", ws.id);
+    return report;
+  };
+
+  if (names.length < 4) return Object.keys(canon).length ? seededReport(0) : empty;
 
   const nameSet = new Set(names);
   try {
@@ -85,7 +108,7 @@ export async function buildPriceCanon(ws: WorkspaceRow, db?: any): Promise<Price
     const SIZE_WORDS = "family|party|catering|large|small|half|full|jumbo|mini|regular|combo|meal|platter|bulk|dozen|packs?|trays?|serves?|servings?|people|persons?|value|deluxe|premium";
     const base = (s: string) => norm(s).replace(new RegExp(`\\b(${SIZE_WORDS})\\b`, "g"), " ").replace(/\s+/g, " ").trim();
     const hasSize = (s: string) => new RegExp(`\\b(${SIZE_WORDS})\\b`).test(s);
-    const canon: Record<string, string> = {};
+    const newLocal: Record<string, string> = {}; // equivalences learned this run (to push global)
     let groups = 0;
     for (const g of data?.groups ?? []) {
       const members = (g.members ?? []).map((m) => String(m ?? "").toLowerCase().trim()).filter((m) => nameSet.has(m));
@@ -96,13 +119,20 @@ export async function buildPriceCanon(ws: WorkspaceRow, db?: any): Promise<Price
       const label = norm(String(g.canonical ?? "")) || norm(clean[0]);
       if (!label) continue;
       groups++;
-      for (const m of clean) canon[norm(m)] = label; // map each clean variant's normed name → shared canonical
+      for (const m of clean) {
+        const k = norm(m);
+        if (!(k in canon)) { canon[k] = label; newLocal[k] = label; } // global (frozen) wins; only add unseen
+      }
     }
-    const report: PriceCanon = { canon, at, groups };
-    const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-    await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), priceCanon: report } }).eq("id", ws.id);
-    return report;
+    // write the new equivalences to the GLOBAL vocabulary (frozen/additive); the
+    // per-workspace goals.priceCanon still gets the MERGED map so consumers are
+    // unchanged and a table-absent (pre-0076) run just skips the global write.
+    if (Object.keys(newLocal).length) {
+      await vocabPut(ws.vertical, "price_canon", Object.fromEntries(Object.entries(newLocal).map(([k, label]) => [k, { label }])));
+    }
+    return seededReport(groups);
   } catch {
-    return empty;
+    // LLM down: still cache whatever the global seed gave us (better than empty).
+    return Object.keys(canon).length ? seededReport(0) : empty;
   }
 }

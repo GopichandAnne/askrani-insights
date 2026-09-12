@@ -11,7 +11,7 @@ import { createServiceClient } from "@/lib/supabase/server";
  * then upgrades to global automatically.
  */
 
-export type VocabKind = "concept" | "grocery_kind" | "unit_basis";
+export type VocabKind = "concept" | "grocery_kind" | "unit_basis" | "price_canon";
 
 let _available: boolean | null = null; // cached per process; a one-time existence probe
 
