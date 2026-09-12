@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { conceptKey } from "@/lib/conceptcanon";
+import { vocabGet, vocabPut } from "@/lib/vocab";
 import type { WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -19,8 +20,12 @@ import type { WorkspaceRow } from "@/lib/workspace";
  *   • facility    — a store-operations/quality gripe (cleanliness, restrooms…) → DROP
  *   • other       — DROP
  *
- * Cached FROZEN + additive on goals.groceryKinds (same discipline as the concept
- * map): a concept's kind is stable run-to-run; the LLM only classifies new ones.
+ * Cached FROZEN + additive (same discipline as the concept map): a concept's kind
+ * is stable run-to-run; the LLM only classifies new ones. Reads the GLOBAL
+ * per-vertical vocabulary first (concept_vocab, kind='grocery_kind') then this
+ * workspace's own goals.groceryKinds as fallback, and writes new kinds to the
+ * global table when available — so a NEW grocery store inherits the vertical's
+ * established kinds instantly. Degrades to per-workspace when 0076 isn't applied.
  */
 
 export type GroceryKind = "festival" | "trending" | "specialty" | "promotion" | "commodity" | "facility" | "other";
@@ -62,12 +67,16 @@ const SYSTEM =
  * Returns a map keyed by conceptKey(concept). LLM only for unseen concepts.
  */
 export async function classifyGroceryConcepts(ws: WorkspaceRow, concepts: string[]): Promise<Record<string, GroceryKind>> {
-  const cached = ((ws.goals as { groceryKinds?: GroceryKinds } | null)?.groceryKinds?.assign ?? {}) as Record<string, GroceryKind>;
+  const wsCached = ((ws.goals as { groceryKinds?: GroceryKinds } | null)?.groceryKinds?.assign ?? {}) as Record<string, GroceryKind>;
   const out: Record<string, GroceryKind> = {};
+  const keys = concepts.map(conceptKey).filter(Boolean);
+  const globalCached = await vocabGet<{ kind: GroceryKind }>(ws.vertical, "grocery_kind", keys);
+  const lookup = (k: string): GroceryKind | undefined => globalCached[k]?.kind ?? wsCached[k];
   const need = new Map<string, string>(); // conceptKey → display concept (unique)
   for (const c of concepts) {
     const k = conceptKey(c); if (!k) continue;
-    if (cached[k]) { out[k] = cached[k]; continue; }
+    const hit = lookup(k);
+    if (hit) { out[k] = hit; continue; }
     if (!need.has(k)) need.set(k, c);
   }
   if (!need.size || !isLlmConfigured()) return out;
@@ -82,11 +91,16 @@ export async function classifyGroceryConcepts(ws: WorkspaceRow, concepts: string
     const newAssign: Record<string, GroceryKind> = {};
     list.forEach(([key], i) => { const kind = byI.get(i); if (kind) { out[key] = kind; newAssign[key] = kind; } });
     if (Object.keys(newAssign).length) {
-      const svc = createServiceClient();
-      const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-      const prev = ((cur?.goals as { groceryKinds?: GroceryKinds } | null)?.groceryKinds?.assign ?? {}) as Record<string, GroceryKind>;
-      const merged = { ...newAssign, ...prev }; // existing wins → frozen
-      await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), groceryKinds: { assign: merged, at: new Date().toISOString() } } }).eq("id", ws.id);
+      // persist to the GLOBAL vocabulary first (frozen); fall back to per-workspace
+      // goals when the table isn't available (pre-migration = current behavior).
+      const globalEntries = Object.fromEntries(Object.entries(newAssign).map(([k, v]) => [k, { kind: v }]));
+      if (!(await vocabPut(ws.vertical, "grocery_kind", globalEntries))) {
+        const svc = createServiceClient();
+        const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+        const prev = ((cur?.goals as { groceryKinds?: GroceryKinds } | null)?.groceryKinds?.assign ?? {}) as Record<string, GroceryKind>;
+        const merged = { ...newAssign, ...prev }; // existing wins → frozen
+        await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), groceryKinds: { assign: merged, at: new Date().toISOString() } } }).eq("id", ws.id);
+      }
     }
   } catch { /* leave unclassified → treated as 'other' (dropped) by caller */ }
   return out;

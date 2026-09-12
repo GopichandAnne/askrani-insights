@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { vocabGet, vocabPut } from "@/lib/vocab";
 import type { WorkspaceRow } from "@/lib/workspace";
 import type { UnitFamily } from "@/lib/priceunits";
 
@@ -12,8 +13,12 @@ import type { UnitFamily } from "@/lib/priceunits";
  * and only ever compared to the same basis (a per-bunch price never vs a per-lb one),
  * and an implicit produce price unifies with an explicit-pack listing of the same item.
  *
- * Cached FROZEN + additive on goals.unitBasis, keyed by canonical item (a basis is a
- * stable property of the product), so the LLM only classifies items it hasn't seen.
+ * Cached FROZEN + additive, keyed by canonical item (a basis is a stable property of
+ * the product), so the LLM only classifies items it hasn't seen. Reads the GLOBAL
+ * per-vertical vocabulary first (concept_vocab, kind='unit_basis') then this
+ * workspace's own goals.unitBasis as fallback, and writes new bases to the global
+ * table when available — so a NEW grocery store inherits established bases instantly.
+ * Degrades to per-workspace when migration 0076 isn't applied.
  */
 
 export interface UnitBasis { family: UnitFamily; basis: string }
@@ -52,12 +57,16 @@ const SYSTEM =
  * keyed by canonical item. LLM only for items not already cached.
  */
 export async function inferUnitBasis(ws: WorkspaceRow, canonItems: string[]): Promise<Record<string, UnitBasis>> {
-  const cached = ((ws.goals as { unitBasis?: UnitBasisCache } | null)?.unitBasis?.assign ?? {}) as Record<string, UnitBasis>;
+  const wsCached = ((ws.goals as { unitBasis?: UnitBasisCache } | null)?.unitBasis?.assign ?? {}) as Record<string, UnitBasis>;
   const out: Record<string, UnitBasis> = {};
+  const keys = canonItems.map(keyOf).filter(Boolean);
+  const globalCached = await vocabGet<UnitBasis>(ws.vertical, "unit_basis", keys);
+  const lookup = (k: string): UnitBasis | undefined => globalCached[k] ?? wsCached[k];
   const need = new Map<string, string>(); // key → display item
   for (const it of canonItems) {
     const k = keyOf(it); if (!k) continue;
-    if (cached[k]) { out[k] = cached[k]; continue; }
+    const hit = lookup(k);
+    if (hit) { out[k] = hit; continue; }
     if (!need.has(k)) need.set(k, it);
   }
   if (!need.size || !isLlmConfigured()) return out;
@@ -85,11 +94,15 @@ export async function inferUnitBasis(ws: WorkspaceRow, canonItems: string[]): Pr
   }
   if (Object.keys(newAssign).length) {
     try {
-      const svc = createServiceClient();
-      const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
-      const prev = ((cur?.goals as { unitBasis?: UnitBasisCache } | null)?.unitBasis?.assign ?? {}) as Record<string, UnitBasis>;
-      const merged = { ...newAssign, ...prev }; // existing wins → frozen
-      await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), unitBasis: { assign: merged, at: new Date().toISOString() } } }).eq("id", ws.id);
+      // persist to the GLOBAL vocabulary first (frozen); fall back to per-workspace
+      // goals when the table isn't available (pre-migration = current behavior).
+      if (!(await vocabPut(ws.vertical, "unit_basis", newAssign))) {
+        const svc = createServiceClient();
+        const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+        const prev = ((cur?.goals as { unitBasis?: UnitBasisCache } | null)?.unitBasis?.assign ?? {}) as Record<string, UnitBasis>;
+        const merged = { ...newAssign, ...prev }; // existing wins → frozen
+        await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), unitBasis: { assign: merged, at: new Date().toISOString() } } }).eq("id", ws.id);
+      }
     } catch { /* tags resolved this run; persistence retries next run */ }
   }
   return out;
