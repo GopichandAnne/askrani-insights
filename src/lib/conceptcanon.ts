@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { vocabGet, vocabPut, vocabConceptSample } from "@/lib/vocab";
 import type { WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -77,15 +78,23 @@ export interface ResolveResult { tags: (ConceptAssign | null)[]; llmFailed: bool
  * cached items still resolve, so a mature map keeps working with no model calls.
  */
 export async function resolveConcepts(ws: WorkspaceRow, items: { kind: string; text: string }[]): Promise<ResolveResult> {
-  const cached = ((ws.goals as { conceptCanon?: ConceptCanon } | null)?.conceptCanon?.assign ?? {}) as Record<string, ConceptAssign>;
+  const wsCached = ((ws.goals as { conceptCanon?: ConceptCanon } | null)?.conceptCanon?.assign ?? {}) as Record<string, ConceptAssign>;
   const tags: (ConceptAssign | null)[] = new Array(items.length).fill(null);
+
+  // GLOBAL per-vertical vocabulary first (shared across every workspace of the
+  // vertical), then this workspace's own map as fallback — so a NEW business
+  // inherits the vertical's established concepts instead of bootstrapping from
+  // zero, and nothing breaks before migration 0076 lands.
+  const allKeys = items.map((it) => conceptKey(it.text)).filter(Boolean);
+  const globalCached = await vocabGet<ConceptAssign>(ws.vertical, "concept", allKeys);
+  const lookup = (key: string): ConceptAssign | undefined => globalCached[key] ?? wsCached[key];
 
   // group the unmapped by their normalized key so identical forms cost one LLM line
   const uniq = new Map<string, { kind: string; text: string; idxs: number[] }>();
   items.forEach((it, i) => {
     const key = conceptKey(it.text);
     if (!key) return;
-    const hit = cached[key];
+    const hit = lookup(key);
     if (hit) { tags[i] = hit; return; }
     const e = uniq.get(key) ?? { kind: it.kind, text: it.text, idxs: [] };
     e.idxs.push(i); uniq.set(key, e);
@@ -100,9 +109,15 @@ export async function resolveConcepts(ws: WorkspaceRow, items: { kind: string; t
   // and it fails identically forever (a doom loop). Batching lets the map build
   // incrementally: a failed batch loses only itself, and each run advances the
   // cache so the next run resolves more. The running vocab carries new concepts
-  // forward so later batches reuse earlier ones (clustering stays consistent).
+  // forward so later batches reuse earlier ones (clustering stays consistent);
+  // it is seeded from the GLOBAL vertical vocabulary so new forms cluster onto the
+  // shared set instead of re-inventing near-duplicates per workspace.
   const BATCH = 100;
-  const runningVocab = new Set(Object.values(cached).map((c) => c.concept));
+  const runningVocab = new Set<string>([
+    ...(await vocabConceptSample(ws.vertical)),
+    ...Object.values(globalCached).map((c) => c.concept),
+    ...Object.values(wsCached).map((c) => c.concept),
+  ]);
   const newAssign: Record<string, ConceptAssign> = {};
   let anyBatchOk = false;
 
