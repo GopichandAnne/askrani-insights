@@ -9,6 +9,7 @@ import { readSaturation } from "@/lib/saturation";
 import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "@/lib/groceryflags";
 import { flyerKviGaps, flyerKviLeads, type FlyerDeal } from "@/lib/kviprices";
 import { inferUnitBasis } from "@/lib/unitbasis";
+import { nearestOccasion } from "@/lib/occasions";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -57,6 +58,7 @@ export interface FallingBehind {
   priceWins: PriceWin[];  // grocery: staples you beat the market on (a promotable strength)
   eventsRead: number;
   at: string;
+  freshestAt?: string | null; // most recent day any tracked signal was seen (data-freshness)
   empty?: boolean;
   failed?: boolean;
 }
@@ -68,13 +70,18 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const at = new Date().toISOString();
   const supabase = db ?? (await createClient());
 
+  const now = new Date();
+  const FEST_WINDOW = 75; // days: a festival is an opportunity only within this run-up
   const { data: rows } = await supabase
     .from("market_event")
-    .select("kind,rival,title,first_seen_on")
+    .select("kind,rival,title,first_seen_on,last_seen_on")
     .eq("workspace_id", ws.id)
     .limit(600);
-  const ev = ((rows ?? []) as { kind: string; rival: string | null; title: string; first_seen_on: string }[])
+  const ev = ((rows ?? []) as { kind: string; rival: string | null; title: string; first_seen_on: string; last_seen_on: string | null }[])
     .filter((r) => (KINDS as readonly string[]).includes(r.kind) && clean(r.title));
+  // Data freshness — the most recent day any tracked signal was seen. Surfaced so a
+  // brief/card can say "as of X" rather than implying everything is live today.
+  const freshestAt = ev.map((r) => r.last_seen_on || r.first_seen_on).filter(Boolean).sort().slice(-1)[0] ?? null;
   if (!ev.length) return empty(at);
   if (!isLlmConfigured()) return empty(at);
 
@@ -127,19 +134,28 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const targetConcepts = new Set<string>(weOffer);
   targetCaps.forEach((_, j) => { const m = tags[targetOffset + j]; if (m?.concept) targetConcepts.add(conceptKey(m.concept)); });
 
-  interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string> }
+  interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string>; occ: { name: string; inDays: number } | null }
   const byC = new Map<string, Agg>();
   const getAgg = (concept: string): Agg => {
     const key = concept.toLowerCase().trim();
     let a = byC.get(key);
-    if (!a) { a = { concept: clean(concept), rivals: new Map(), promo: new Set(), standing: new Set(), offeringDates: new Set(), qualityHits: 0, supplyEx: [], demandEx: [], dates: new Set() }; byC.set(key, a); }
+    if (!a) { a = { concept: clean(concept), rivals: new Map(), promo: new Set(), standing: new Set(), offeringDates: new Set(), qualityHits: 0, supplyEx: [], demandEx: [], dates: new Set(), occ: null }; byC.set(key, a); }
     return a;
+  };
+  // Resolve a festival/occasion mention to the SOONEST still-relevant occurrence for
+  // this aggregate — so a concept fed by a past Rakhi promo AND an upcoming Ganesh one
+  // reframes to Ganesh, and one fed only by past occasions ends up with occ=null (dropped).
+  const noteOccasion = (a: Agg, title: string) => {
+    const o = nearestOccasion(title, now);
+    if (!o || o.inDays < -3 || o.inDays > FEST_WINDOW) return; // past or too far out
+    if (!a.occ || o.inDays < a.occ.inDays) a.occ = { name: o.name, inDays: o.inDays };
   };
 
   ev.forEach((r, i) => {
     const m = tags[i]; if (!m?.concept) return;
     const a = getAgg(m.concept);
     a.dates.add(r.first_seen_on);
+    noteOccasion(a, clean(r.title));
     if (r.kind === "demand") {
       if (m.demand_type === "offering") { a.offeringDates.add(r.first_seen_on); if (a.demandEx.length < 2) a.demandEx.push(clean(r.title)); }
       else if (m.demand_type === "quality") a.qualityHits++;
@@ -189,6 +205,12 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     // execution-only concept (gripes, nobody "supplies" it, no offering wish) → a bar, not an opportunity
     if (a.qualityHits && !demandDates && !rivalCount) { qualityBars.push(a.concept); continue; }
 
+    // Festival/occasion opportunities live only in the RUN-UP. If this concept is
+    // festival-shaped, require a still-upcoming occasion — a past one (a Rakhi promo
+    // in September) is noise, not an opening. Kept ones are reframed + urgency-ranked below.
+    const isFestival = grocery ? (gKind[conceptKey(a.concept)] === "festival") : /festiv|occasion/i.test(a.concept);
+    if (isFestival && !a.occ) continue;
+
     const sat = readSaturation(rivalCount, totalBrands, coveredN);
     const openBoost = Math.round((1 - sat.saturation) * 28); // the more open the gap, the better the opening
 
@@ -225,8 +247,17 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     // everything else (menu-only, saturated-no-demand, unknown-visibility supply) → drop: not a real opening
     if (!tag) continue;
 
+    // Reframe a festival flag to the specific upcoming occasion + timing, and rank it
+    // by urgency (sooner = higher) so the run-up you can still act on floats up.
+    let displayConcept = a.concept;
+    if (isFestival && a.occ) {
+      const dd = a.occ.inDays;
+      displayConcept = `${a.occ.name} — ${dd <= 0 ? "happening now" : `in ${dd} day${dd === 1 ? "" : "s"}`}`;
+      score += Math.max(0, 34 - Math.floor(dd / 2));
+    }
+
     flags.push({
-      concept: a.concept, tag,
+      concept: displayConcept, tag,
       rivals: [...a.rivals.values()].slice(0, 6), rivalCount,
       demandDates, recurring,
       evidence: a.supplyEx[0], demandExample: a.demandEx[0],
@@ -268,8 +299,8 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   }
 
   flags.sort((x, y) => y.score - x.score);
-  if (!flags.length && !qualityBars.length && !priceWins.length) return empty(at);
-  return { flags: flags.slice(0, 8), qualityBars: qualityBars.slice(0, 12), priceWins, eventsRead: ev.length, at };
+  if (!flags.length && !qualityBars.length && !priceWins.length) return { ...empty(at), freshestAt };
+  return { flags: flags.slice(0, 8), qualityBars: qualityBars.slice(0, 12), priceWins, eventsRead: ev.length, at, freshestAt };
 }
 
 export function fallingBehindIsGood(r: FallingBehind): boolean {

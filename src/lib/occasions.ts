@@ -65,6 +65,13 @@ const FIXED: { name: string; audience: string; note: string; dates: Record<numbe
   { name: "Eid al-Fitr", audience: "Muslim", note: "celebration feasts, sweets, gifting — end of Ramadan, a peak day", dates: { 2026: "2026-03-20", 2027: "2027-03-10", 2028: "2028-02-27" } },
   { name: "Vaisakhi", audience: "South Asian (Punjabi/Sikh)", note: "harvest festival, community meals & sweets", dates: { 2026: "2026-04-14", 2027: "2027-04-14", 2028: "2028-04-13" } },
   { name: "Eid al-Adha", audience: "Muslim", note: "feast of sacrifice, meat & catering, family gatherings", dates: { 2026: "2026-05-27", 2027: "2027-05-16", 2028: "2028-05-05" } },
+  // South Asian lunar festivals prominent for desi grocers/restaurants — the run-up
+  // is the selling window, so they must be dated (approximate to the day; verify + refresh yearly).
+  { name: "Raksha Bandhan", audience: "South Asian", note: "rakhi + sweet boxes, sibling gifting", dates: { 2026: "2026-08-28", 2027: "2027-08-17", 2028: "2028-09-04" } },
+  { name: "Janmashtami", audience: "South Asian", note: "sweets & fasting-friendly foods, temple crowds", dates: { 2026: "2026-09-04", 2027: "2027-08-25", 2028: "2028-09-12" } },
+  { name: "Ganesh Chaturthi", audience: "South Asian", note: "modak & sweets, pooja essentials, idol pre-booking", dates: { 2026: "2026-09-14", 2027: "2027-09-04", 2028: "2028-08-23" } },
+  { name: "Onam", audience: "South Asian (Malayali)", note: "sadhya feast, banana-leaf meals, produce", dates: { 2026: "2026-08-26", 2027: "2027-09-14", 2028: "2028-09-01" } },
+  { name: "Pongal / Makar Sankranti", audience: "South Asian", note: "harvest festival, sugarcane/jaggery, festive groceries", dates: { 2026: "2026-01-14", 2027: "2027-01-14", 2028: "2028-01-15" } },
   { name: "Rosh Hashanah", audience: "Jewish", note: "new-year sweets (apples & honey), holiday meals", dates: { 2026: "2026-09-11", 2027: "2027-10-01", 2028: "2028-09-20" } },
   { name: "Navratri / Dussehra", audience: "South Asian", note: "nine nights of festivities, fasting-friendly + sweets", dates: { 2026: "2026-10-20", 2027: "2027-10-09", 2028: "2028-09-27" } },
   { name: "Diwali", audience: "South Asian", note: "sweets, gift boxes & hampers, festive shopping — the biggest season", dates: { 2026: "2026-11-08", 2027: "2027-10-29", 2028: "2028-10-17" } },
@@ -107,4 +114,62 @@ export function upcomingOccasionsAll(now = new Date(), windowDays = 75, limit = 
  *  timing for diaspora businesses too. `vertical` reserved (callers pass it). */
 export function upcomingOccasions(_vertical?: string, now = new Date(), windowDays = 45, limit = 4): Occasion[] {
   return upcomingOccasionsAll(now, windowDays, limit);
+}
+
+// Free-text mentions ("Celebrate Rakhi…", "welcome Ganpati Bappa home") → the
+// calendar occasion they name. Aliases map to the exact names above.
+const ALIASES: [RegExp, string][] = [
+  [/raksha|rakhi/, "Raksha Bandhan"],
+  [/ganesh|ganpati|ganapati|vinayaka|ganesha/, "Ganesh Chaturthi"],
+  [/janmashtami|gokulashtami|krishna janm/, "Janmashtami"],
+  [/\bonam\b|thiruvonam/, "Onam"],
+  [/pongal|makar sankranti|sankranti|uttarayan/, "Pongal / Makar Sankranti"],
+  [/diwali|deepavali|dipavali/, "Diwali"],
+  [/navratri|navaratri|dussehra|dasara|durga puja/, "Navratri / Dussehra"],
+  [/\bholi\b/, "Holi"],
+  [/vaisakhi|baisakhi/, "Vaisakhi"],
+  [/ramadan|ramzan/, "Ramadan (begins)"],
+  [/eid al-?adha|bakr[ae]?id|qurbani/, "Eid al-Adha"],
+  [/eid al-?fitr|\beid\b/, "Eid al-Fitr"],
+  [/lunar new year|chinese new year/, "Lunar New Year"],
+  [/christmas|xmas/, "Christmas"],
+  [/thanksgiving/, "Thanksgiving"],
+  [/halloween/, "Halloween"],
+  [/independence day|4th of july|july 4|fourth of july/, "Independence Day"],
+  [/easter/, "Easter"],
+  [/valentine/, "Valentine"],
+  [/mother'?s day/, "Mother's Day"],
+  [/father'?s day/, "Father's Day"],
+  [/new year/, "New Year's Day"],
+];
+
+function dateFor(name: string, y: number): Date | null {
+  const o = OCCASIONS.find((x) => x.name === name);
+  if (o) return o.gen(y);
+  const f = FIXED.find((x) => x.name === name);
+  if (f && f.dates[y]) { const [Y, M, D] = f.dates[y].split("-").map(Number); return new Date(Date.UTC(Y, M - 1, D)); }
+  if (name === "Valentine") return d(y, 1, 14);
+  return null;
+}
+
+/**
+ * Resolve a festival mention in free text to the calendar occurrence NEAREST today,
+ * with a SIGNED day count (negative = already passed, positive = upcoming). Lets a
+ * detector tell "Rakhi is over" (drop) from "Ganesh is in 2 days" (act). Null if the
+ * text names no occasion we know.
+ */
+export function nearestOccasion(text: string, now = new Date()): { name: string; inDays: number; whenISO: string } | null {
+  const lc = String(text || "").toLowerCase();
+  let name: string | null = null;
+  for (const [re, n] of ALIASES) if (re.test(lc)) { name = n; break; }
+  if (!name) return null;
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const yr = now.getUTCFullYear();
+  let best: { inDays: number; iso: string } | null = null;
+  for (const y of [yr - 1, yr, yr + 1, yr + 2]) {
+    const dt = dateFor(name, y); if (!dt) continue;
+    const inDays = Math.round((Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()) - today) / 86400000);
+    if (best === null || Math.abs(inDays) < Math.abs(best.inDays)) best = { inDays, iso: dt.toISOString().slice(0, 10) };
+  }
+  return best ? { name, inDays: best.inDays, whenISO: best.iso } : null;
 }
