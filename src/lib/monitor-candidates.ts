@@ -36,6 +36,11 @@ export const DEFAULT_CANDIDATES: Candidate[] = [
   { id: "r14", nm: "Aroma — Indian Food Park", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "aromaaustin" } },
   { id: "r15", nm: "Bayleaf Indian Restaurant & Bar", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "bayleaf_indian_restaurant_bar" } },
   { id: "r16", nm: "Asiana Indian Cuisine", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "asiana_indian_cuisine" } },
+  { id: "r17", nm: "Indian Cravings", vertical: "restaurant", area: "Pflugerville", web: "https://indiancravings.com", place: true, handles: {} },
+  { id: "r18", nm: "Curry Kitchen", vertical: "restaurant", area: "Pflugerville", web: "https://currykitchen.org", place: true, handles: {}, note: "Indian & Nepalese." },
+  { id: "r19", nm: "Mama Bros", vertical: "restaurant", area: "Pflugerville", web: "https://mamabros.com", place: true, handles: {} },
+  { id: "r20", nm: "Namaste Dine In", vertical: "restaurant", area: "Georgetown", web: "https://namastedineintx.com", place: true, handles: {}, note: "Indian & Nepalese, 103 N Austin Ave." },
+  { id: "r21", nm: "Dosthi Bandi", vertical: "restaurant", area: "Georgetown", web: "https://dosthibandi.site", place: true, handles: {}, note: "Indian street-food truck at 7500 TX-29, Georgetown." },
   { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", place: true, handles: { instagram: "manpasand_atx" }, note: "Their CURRENT account is @manpasand_atx — older @manpasandaustin / @manpasand_austin are stale. Confirm via Open ↗.", facets: ["grocery", "restaurant"] },
   { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin" }, note: "Location account — @desibrothersaustin (the DFW Facebook was dropped as wrong-metro).", facets: ["grocery", "restaurant"] },
   { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", place: true, handles: { instagram: "indiabazaaraustin" }, facets: ["grocery", "restaurant"] },
@@ -48,6 +53,8 @@ export const DEFAULT_CANDIDATES: Candidate[] = [
   { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Cedar Park", web: "https://www.patelbros.com", place: true, handles: { instagram: "patelbrotherscedarpark" }, note: "Open in Cedar Park (2026). Confirm @patelbrotherscedarpark via Open ↗." },
   { id: "g11", nm: "Khana Khazana ATX", vertical: "grocery", area: "Cedar Park", place: true, handles: { instagram: "khana_khazana_atx" } },
   { id: "g12", nm: "MTM Indian Grocery & Fish", vertical: "grocery", area: "Austin", place: true, handles: { instagram: "mtmindianfoodsinc" } },
+  { id: "g13", nm: "Desi Dukaan", vertical: "grocery", area: "Pflugerville", place: true, handles: {}, note: "New (opened Aug 2026) — Stone Hill Town Center; grocery + prepared food.", facets: ["grocery", "restaurant"] },
+  { id: "g14", nm: "DB World Foods", vertical: "grocery", area: "Leander", web: "https://dbworldfoods.com", place: true, handles: {}, note: "Indian & international grocer, Ronald Reagan Blvd (Leander)." },
 ];
 
 const cleanHandle = (s: unknown) => String(s ?? "").replace(/^@+/, "").replace(/[^A-Za-z0-9_.\-]/g, "").slice(0, 40);
