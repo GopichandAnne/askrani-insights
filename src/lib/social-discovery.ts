@@ -221,12 +221,13 @@ function locationTokens(city: string): string[] {
   return [...set];
 }
 
-/** Does this scraped profile PROVE it belongs to this business? The gold signal is
- *  the profile linking the business's own website; naming its street address (+city)
- *  is just as strong; name + city (or the local abbreviation, e.g. "atx") together
- *  is acceptable. Name ALONE is NOT enough — that's exactly what let unrelated
- *  same-name accounts through. Returns a strength (3 = website/address proof, 2 =
- *  name+city) so the caller can rank multiple proven accounts, or 0 when unproven. */
+/** Does this scraped profile PROVE it's THIS business at THIS location? Two things
+ *  must BOTH hold: it's the right brand (links the business website, or matches the
+ *  name) AND it's this location (names this city / local abbrev like "atx", or the
+ *  branch street address). Requiring location is essential: a chain's every store
+ *  links the SAME corporate site and shares the name, so brand proof ALONE confirms
+ *  the wrong-city store (e.g. Patel Brothers Ashburn VA, or a national account).
+ *  Returns strength (3 = address, or website+city; 2 = name+city) or 0 = unproven. */
 function identityMatch(id: ProfileIdentity, name: string, ctx: VerifyCtx): number {
   const flat = (s?: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const dom = domainOf(ctx.website);
@@ -237,9 +238,11 @@ function identityMatch(id: ProfileIdentity, name: string, ctx: VerifyCtx): numbe
   const nameHit = nameTokens(name).some((t) => hay.includes(t));
   const streetNo = (ctx.address ?? "").match(/\b\d{3,6}\b/)?.[0];
   const addrHit = !!streetNo && cityHit && hay.includes(streetNo);
-  if (domainMatch || addrHit) return 3; // proven THIS business
-  if (nameHit && cityHit) return 2;      // name + city (incl. local abbrev) — acceptable
-  return 0;                              // unproven → never attach
+  const isBrand = domainMatch || nameHit;
+  if (!isBrand) return 0;        // not even the right brand
+  if (addrHit) return 3;         // exact branch street address + city — unambiguous
+  if (!cityHit) return 0;        // right brand, WRONG/unknown location → reject (chain trap)
+  return domainMatch ? 3 : 2;    // brand + this city
 }
 
 /** Confirm candidate accounts via Apify (the only channel that can actually load
