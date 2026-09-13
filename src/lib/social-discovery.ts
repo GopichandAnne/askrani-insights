@@ -141,7 +141,12 @@ async function pickIntelligent(
   try {
     const list = cands.map((c, i) => `${i + 1}. @${c.handle} — ${c.context || "(no description)"}`).join("\n");
     const { data } = await getLlm().callStructured<{ handle: string; confident: boolean }>({
-      system: `You verify the official ${platform} account for a SPECIFIC local business location. Many brands and franchises run a SEPARATE account per city/metro (e.g. "@indiabazaraustin" vs "@indiabazardfw", or a page whose bio says "Frisco, TX"). Your job: pick the account for THIS business in THIS city, and REJECT any account whose handle or description points to a DIFFERENT city/metro/region — even when the brand name matches exactly. A same-name account for another metro is WRONG, not a fallback. Only return a handle you're confident is this business at this location (name AND locality must fit). If every candidate belongs to another city, or you can't tell, return an empty handle. Return the exact handle from the list, without '@'.`,
+      system: `You verify the official ${platform} account for a SPECIFIC local business location, the way a careful human would — not by matching the name, but by checking it's THIS business at THIS place and it's the CURRENT account.\n` +
+        `RULES:\n` +
+        `1) Location: many brands run a separate account per city/metro (e.g. "@indiabazaraustin" vs "@indiabazardfw", or a bio saying "Frisco, TX"). REJECT any account whose handle or description points to a DIFFERENT city/metro — a same-name account for another metro is WRONG, not a fallback.\n` +
+        `2) Multiple accounts of the SAME business: a business often has an OLD/abandoned account and a CURRENT one. Prefer the one that reads as the current, primary presence for this location (its description fits this city, looks active/official). Do NOT just pick the one with the most posts — an old account can have more posts than the live one.\n` +
+        `3) Don't guess: if two accounts both plausibly fit this location and you can't tell which is current from the descriptions, return an EMPTY handle (a human will confirm) rather than pick the wrong/stale one. Attaching a stale or wrong account is worse than attaching none.\n` +
+        `Return the exact handle from the list (no '@'), or empty.`,
       text: `Business: "${name}"\nCity: ${city || "(unknown)"}\n\nCandidate ${platform} accounts (handle — page name/description):\n${list}`,
       schema: PICK_SCHEMA,
       tier: "classify",
@@ -233,7 +238,11 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   const loc = city ? ` ${city}` : "";
   const cityToken = city.toLowerCase().replace(/[^a-z0-9]/g, "");
   const word = WORD[host];
+  // Search by name+city AND by the street address — a profile that names its address
+  // is strong proof it's this branch, and address search surfaces location accounts a
+  // bare name search misses.
   const queries = [`${clean}${loc} ${word}`, `${clean} ${word}`];
+  if (ctx.address) queries.splice(1, 0, `${clean} ${ctx.address} ${word}`);
   if (clean !== name) queries.push(`${name} ${word}`);
 
   const all: { handle: string; url: string; context: string }[] = [];
