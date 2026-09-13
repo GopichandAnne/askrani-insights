@@ -26,7 +26,7 @@ const SEED: Biz[] = [
   { id: "g7", nm: "Dana Bazaar Indian Supermarket", vertical: "grocery", area: "Austin", web: "https://danabazaarsupermarket.com", ig: "danabazaarsupermarket" },
   { id: "g8", nm: "Iqbal Foods", vertical: "grocery", area: "Austin", ig: "", place: true },
   { id: "g9", nm: "H Mart (Lakeline)", vertical: "grocery", area: "Austin", web: "https://www.hmart.com", ig: "hmartofficial", place: true, fb: "105951276119949", note: "Korean grocer, not Indian — a competitor. Confirm you want it in the set." },
-  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Austin", web: "https://www.patelbros.com", ig: "patelbrothers", place: true, note: "National chain; the Austin store is new/upcoming and shares the national @patelbrothers. Confirm there's a local presence worth watching before selecting." },
+  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Cedar Park", web: "https://www.patelbros.com", ig: "patelbrothers", place: true, note: "Open in Cedar Park (2026). No dedicated local Instagram — only national @patelbrothers — so its Google listing / flyers are the better local signal to watch." },
 ];
 
 const mapsUrl = (b: Biz) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.nm} ${b.area} TX`)}`;
