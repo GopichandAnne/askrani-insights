@@ -19,8 +19,9 @@ export const maxDuration = 30;
  * with a full refund if creation fails. Signed-in only.
  */
 const clean = (s: unknown, n = 120) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
-const cleanHandle = (s: unknown) => String(s ?? "").replace(/^@+/, "").replace(/[^A-Za-z0-9_.]/g, "").slice(0, 30);
+const cleanHandle = (s: unknown) => String(s ?? "").replace(/^@+/, "").replace(/[^A-Za-z0-9_.\-]/g, "").slice(0, 40);
 const VERTS = new Set(["grocery", "restaurant", "salon", "smoke_vape", "fitness", "dental", "real_estate", "other"]);
+const CHANS = ["instagram", "facebook", "tiktok", "youtube"] as const;
 
 export async function POST(req: Request) {
   const auth = await requireOrg();
@@ -30,14 +31,19 @@ export async function POST(req: Request) {
   const label = clean(body.label, 60) || "Austin, TX";
   const raw = Array.isArray(body.businesses) ? body.businesses : [];
   const businesses = raw
-    .map((b: Record<string, unknown>) => ({
-      name: clean(b.name),
-      website: b.website ? clean(b.website, 300) : undefined,
-      vertical: VERTS.has(String(b.vertical)) ? String(b.vertical) : "restaurant",
-      instagram: cleanHandle(b.handle ?? b.instagram) || undefined,
-    }))
+    .map((b: Record<string, unknown>) => {
+      const rawH = (b.handles ?? {}) as Record<string, unknown>;
+      const handles: Record<string, string> = {};
+      for (const c of CHANS) { const h = cleanHandle(rawH[c] ?? (c === "instagram" ? b.handle ?? b.instagram : "")); if (h) handles[c] = h; }
+      return {
+        name: clean(b.name),
+        website: b.website ? clean(b.website, 300) : undefined,
+        vertical: VERTS.has(String(b.vertical)) ? String(b.vertical) : "restaurant",
+        handles,
+      };
+    })
     .filter((b: { name: string }) => b.name.length > 1)
-    .slice(0, 30);
+    .slice(0, 40);
   if (!businesses.length) return badRequest("Select at least one business to monitor.");
 
   // Group per vertical → one area workspace each (clean detector branches).

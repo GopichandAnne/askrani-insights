@@ -547,7 +547,7 @@ export async function createAreaWorkspace(
     keyword?: string | null;
     vertical?: string;
     center?: { lat: number; lng: number } | null;
-    businesses: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; vertical?: string; instagram?: string }[];
+    businesses: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; vertical?: string; instagram?: string; handles?: Partial<Record<"instagram" | "facebook" | "tiktok" | "youtube", string>> }[];
   },
 ): Promise<{ workspaceId: string; count: number }> {
   const svc = createServiceClient();
@@ -577,13 +577,18 @@ export async function createAreaWorkspace(
   for (const b of input.businesses.slice(0, 15)) {
     if (!b.name) continue;
     const compId = await upsertBusiness(svc, b, b.vertical || vertical);
-    // Owner-confirmed Instagram handle (from the monitoring-queue validation step) —
-    // store it so social collection targets the right account and it feeds the
-    // handle-confirmed identity signal. Merge, never clobber other attributes.
-    if (b.instagram) {
-      const { data: cur } = await svc.from("business").select("attributes").eq("id", compId).maybeSingle();
-      const attrs = ((cur?.attributes as Record<string, unknown>) ?? {});
-      await svc.from("business").update({ attributes: { ...attrs, instagram: b.instagram, instagram_confirmed_at: new Date().toISOString() } }).eq("id", compId);
+    // Owner-confirmed social handles (from the monitoring-queue validation step) →
+    // external_identity per platform, so the social collectors target the exact
+    // accounts across Instagram / Facebook / TikTok / YouTube. Owner-confirmed wins.
+    const handles = { ...(b.instagram ? { instagram: b.instagram } : {}), ...(b.handles ?? {}) } as Record<string, string>;
+    const bases: Record<string, string> = { instagram: "https://instagram.com/", facebook: "https://facebook.com/", tiktok: "https://tiktok.com/@", youtube: "https://youtube.com/@" };
+    for (const [platform, raw] of Object.entries(handles)) {
+      const handle = String(raw ?? "").replace(/^@+/, "").trim();
+      if (!handle || !bases[platform]) continue;
+      const url = `${bases[platform]}${handle}`;
+      const { data: ex } = await svc.from("external_identity").select("id").eq("business_id", compId).eq("platform", platform).limit(1).maybeSingle();
+      if (ex?.id) await svc.from("external_identity").update({ url, handle, verification_state: "auto_verified" }).eq("id", ex.id);
+      else await svc.from("external_identity").insert({ business_id: compId, platform, url, handle, verification_state: "auto_verified" }).then(() => {}, () => {});
     }
     const { error: edgeErr } = await svc
       .from("competitor_edge")
