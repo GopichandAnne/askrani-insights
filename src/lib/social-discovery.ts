@@ -9,7 +9,7 @@
  */
 
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
-import { apifyConfigured, collectProfileIdentity, type ProfileIdentity } from "@/lib/providers/apify/platforms";
+import { apifyConfigured, collectProfileIdentities, type ProfileIdentity } from "@/lib/providers/apify/platforms";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
@@ -245,24 +245,51 @@ function identityMatch(id: ProfileIdentity, name: string, ctx: VerifyCtx): numbe
   return domainMatch ? 3 : 2;    // brand + this city
 }
 
-/** Confirm candidate accounts via Apify (the only channel that can actually load
- *  the profile) and return the best PROVEN one. Scrapes each candidate's profile in
- *  parallel (identity + recency in one call), keeps only those the profile proves
- *  belong to this business, then ranks by proof strength → recency → verified →
- *  followers. Returns undefined when NONE prove out — the caller then attaches
- *  nothing (a blank the human fills), never a guessed account. */
+/** Likely handle PATTERNS for a business at a location, so we can probe accounts
+ *  that web search hasn't indexed yet (a brand-new account never appears in search).
+ *  Generated from the distinctive name tokens × location tokens in the common IG/FB
+ *  formats — NOT hardcoded per business. e.g. "Patel Brothers" + "Cedar Park" yields
+ *  patelbrotherscedarpark, patelbrotherscedarparktx, patelbrothersatx, … which Apify
+ *  then probes for existence + identity match. */
+function handleGuesses(name: string, city: string): string[] {
+  const toks = nameTokens(name);
+  if (!toks.length) return [];
+  const base = toks.join("");
+  const baseU = toks.join("_");
+  const cityFlat = city.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const locs = new Set<string>();
+  if (cityFlat.length >= 3) locs.add(cityFlat);
+  for (const t of locationTokens(city)) locs.add(t); // city + local abbrevs (atx, austin…)
+  const out = new Set<string>([base]);
+  for (const l of locs) {
+    out.add(`${base}${l}`);
+    out.add(`${base}${l}tx`); // stores often suffix the state: …cedarparktx
+    out.add(`${base}_${l}`);
+    out.add(`${baseU}_${l}`);
+  }
+  return [...out].filter((h) => h.length >= 4 && h.length <= 30);
+}
+
+const cleanHostHandle = (h?: string): string =>
+  String(h ?? "").replace(/^https?:\/\/(www\.)?[^/]+\//i, "").replace(/^@/, "").replace(/[/?#].*$/, "").trim();
+
+/** Confirm candidate accounts via Apify (the only channel that can actually load the
+ *  profile) and return the best PROVEN one. Scrapes the WHOLE candidate pool —
+ *  search hits AND generated handle guesses — in ONE batch run, keeps only the
+ *  profiles that prove they're this business at this location, then ranks by proof
+ *  strength → recency → verified → followers. Returns undefined when NONE prove out
+ *  — the caller then attaches nothing (a blank the human fills), never a guess. */
 async function confirmProfiles(platform: string, host: SocialHost, handles: string[], name: string, ctx: VerifyCtx): Promise<string | undefined> {
   if (!handles.length) return undefined;
-  const scored = await Promise.all(handles.map(async (h) => {
-    const id = await collectProfileIdentity(platform, `${PREFIX[host]}${h}`, { maxMs: 40000 }).catch(() => undefined);
-    if (!id) return undefined;
+  const ids = await collectProfileIdentities(platform, handles.map((h) => `${PREFIX[host]}${h}`), { maxMs: 55000 }).catch(() => [] as ProfileIdentity[]);
+  const scored = ids.map((id) => {
     const strength = identityMatch(id, name, ctx);
-    return strength ? { h, strength, at: id.latestPostAt ?? 0, followers: id.followers ?? 0, verified: id.verified ? 1 : 0 } : undefined;
-  }));
-  const ok = scored.filter((x): x is NonNullable<typeof x> => !!x);
-  if (!ok.length) return undefined;
-  ok.sort((a, b) => b.strength - a.strength || b.at - a.at || b.verified - a.verified || b.followers - a.followers);
-  return ok[0].h;
+    const h = cleanHostHandle(id.handle);
+    return strength && h ? { h, strength, at: id.latestPostAt ?? 0, followers: id.followers ?? 0, verified: id.verified ? 1 : 0 } : undefined;
+  }).filter((x): x is NonNullable<typeof x> => !!x);
+  if (!scored.length) return undefined;
+  scored.sort((a, b) => b.strength - a.strength || b.at - a.at || b.verified - a.verified || b.followers - a.followers);
+  return scored[0].h;
 }
 
 export async function reverseGeoCity(geo?: { lat: number; lng: number }): Promise<string> {
@@ -371,13 +398,15 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   // this business (links our website, or names our address/city), and among those
   // prefer the currently-active one (@manpasand_atx over stale @manpasandaustin).
   // If NONE prove out, we attach nothing — a blank the human fills, never a guess.
-  if (host === "instagram.com" && apifyConfigured()) {
-    // Include the handle we ALREADY have (seedHandle) in the pool, so re-resolve
-    // verifies it too — if the profile doesn't exist / isn't this business it fails
-    // confirmation and a proven account replaces it (or none does → caller flags it).
+  if ((host === "instagram.com" || host === "facebook.com") && apifyConfigured()) {
+    const platform = host === "instagram.com" ? "instagram" : "facebook";
+    // Pool = the handle we ALREADY have (verify it too) + search hits + the LLM's
+    // picks + GENERATED handle guesses (name × location), so a brand-new account
+    // that search hasn't indexed still gets probed. ONE batched scrape confirms
+    // which actually exist and prove they're this business at this location.
     const seed = (seedHandle ?? "").replace(/^@+/, "").trim();
-    const pool = [...new Set([seed, pick.chosen, ...pick.plausible, ...heuristicPlausible(all, name)].filter((h): h is string => !!h))].slice(0, 4);
-    const confirmed = await confirmProfiles("instagram", host, pool, name, ctx);
+    const pool = [...new Set([seed, pick.chosen, ...pick.plausible, ...heuristicPlausible(all, name), ...handleGuesses(name, city)].filter((h): h is string => !!h))].slice(0, 10);
+    const confirmed = await confirmProfiles(platform, host, pool, name, ctx);
     return confirmed ? { handle: confirmed, confidence: "high" } : undefined;
   }
 

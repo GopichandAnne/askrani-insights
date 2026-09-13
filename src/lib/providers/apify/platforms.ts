@@ -449,32 +449,63 @@ export interface ProfileIdentity {
   costUsd: number;
 }
 
-export async function collectProfileIdentity(
+/** Map one scraped profile record → ProfileIdentity (field names vary by actor). */
+function mapIdentity(platform: string, it: any, costUsd: number): ProfileIdentity {
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+  const toMs = (t: unknown) => { const ms = t ? Date.parse(String(t)) : NaN; return Number.isFinite(ms) ? ms : undefined; };
+  let latestPostAt: number | undefined;
+  const posts = it.latestPosts ?? it.posts ?? it.topPosts ?? [];
+  for (const p of Array.isArray(posts) ? posts : []) {
+    const ms = toMs(p?.timestamp ?? p?.createTimeISO ?? p?.date ?? p?.publishedAt ?? p?.taken_at);
+    if (ms) latestPostAt = Math.max(latestPostAt ?? 0, ms);
+  }
+  switch (platform) {
+    case "instagram": {
+      const ext = it.externalUrl ?? (Array.isArray(it.externalUrls) ? (it.externalUrls[0]?.url ?? it.externalUrls[0]) : undefined);
+      return { handle: it.username, externalUrl: ext, bio: it.biography, name: it.fullName, latestPostAt, followers: num(it.followersCount), verified: !!it.verified, costUsd };
+    }
+    case "tiktok": {
+      const a = (it.authorMeta ?? {}) as any;
+      return { handle: a.name ?? it.name, externalUrl: a.bioLink ?? a.link, bio: a.signature ?? it.signature, name: a.nickName ?? a.nickname, latestPostAt: latestPostAt ?? toMs(it.createTimeISO), followers: num(a.fans ?? it.fans), verified: !!(a.verified ?? it.verified), costUsd };
+    }
+    default: { // facebook page
+      return { handle: it.pageUrl ?? it.url ?? it.pageName, externalUrl: it.website ?? (Array.isArray(it.websites) ? it.websites[0] : undefined), bio: it.intro ?? it.about ?? it.pageAbout ?? it.info, name: it.title ?? it.name ?? it.pageName, latestPostAt, followers: num(it.followers ?? it.followersCount ?? it.likes), verified: !!it.verified, costUsd };
+    }
+  }
+}
+
+/**
+ * Scrape SEVERAL profiles in ONE Actor run and return the identity of each that
+ * EXISTS. Batching matters: it lets the resolver probe candidate/guessed handles
+ * cheaply (one run for up to ~10 usernames), which is how we find a brand-new
+ * account that web search hasn't indexed yet. Non-existent handles simply don't
+ * come back. `targets` are profile URLs; IG/TikTok reduce them to usernames.
+ */
+export async function collectProfileIdentities(
   platform: string,
-  target: string,
+  targets: string[],
   opts: { maxMs?: number } = {},
-): Promise<ProfileIdentity> {
+): Promise<ProfileIdentity[]> {
   const token = process.env.APIFY_TOKEN;
   const actor =
     platform === "instagram" ? (process.env.APIFY_INSTAGRAM_PROFILE_ACTOR ?? "apify~instagram-profile-scraper")
     : platform === "tiktok" ? (process.env.APIFY_TIKTOK_PROFILE_ACTOR ?? "clockworks~tiktok-scraper")
     : platform === "facebook" ? (process.env.APIFY_FACEBOOK_PAGE_ACTOR ?? "apify~facebook-pages-scraper")
     : undefined;
-  if (!token || !actor) return { costUsd: 0 };
+  const uniq = [...new Set(targets.map((t) => String(t ?? "").trim()).filter(Boolean))].slice(0, 10);
+  if (!token || !actor || !uniq.length) return [];
   const input =
-    platform === "instagram" ? { usernames: [handleOf(target)] }
-    : platform === "tiktok" ? { profiles: [handleOf(target)], resultsPerPage: 3, shouldDownloadVideos: false, shouldDownloadCovers: false }
-    : { startUrls: [{ url: target }] };
-  const maxMs = opts.maxMs ?? 45000;
-  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
-  const toMs = (t: unknown) => { const ms = t ? Date.parse(String(t)) : NaN; return Number.isFinite(ms) ? ms : undefined; };
+    platform === "instagram" ? { usernames: uniq.map(handleOf) }
+    : platform === "tiktok" ? { profiles: uniq.map(handleOf), resultsPerPage: 2, shouldDownloadVideos: false, shouldDownloadCovers: false }
+    : { startUrls: uniq.map((u) => ({ url: u })) };
+  const maxMs = opts.maxMs ?? 60000;
   try {
     const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
     });
-    if (!runRes.ok) return { costUsd: 0 };
+    if (!runRes.ok) return [];
     const runId = ((await runRes.json()) as any).data?.id;
-    if (!runId) return { costUsd: 0 };
+    if (!runId) return [];
     const deadline = Date.now() + maxMs;
     let datasetId: string | undefined; let costUsd = 0;
     while (Date.now() < deadline) {
@@ -482,33 +513,18 @@ export async function collectProfileIdentity(
       costUsd = st.data?.usageTotalUsd ?? costUsd;
       const s = st.data?.status;
       if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
-      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { costUsd };
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return [];
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { costUsd };
-    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=3`).then((r) => r.json())) as any[];
-    const it = (raw ?? [])[0] ?? {};
-    // Newest post date from whatever post list the profile scraper returned.
-    let latestPostAt: number | undefined;
-    const posts = it.latestPosts ?? it.posts ?? it.topPosts ?? [];
-    for (const p of Array.isArray(posts) ? posts : []) {
-      const ms = toMs(p?.timestamp ?? p?.createTimeISO ?? p?.date ?? p?.publishedAt ?? p?.taken_at);
-      if (ms) latestPostAt = Math.max(latestPostAt ?? 0, ms);
-    }
-    switch (platform) {
-      case "instagram": {
-        const ext = it.externalUrl ?? (Array.isArray(it.externalUrls) ? (it.externalUrls[0]?.url ?? it.externalUrls[0]) : undefined);
-        return { handle: it.username, externalUrl: ext, bio: it.biography, name: it.fullName, latestPostAt, followers: num(it.followersCount), verified: !!it.verified, costUsd };
-      }
-      case "tiktok": {
-        const a = (it.authorMeta ?? {}) as any;
-        return { handle: a.name ?? it.name, externalUrl: a.bioLink ?? a.link, bio: a.signature ?? it.signature, name: a.nickName ?? a.nickname, latestPostAt: latestPostAt ?? toMs(it.createTimeISO), followers: num(a.fans ?? it.fans), verified: !!(a.verified ?? it.verified), costUsd };
-      }
-      default: { // facebook page
-        return { handle: it.pageUrl ?? it.url, externalUrl: it.website ?? (Array.isArray(it.websites) ? it.websites[0] : undefined), bio: it.intro ?? it.about ?? it.pageAbout ?? it.info, name: it.title ?? it.name ?? it.pageName, latestPostAt, followers: num(it.followers ?? it.followersCount ?? it.likes), verified: !!it.verified, costUsd };
-      }
-    }
-  } catch { return { costUsd: 0 }; }
+    if (!datasetId) return [];
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=${uniq.length + 3}`).then((r) => r.json())) as any[];
+    return (raw ?? []).map((it) => mapIdentity(platform, it, costUsd));
+  } catch { return []; }
+}
+
+/** Single-profile convenience over the batch scrape. */
+export async function collectProfileIdentity(platform: string, target: string, opts: { maxMs?: number } = {}): Promise<ProfileIdentity> {
+  return (await collectProfileIdentities(platform, [target], opts))[0] ?? { costUsd: 0 };
 }
 
 // ── Hashtag discovery (the national industry corpus) ────────────────────────
