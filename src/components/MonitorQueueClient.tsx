@@ -1,16 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Candidate, Chan, Vert } from "@/lib/monitor-candidates";
 
-// Austin/Cedar Park/Round Rock Indian restaurants & grocers with social handles
-// resolved from their own sites + web search (Sep 2026). Every handle is a
-// SUGGESTION to validate — open the profile to confirm it's the right account.
-type Chan = "instagram" | "facebook" | "tiktok" | "youtube";
-type Vert = "restaurant" | "grocery";
-// facets: a business can be BOTH (Foodistaan/Desi Circle sell groceries; many desi
-// grocers have a deli/hot counter). It's then watched & compared in each. Defaults
-// to [vertical]; pre-marked for the obvious hybrids, human-adjustable in the UI.
-type Biz = { id: string; nm: string; vertical: Vert; area: string; web?: string; place?: boolean; note?: string; handles: Partial<Record<Chan, string>>; facets?: Vert[] };
+// Candidates come from the server (persisted corrections, or the code default), so
+// handle/facet edits survive a reload. Every handle is a SUGGESTION to validate.
+type Biz = Candidate;
 
 const CHAN: { key: Chan; label: string; icon: string; base: string }[] = [
   { key: "instagram", label: "Instagram", icon: "📸", base: "https://instagram.com/" },
@@ -19,50 +14,38 @@ const CHAN: { key: Chan; label: string; icon: string; base: string }[] = [
   { key: "youtube", label: "YouTube", icon: "▶️", base: "https://youtube.com/@" },
 ];
 
-const SEED: Biz[] = [
-  { id: "r1", nm: "Desi Circle", vertical: "restaurant", area: "Austin", web: "https://desicircleusa.com", place: true, handles: { instagram: "desicircleaustin" }, facets: ["restaurant", "grocery"] },
-  { id: "r2", nm: "Foodistaan", vertical: "restaurant", area: "Cedar Park", web: "https://www.foodistaan.us", place: true, handles: { instagram: "foodistaancp" }, note: "Location account — @foodistaancp (Cedar Park), not the national @foodistaan.us.", facets: ["restaurant", "grocery"] },
-  { id: "r3", nm: "House of Chettinad", vertical: "restaurant", area: "Austin", web: "https://www.houseofchettinad.com", place: true, handles: { instagram: "houseofchettinad_", tiktok: "houseofchettinad_" } },
-  { id: "r4", nm: "Bawarchi Indian Cuisine & Bar", vertical: "restaurant", area: "Leander", web: "https://www.bawarchibiryanis.us", place: true, handles: { instagram: "bawarchi_indiancuisine_bar_tx" }, note: "Location account — @bawarchi_indiancuisine_bar_tx (Leander), not the national @bawarchibiryanis_usa." },
-  { id: "r5", nm: "Chowrastha", vertical: "restaurant", area: "Austin", web: "http://desichowrastha.com", place: true, handles: { instagram: "desichowrastha", facebook: "chowrastha-104748712131254" } },
-  { id: "r6", nm: "Hashtag India", vertical: "restaurant", area: "Leander", web: "https://www.hashtagindia.com", place: true, handles: { instagram: "hashtagindia.leander" }, note: "Location account — @hashtagindia.leander, not the national @hashtagindia_ (all 15 stores)." },
-  { id: "r7", nm: "Naga's Indian Cuisine", vertical: "restaurant", area: "Cedar Park", web: "https://nagasaustin.com", place: true, handles: { instagram: "nagasaustin" } },
-  { id: "r8", nm: "Salt N Pepper Gourmet Indian Fare", vertical: "restaurant", area: "Cedar Park", web: "https://saltnpepperusa.com", place: true, handles: { instagram: "saltnpepper_cedarpark" } },
-  { id: "r9", nm: "Tandoor Restaurant & Catering", vertical: "restaurant", area: "Austin", web: "https://www.tandoortx.com", place: true, handles: {} },
-  { id: "r10", nm: "Sangam Chettinad Indian Cuisine", vertical: "restaurant", area: "Austin", web: "https://www.sangamchettinad.com", place: true, handles: { instagram: "austinsangam", facebook: "austinsangam" } },
-  { id: "r11", nm: "Teji's", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "tejisindian" } },
-  { id: "r12", nm: "Tulsi Indian Cuisine", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "tulsifineindian_austin" } },
-  { id: "r13", nm: "Kuppanna Indian Restaurant", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "kuppannaaustin" } },
-  { id: "r14", nm: "Aroma — Indian Food Park", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "aromaaustin" } },
-  { id: "r15", nm: "Bayleaf Indian Restaurant & Bar", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "bayleaf_indian_restaurant_bar" } },
-  { id: "r16", nm: "Asiana Indian Cuisine", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "asiana_indian_cuisine" } },
-  { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", place: true, handles: { instagram: "manpasandaustin" }, facets: ["grocery", "restaurant"] },
-  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin" }, note: "Location account — @desibrothersaustin (the DFW Facebook was dropped as wrong-metro).", facets: ["grocery", "restaurant"] },
-  { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", place: true, handles: { instagram: "indiabazaaraustin" }, facets: ["grocery", "restaurant"] },
-  { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Cedar Park", web: "https://www.big-bazaar.co", place: true, handles: { instagram: "bigbazaar789" }, note: "Two similar Big Bazaar IG accounts — @bigbazaar789 is the Cedar Park one. Confirm." },
-  { id: "g5", nm: "Gandhi Bazar", vertical: "grocery", area: "Austin", web: "http://www.gandhi-bazar.com", place: true, handles: { facebook: "gandhibazarstore" }, note: "Only a Facebook page found — add their Instagram if they have one." },
-  { id: "g6", nm: "International Foods (Halal)", vertical: "grocery", area: "Austin", web: "https://ifatx.com", place: true, handles: { instagram: "internationalfoodsaustin" } },
-  { id: "g7", nm: "Dana Bazaar Indian Supermarket", vertical: "grocery", area: "Austin", web: "https://danabazaarsupermarket.com", place: true, handles: { instagram: "danabazaarsupermarket", facebook: "danabazaaraustin" } },
-  { id: "g8", nm: "Iqbal Foods", vertical: "grocery", area: "Austin", place: true, handles: {} },
-  { id: "g9", nm: "H Mart (Lakeline)", vertical: "grocery", area: "Austin", web: "https://www.hmart.com", place: true, handles: { instagram: "hmartofficial" }, note: "Korean grocer, not Indian — a competitor. Confirm you want it in the set." },
-  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Cedar Park", web: "https://www.patelbros.com", place: true, handles: { instagram: "patelbrotherscedarpark" }, note: "Open in Cedar Park (2026). Confirm @patelbrotherscedarpark via Open ↗." },
-  { id: "g11", nm: "Khana Khazana ATX", vertical: "grocery", area: "Cedar Park", place: true, handles: { instagram: "khana_khazana_atx" } },
-  { id: "g12", nm: "MTM Indian Grocery & Fish", vertical: "grocery", area: "Austin", place: true, handles: { instagram: "mtmindianfoodsinc" } },
-];
-
 const mapsUrl = (b: Biz) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.nm} ${b.area} TX`)}`;
 
-export function MonitorQueueClient() {
+export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
+  const SEED = initial; // persisted candidates (or the code default) from the server
   const [handles, setHandles] = useState<Record<string, Partial<Record<Chan, string>>>>(() => Object.fromEntries(SEED.map((b) => [b.id, { ...b.handles }])));
   const [facets, setFacets] = useState<Record<string, Vert[]>>(() => Object.fromEntries(SEED.map((b) => [b.id, b.facets ?? [b.vertical]])));
   const [sel, setSel] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [err, setErr] = useState<string | null>(null);
+
+  // Persist handle/facet corrections so they survive a reload ("I fixed a handle you
+  // got wrong — come back later, it's still fixed"). Debounced; skips the first mount.
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return; }
+    setSaveState("saving");
+    const t = setTimeout(async () => {
+      const candidates = SEED.map((b) => ({ ...b, handles: handles[b.id] ?? {}, facets: facets[b.id] ?? [b.vertical] }));
+      try {
+        const r = await fetch("/api/monitor/candidates", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ candidates }) });
+        setSaveState(r.ok ? "saved" : "idle");
+      } catch { setSaveState("idle"); }
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handles, facets]);
   const [resolving, setResolving] = useState(false);
   const [resolveMsg, setResolveMsg] = useState<string | null>(null);
   const [done, setDone] = useState<{ created: { workspaceId: string; vertical: string; count: number }[]; total: number } | null>(null);
 
-  const groups = useMemo(() => ({ restaurant: SEED.filter((b) => b.vertical === "restaurant"), grocery: SEED.filter((b) => b.vertical === "grocery") }), []);
+  const groups = useMemo(() => ({ restaurant: SEED.filter((b) => b.vertical === "restaurant"), grocery: SEED.filter((b) => b.vertical === "grocery") }), [SEED]);
   const chanCount = (id: string) => CHAN.filter((c) => (handles[id]?.[c.key] ?? "").trim()).length;
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const other = (b: Biz): Vert => (b.vertical === "restaurant" ? "grocery" : "restaurant");
@@ -139,6 +122,7 @@ export function MonitorQueueClient() {
             {resolving ? "Re-resolving…" : "🔍 Re-resolve selected (location-aware)"}
           </button>
           <span className="text-xs text-ink-faint">Picks the <b>local</b> account for a multi-location brand (e.g. @foodistaancp, not the national handle).</span>
+          <span className="ml-auto text-xs text-ink-faint">{saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved — your edits persist" : "Edits save automatically"}</span>
         </div>
         {resolveMsg && <p className="mt-2 text-xs text-brand">{resolveMsg}</p>}
       </div>

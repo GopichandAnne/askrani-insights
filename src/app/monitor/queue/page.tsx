@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getUser, isSuperAdmin } from "@/lib/auth";
+import { loadCandidates } from "@/lib/monitor-candidates";
 import { MonitorQueueClient } from "@/components/MonitorQueueClient";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export default async function MonitorQueuePage() {
   // Superadmin-only: this is the founder/ops cold-collect tool, not a tenant feature.
   const user = await getUser();
   if (!isSuperAdmin(user)) redirect("/");
+  const initial = await loadCandidates(); // persisted corrections (or the code default)
   return (
     <div className="animate-fade-in space-y-6">
       <header>
@@ -25,7 +27,7 @@ export default async function MonitorQueuePage() {
           Nothing is collected until you press the button.
         </p>
       </header>
-      <MonitorQueueClient />
+      <MonitorQueueClient initial={initial} />
     </div>
   );
 }
