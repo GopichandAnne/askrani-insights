@@ -1,3 +1,5 @@
+import { redirect } from "next/navigation";
+import { getUser, isSuperAdmin } from "@/lib/auth";
 import { MonitorQueueClient } from "@/components/MonitorQueueClient";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +10,10 @@ export const metadata = { title: "Monitoring queue — Ask Rani Insights" };
  * account, then start collecting only what you approve. The human gate before any
  * collection credit is spent (the cold-collect GTM step for Austin desi businesses).
  */
-export default function MonitorQueuePage() {
+export default async function MonitorQueuePage() {
+  // Superadmin-only: this is the founder/ops cold-collect tool, not a tenant feature.
+  const user = await getUser();
+  if (!isSuperAdmin(user)) redirect("/");
   return (
     <div className="animate-fade-in space-y-6">
       <header>

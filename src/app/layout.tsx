@@ -34,7 +34,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const areaMode = active?.status === "ok" && isAreaMode(active.workspace);
   const sections = areaMode ? SECTIONS_AREA : SECTIONS_NORMAL;
   const more = admin
-    ? [...(areaMode ? MORE_AREA : MORE_NORMAL), { href: "/admin", label: "Admin", icon: "admin" }]
+    ? [...(areaMode ? MORE_AREA : MORE_NORMAL),
+       { href: "/monitor/queue", label: "Monitoring queue", icon: "queue" },
+       { href: "/admin", label: "Admin", icon: "admin" }]
     : (areaMode ? MORE_AREA : MORE_NORMAL);
   const home = sections[0].href;
 

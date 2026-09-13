@@ -47,7 +47,6 @@ export const MORE_NORMAL: NavMember[] = [
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
   { href: "/explore", label: "Watch a market", icon: "explore" },
-  { href: "/monitor/queue", label: "Monitoring queue", icon: "queue" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];
 
@@ -75,6 +74,5 @@ export const MORE_AREA: NavMember[] = [
   { href: "/reports", label: "Report", icon: "report" },
   { href: "/billing", label: "Billing", icon: "billing" },
   { href: "/explore", label: "Watch a market", icon: "explore" },
-  { href: "/monitor/queue", label: "Monitoring queue", icon: "queue" },
   { href: "/onboarding", label: "New workspace", icon: "add" },
 ];

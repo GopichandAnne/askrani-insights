@@ -1,5 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
+import { getUser, isSuperAdmin } from "@/lib/auth";
 import { createAreaWorkspace } from "@/lib/discovery";
 import { enqueueWorkspaceCollection, nudgeWorker } from "@/lib/jobs";
 import { quoteAreaMonitor, spendCredits, refundCredits, getBalance } from "@/lib/credits";
@@ -26,6 +27,8 @@ const CHANS = ["instagram", "facebook", "tiktok", "youtube"] as const;
 export async function POST(req: Request) {
   const auth = await requireOrg();
   if (!auth) return unauthorized();
+  // Superadmin-only (founder/ops tool) — matches the page gate.
+  if (!isSuperAdmin(await getUser())) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const label = clean(body.label, 60) || "Austin, TX";
