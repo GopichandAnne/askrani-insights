@@ -217,10 +217,23 @@ export async function processOneJob(): Promise<TickResult> {
     } catch {
       /* detection is best-effort; never fail the job on it */
     }
-    await svc
-      .from("collection_job")
-      .update({ status: "done", result: res, error: res.error ?? null })
-      .eq("id", job.id);
+    if (res.ok === false) {
+      // collection produced NOTHING and hit errors — a real failure (blocked search,
+      // site down, etc.). Retry like a thrown exception (up to MAX_ATTEMPTS) instead
+      // of silently marking it done; a legitimately empty business keeps ok=true.
+      outcome = "error";
+      const msg = res.error ?? "collection produced nothing";
+      if (job.attempts < MAX_ATTEMPTS) {
+        await svc.from("collection_job").update({ status: "pending", error: msg }).eq("id", job.id);
+      } else {
+        await svc.from("collection_job").update({ status: "error", result: res, error: msg }).eq("id", job.id);
+      }
+    } else {
+      await svc
+        .from("collection_job")
+        .update({ status: "done", result: res, error: res.error ?? null })
+        .eq("id", job.id);
+    }
   } catch (e) {
     const msg = (e as Error).message;
     // retry a few times before giving up

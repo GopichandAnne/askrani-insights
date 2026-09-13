@@ -205,7 +205,8 @@ async function finishRun(svc: Svc, runId: string | undefined, count: number, err
   await svc
     .from("provider_run")
     .update({
-      status: error && count === 0 ? "partial" : "succeeded",
+      // no error → succeeded; error but some data → partial; error with nothing → failed
+      status: !error ? "succeeded" : count > 0 ? "partial" : "failed",
       result_count: count,
       cost_usd: Number(costUsd.toFixed(4)),
       finished_at: new Date().toISOString(),
@@ -369,17 +370,26 @@ export async function collectBusiness(
   for (const pl of profileLinks) {
     const { data: exists } = await svc
       .from("external_identity")
-      .select("id")
+      .select("id, verification_state")
       .eq("business_id", businessId)
       .eq("platform", pl.platform)
       .limit(1)
       .maybeSingle();
+    // A link on the business's OWN website is the strongest possible signal that the
+    // handle is really theirs — auto_verified. Precedence: never DOWNGRADE a stronger
+    // row (an owner-confirmed / already auto_verified one is left alone), but DO
+    // UPGRADE a weaker "observed" row (name+geo guess) to auto_verified with the
+    // site's own URL — otherwise a later backlink never strengthens the record.
     if (!exists) {
-      // A link on the business's OWN website is the strongest possible signal that
-      // the handle is really theirs — mark it auto_verified, not just observed.
       await svc
         .from("external_identity")
         .insert({ business_id: businessId, platform: pl.platform, url: pl.url, verification_state: "auto_verified" })
+        .then(() => {}, () => {});
+    } else if ((exists as any).verification_state !== "auto_verified") {
+      await svc
+        .from("external_identity")
+        .update({ url: pl.url, verification_state: "auto_verified" })
+        .eq("id", (exists as any).id)
         .then(() => {}, () => {});
     }
   }
