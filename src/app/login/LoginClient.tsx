@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { RaniMark } from "@/components/RaniSpinner";
@@ -75,6 +75,14 @@ export function LoginClient() {
   const set = (k: keyof typeof f) => (e: ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const switchTab = (t: Tab) => { setTab(t); setStep("form"); setMsg(null); if (t === "register") setMethod("phone"); };
+
+  // Land on the register tab when arrived via a "Start free / Create account" link
+  // (the marketing site sends ?mode=signup). Post-mount so there's no hydration diff.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("mode") === "signup" || p.get("tab") === "register") switchTab("register");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function signInWithGoogle() {
     if (busy) return;
