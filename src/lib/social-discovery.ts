@@ -190,25 +190,55 @@ function heuristicPlausible(cands: { handle: string }[], name: string): string[]
   return cands.filter((c) => toks.some((t) => norm(c.handle).includes(t))).map((c) => c.handle);
 }
 
+// Location tokens an account might use for a city — the city's own name AND the
+// common local abbreviation (people write "atx", not "austin"). Cities in one
+// metro share the metro signal (a Cedar Park store may brand itself "austin"/"atx").
+// We DELIBERATELY exclude the bare state ("tx") — that would wrongly confirm a
+// same-brand account from another Texas metro, the cross-metro bug we guard against.
+const METRO_TOKENS: Record<string, string[]> = {
+  // Austin metro
+  "austin": ["austin", "atx"],
+  "cedar park": ["cedarpark", "austin", "atx"],
+  "leander": ["leander", "austin", "atx"],
+  "round rock": ["roundrock", "austin", "atx"],
+  "pflugerville": ["pflugerville", "austin", "atx"],
+  "georgetown": ["georgetown", "austin", "atx"],
+  "san marcos": ["sanmarcos", "austin", "atx"],
+  // Other majors (city-specific abbrevs only)
+  "dallas": ["dallas", "dfw"],
+  "fort worth": ["fortworth", "dfw"],
+  "houston": ["houston", "htx", "htown"],
+  "san antonio": ["sanantonio", "satx"],
+};
+/** Accepted location tokens (flattened, ≥3 chars) for a city: its name + local abbrevs. */
+function locationTokens(city: string): string[] {
+  const flat = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const c = city.toLowerCase().trim();
+  const set = new Set<string>();
+  const own = flat(c);
+  if (own.length >= 3) set.add(own);
+  for (const t of METRO_TOKENS[c] ?? []) { const f = flat(t); if (f.length >= 3) set.add(f); }
+  return [...set];
+}
+
 /** Does this scraped profile PROVE it belongs to this business? The gold signal is
  *  the profile linking the business's own website; naming its street address (+city)
- *  is just as strong; name + city together is acceptable. Name ALONE is NOT enough —
- *  that's exactly what let unrelated same-name accounts through. Returns a strength
- *  (3 = website/address proof, 2 = name+city) so the caller can rank multiple proven
- *  accounts, or 0 when unproven. */
+ *  is just as strong; name + city (or the local abbreviation, e.g. "atx") together
+ *  is acceptable. Name ALONE is NOT enough — that's exactly what let unrelated
+ *  same-name accounts through. Returns a strength (3 = website/address proof, 2 =
+ *  name+city) so the caller can rank multiple proven accounts, or 0 when unproven. */
 function identityMatch(id: ProfileIdentity, name: string, ctx: VerifyCtx): number {
   const flat = (s?: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const dom = domainOf(ctx.website);
   const hay = flat(`${id.bio ?? ""} ${id.name ?? ""} ${id.handle ?? ""}`);
   const extDom = domainOf(id.externalUrl);
   const domainMatch = !!dom && (extDom === dom || (dom.length >= 6 && hay.includes(flat(dom))));
-  const cityTok = flat(ctx.city);
-  const cityHit = cityTok.length >= 3 && hay.includes(cityTok);
+  const cityHit = locationTokens(ctx.city ?? "").some((t) => hay.includes(t));
   const nameHit = nameTokens(name).some((t) => hay.includes(t));
   const streetNo = (ctx.address ?? "").match(/\b\d{3,6}\b/)?.[0];
   const addrHit = !!streetNo && cityHit && hay.includes(streetNo);
   if (domainMatch || addrHit) return 3; // proven THIS business
-  if (nameHit && cityHit) return 2;      // name + city — acceptable
+  if (nameHit && cityHit) return 2;      // name + city (incl. local abbrev) — acceptable
   return 0;                              // unproven → never attach
 }
 
