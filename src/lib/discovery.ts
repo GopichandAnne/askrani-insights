@@ -547,7 +547,7 @@ export async function createAreaWorkspace(
     keyword?: string | null;
     vertical?: string;
     center?: { lat: number; lng: number } | null;
-    businesses: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; vertical?: string }[];
+    businesses: { name: string; website?: string; geo?: { lat: number; lng: number }; category?: string; vertical?: string; instagram?: string }[];
   },
 ): Promise<{ workspaceId: string; count: number }> {
   const svc = createServiceClient();
@@ -577,6 +577,14 @@ export async function createAreaWorkspace(
   for (const b of input.businesses.slice(0, 15)) {
     if (!b.name) continue;
     const compId = await upsertBusiness(svc, b, b.vertical || vertical);
+    // Owner-confirmed Instagram handle (from the monitoring-queue validation step) —
+    // store it so social collection targets the right account and it feeds the
+    // handle-confirmed identity signal. Merge, never clobber other attributes.
+    if (b.instagram) {
+      const { data: cur } = await svc.from("business").select("attributes").eq("id", compId).maybeSingle();
+      const attrs = ((cur?.attributes as Record<string, unknown>) ?? {});
+      await svc.from("business").update({ attributes: { ...attrs, instagram: b.instagram, instagram_confirmed_at: new Date().toISOString() } }).eq("id", compId);
+    }
     const { error: edgeErr } = await svc
       .from("competitor_edge")
       .upsert(

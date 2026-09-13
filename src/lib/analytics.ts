@@ -10,6 +10,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 export type AnalyticsEvent =
   | "explore_search"
   | "monitor_area"
+  | "monitor_selected"
   | "signup"
   | "profile_completed"
   | "profile_updated"
