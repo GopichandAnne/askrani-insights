@@ -10,6 +10,7 @@ import { classifyGroceryConcepts, GROCERY_OPPORTUNITY, type GroceryKind } from "
 import { flyerKviGaps, flyerKviLeads, type FlyerDeal } from "@/lib/kviprices";
 import { inferUnitBasis } from "@/lib/unitbasis";
 import { nearestOccasion } from "@/lib/occasions";
+import { getOrMakeFacets } from "@/lib/facets";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -182,13 +183,18 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   for (const bid of Object.keys(capsByBiz)) { const b = res.brandOf.get(bid); if (b) menuCoveredBrands.add(b); }
   const totalBrands = competitorBrands.size, coveredN = menuCoveredBrands.size;
 
-  // Grocery branch (G0): grocery competition is products/prices/festivals, not
-  // restaurant-style "moves" — so classify grocery concepts and keep only real
-  // grocery openings (festival basket / trending / distinctive specialty / category
-  // promotion), dropping commodity staples ("2 rivals sell flour") and facility
-  // gripes that otherwise flood the feed as junk flags.
-  const grocery = ws.vertical === "grocery";
-  const gKind: Record<string, GroceryKind> = grocery
+  // Facet-aware: a business isn't one strict vertical. A restaurant that also sells
+  // groceries (Foodistaan) or a grocery with a deli/hot counter (Man Pasand) is BOTH,
+  // so we run BOTH analyses within the one workspace and route EACH concept by its
+  // nature — grocery-opportunity concepts (festival/trending/specialty/promotion) get
+  // the grocery treatment, restaurant-style moves get the restaurant treatment. Pure
+  // verticals resolve to a single facet and behave exactly as before.
+  const facets = await getOrMakeFacets(ws, supabase);
+  const hasGrocery = facets.includes("grocery");
+  const hasFood = facets.includes("restaurant");
+  // Grocery concept classification (only when the business has a grocery facet): keeps
+  // real grocery openings, drops commodity staples ("2 rivals sell flour") + facility gripes.
+  const gKind: Record<string, GroceryKind> = hasGrocery
     ? await classifyGroceryConcepts(ws, [...byC.values()].map((a) => a.concept))
     : {};
 
@@ -208,27 +214,32 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
     // Festival/occasion opportunities live only in the RUN-UP. If this concept is
     // festival-shaped, require a still-upcoming occasion — a past one (a Rakhi promo
     // in September) is noise, not an opening. Kept ones are reframed + urgency-ranked below.
-    const isFestival = grocery ? (gKind[conceptKey(a.concept)] === "festival") : /festiv|occasion/i.test(a.concept);
+    // Which facet is THIS concept? A grocery-opportunity kind → grocery nature; a
+    // commodity/facility → grocery noise (drop); anything else → restaurant-style move.
+    const gk = hasGrocery ? (gKind[conceptKey(a.concept)] ?? "other") : undefined;
+    const isGroceryConcept = gk !== undefined && GROCERY_OPPORTUNITY.has(gk);
+
+    const isFestival = (hasGrocery && gk === "festival") || /festiv|occasion/i.test(a.concept);
     if (isFestival && !a.occ) continue;
 
     const sat = readSaturation(rivalCount, totalBrands, coveredN);
     const openBoost = Math.round((1 - sat.saturation) * 28); // the more open the gap, the better the opening
 
     let tag: FbTag | null = null, score = 0;
-    if (grocery) {
-      // grocery: keep only recognized grocery opportunities; drop commodity/facility/other
-      const kind = gKind[conceptKey(a.concept)] ?? "other";
-      if (!GROCERY_OPPORTUNITY.has(kind)) continue;
+    if (isGroceryConcept) {
+      // grocery opening (festival basket / trending / distinctive specialty / promotion)
       if (rivalCount < 1 && demandDates < 1) continue;      // need some observed evidence
-      if (kind === "trending") {
+      if (gk === "trending") {
         // an emerging product few carry yet = early-mover opening
         tag = "demand_moving"; score = 110 + demandDates * 6 + rivalCount * 4 + openBoost;
       } else {
         // festival basket / specialty / category promotion you're not matching
         if (sat.state === "saturated") continue;            // everyone does it → table stakes
-        tag = "behind"; score = 68 + promoCount * 10 + rivalCount * 4 + Math.floor(openBoost / 2) + (kind === "festival" ? 12 : 0);
+        tag = "behind"; score = 68 + promoCount * 10 + rivalCount * 4 + Math.floor(openBoost / 2) + (gk === "festival" ? 12 : 0);
       }
-    } else if (demandDates >= 1) {
+    } else if (hasGrocery && (gk === "commodity" || gk === "facility")) {
+      continue; // grocery staple/facility noise → not an opening
+    } else if (hasFood && demandDates >= 1) {
       if (sat.state === "early" || sat.state === "contested") {
         // demand + an OPEN supply gap (few/some rivals) = the prime opening
         tag = "demand_moving"; score = 120 + demandDates * 6 + (recurring ? 20 : 0) + openBoost + promoCount * 8;
@@ -240,11 +251,11 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
         // otherwise it's an observation gap → keep as a low-confidence early signal.
         tag = "demand_gap"; score = sat.visible ? 58 + demandDates * 6 : 30 + demandDates * 4;
       }
-    } else if (promoCount >= 2 && sat.state !== "saturated") {
+    } else if (hasFood && promoCount >= 2 && sat.state !== "saturated") {
       // no demand, but rivals are actively PROMOTING it and the gap isn't saturated → you're behind
       tag = "behind"; score = 80 + promoCount * 12 + Math.floor(openBoost / 2);
     }
-    // everything else (menu-only, saturated-no-demand, unknown-visibility supply) → drop: not a real opening
+    // everything else (grocery-only "other", menu-only, saturated-no-demand) → drop.
     if (!tag) continue;
 
     // Reframe a festival flag to the specific upcoming occasion + timing, and rank it
@@ -269,8 +280,9 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   // "you're priced above market on <staple>". Uses priceCanon to collapse item-name
   // variants and entity resolution to dedupe rival brands; only fires on the target's
   // own price + >=2 rival brands + a material over-market gap. Never excluded by
-  // target-gap (a price gap on something you DO sell is the whole point).
-  if (grocery) {
+  // target-gap (a price gap on something you DO sell is the whole point). Runs for any
+  // business with a grocery facet — incl. a hybrid restaurant that sells groceries.
+  if (hasGrocery) {
     const goals = (ws.goals as Record<string, unknown> | null) ?? {};
     const myDeals = ((goals.myFlyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
     const compDeals = ((goals.flyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
