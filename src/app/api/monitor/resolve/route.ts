@@ -4,7 +4,7 @@ import { getUser, isSuperAdmin } from "@/lib/auth";
 import { findSocialHandles } from "@/lib/social-discovery";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120; // Instagram confirmation scrapes each candidate profile via Apify
 
 /**
  * Intelligent, location-aware handle resolution for the monitoring queue. Runs the
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
       website: b.website ? String(b.website).slice(0, 300) : undefined,
     }))
     .filter((b: { id: string; name: string }) => b.id && b.name)
-    .slice(0, 10); // bounded: each resolves via searches + LLM
+    .slice(0, 6); // bounded: each resolves via searches + LLM + Apify profile confirmation
 
   const results = await Promise.all(businesses.map(async (b: { id: string; name: string; city: string; website?: string }) => {
     try {

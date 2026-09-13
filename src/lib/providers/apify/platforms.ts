@@ -431,6 +431,86 @@ export async function latestActivityAt(
   } catch { return undefined; }
 }
 
+// ── Profile IDENTITY (confirm an account really is this business) ────────────
+// The resolver can't verify an Instagram/Facebook profile with a plain fetch —
+// those platforms block datacenter IPs (Vercel), so the profile HTML comes back a
+// login wall. Apify CAN load the profile, so this returns the identity fields we
+// check against the business (its linked website, bio, name) PLUS the newest post
+// date (recency) from ONE scrape. Dormant unless APIFY_TOKEN + the profile Actor
+// are set. Best-effort: any failure returns an empty identity (never throws).
+export interface ProfileIdentity {
+  handle?: string;
+  externalUrl?: string; // the website the profile links to (the gold confirmation)
+  bio?: string;
+  name?: string;
+  latestPostAt?: number; // ms — recency, to prefer the currently-active account
+  followers?: number;
+  verified?: boolean;
+  costUsd: number;
+}
+
+export async function collectProfileIdentity(
+  platform: string,
+  target: string,
+  opts: { maxMs?: number } = {},
+): Promise<ProfileIdentity> {
+  const token = process.env.APIFY_TOKEN;
+  const actor =
+    platform === "instagram" ? (process.env.APIFY_INSTAGRAM_PROFILE_ACTOR ?? "apify~instagram-profile-scraper")
+    : platform === "tiktok" ? (process.env.APIFY_TIKTOK_PROFILE_ACTOR ?? "clockworks~tiktok-scraper")
+    : platform === "facebook" ? (process.env.APIFY_FACEBOOK_PAGE_ACTOR ?? "apify~facebook-pages-scraper")
+    : undefined;
+  if (!token || !actor) return { costUsd: 0 };
+  const input =
+    platform === "instagram" ? { usernames: [handleOf(target)] }
+    : platform === "tiktok" ? { profiles: [handleOf(target)], resultsPerPage: 3, shouldDownloadVideos: false, shouldDownloadCovers: false }
+    : { startUrls: [{ url: target }] };
+  const maxMs = opts.maxMs ?? 45000;
+  const num = (x: unknown) => { const n = Number(x); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+  const toMs = (t: unknown) => { const ms = t ? Date.parse(String(t)) : NaN; return Number.isFinite(ms) ? ms : undefined; };
+  try {
+    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+    });
+    if (!runRes.ok) return { costUsd: 0 };
+    const runId = ((await runRes.json()) as any).data?.id;
+    if (!runId) return { costUsd: 0 };
+    const deadline = Date.now() + maxMs;
+    let datasetId: string | undefined; let costUsd = 0;
+    while (Date.now() < deadline) {
+      const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
+      costUsd = st.data?.usageTotalUsd ?? costUsd;
+      const s = st.data?.status;
+      if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { costUsd };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!datasetId) return { costUsd };
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=3`).then((r) => r.json())) as any[];
+    const it = (raw ?? [])[0] ?? {};
+    // Newest post date from whatever post list the profile scraper returned.
+    let latestPostAt: number | undefined;
+    const posts = it.latestPosts ?? it.posts ?? it.topPosts ?? [];
+    for (const p of Array.isArray(posts) ? posts : []) {
+      const ms = toMs(p?.timestamp ?? p?.createTimeISO ?? p?.date ?? p?.publishedAt ?? p?.taken_at);
+      if (ms) latestPostAt = Math.max(latestPostAt ?? 0, ms);
+    }
+    switch (platform) {
+      case "instagram": {
+        const ext = it.externalUrl ?? (Array.isArray(it.externalUrls) ? (it.externalUrls[0]?.url ?? it.externalUrls[0]) : undefined);
+        return { handle: it.username, externalUrl: ext, bio: it.biography, name: it.fullName, latestPostAt, followers: num(it.followersCount), verified: !!it.verified, costUsd };
+      }
+      case "tiktok": {
+        const a = (it.authorMeta ?? {}) as any;
+        return { handle: a.name ?? it.name, externalUrl: a.bioLink ?? a.link, bio: a.signature ?? it.signature, name: a.nickName ?? a.nickname, latestPostAt: latestPostAt ?? toMs(it.createTimeISO), followers: num(a.fans ?? it.fans), verified: !!(a.verified ?? it.verified), costUsd };
+      }
+      default: { // facebook page
+        return { handle: it.pageUrl ?? it.url, externalUrl: it.website ?? (Array.isArray(it.websites) ? it.websites[0] : undefined), bio: it.intro ?? it.about ?? it.pageAbout ?? it.info, name: it.title ?? it.name ?? it.pageName, latestPostAt, followers: num(it.followers ?? it.followersCount ?? it.likes), verified: !!it.verified, costUsd };
+      }
+    }
+  } catch { return { costUsd: 0 }; }
+}
+
 // ── Hashtag discovery (the national industry corpus) ────────────────────────
 // Scrapes the TOP posts under a category hashtag so the best content + accounts
 // EMERGE from engagement (discovery-first), rather than a hand-curated account

@@ -65,8 +65,8 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
     setResolving(true); setResolveMsg(null); setErr(null);
     let updated = 0;
     try {
-      for (let i = 0; i < ids.length; i += 10) {
-        const chunk = ids.slice(i, i + 10).map((id) => { const b = SEED.find((x) => x.id === id)!; return { id, name: b.nm, area: b.area, website: b.web }; });
+      for (let i = 0; i < ids.length; i += 3) {
+        const chunk = ids.slice(i, i + 3).map((id) => { const b = SEED.find((x) => x.id === id)!; return { id, name: b.nm, area: b.area, website: b.web }; });
         const r = await fetch("/api/monitor/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ businesses: chunk }) });
         const d = await r.json();
         if (!r.ok) { setErr(d.error ?? "Re-resolve failed."); break; }

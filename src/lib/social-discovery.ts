@@ -9,7 +9,7 @@
  */
 
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
-import { apifyConfigured, latestActivityAt } from "@/lib/providers/apify/platforms";
+import { apifyConfigured, collectProfileIdentity, type ProfileIdentity } from "@/lib/providers/apify/platforms";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
@@ -190,18 +190,46 @@ function heuristicPlausible(cands: { handle: string }[], name: string): string[]
   return cands.filter((c) => toks.some((t) => norm(c.handle).includes(t))).map((c) => c.handle);
 }
 
-/** Break a tie between multiple accounts of the SAME business by recency — the
- *  currently-active account (most recent post) wins, exactly how a human decides
- *  "which one do they actually use". Scrapes each candidate's newest post date in
- *  parallel, bounded. Returns undefined when no candidate yields a date (all blocked
- *  / not configured) so the caller falls back to the LLM/heuristic pick. */
-async function pickMostRecent(host: SocialHost, handles: string[]): Promise<string | undefined> {
-  const platform = WORD[host];
-  const dated = await Promise.all(
-    handles.slice(0, 3).map(async (h) => ({ h, at: await latestActivityAt(platform, `${PREFIX[host]}${h}`, { maxMs: 28000 }).catch(() => undefined) })),
-  );
-  const known = dated.filter((d) => d.at != null).sort((a, b) => (b.at as number) - (a.at as number));
-  return known[0]?.h; // newest poster; undefined if none returned a date
+/** Does this scraped profile PROVE it belongs to this business? The gold signal is
+ *  the profile linking the business's own website; naming its street address (+city)
+ *  is just as strong; name + city together is acceptable. Name ALONE is NOT enough —
+ *  that's exactly what let unrelated same-name accounts through. Returns a strength
+ *  (3 = website/address proof, 2 = name+city) so the caller can rank multiple proven
+ *  accounts, or 0 when unproven. */
+function identityMatch(id: ProfileIdentity, name: string, ctx: VerifyCtx): number {
+  const flat = (s?: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const dom = domainOf(ctx.website);
+  const hay = flat(`${id.bio ?? ""} ${id.name ?? ""} ${id.handle ?? ""}`);
+  const extDom = domainOf(id.externalUrl);
+  const domainMatch = !!dom && (extDom === dom || (dom.length >= 6 && hay.includes(flat(dom))));
+  const cityTok = flat(ctx.city);
+  const cityHit = cityTok.length >= 3 && hay.includes(cityTok);
+  const nameHit = nameTokens(name).some((t) => hay.includes(t));
+  const streetNo = (ctx.address ?? "").match(/\b\d{3,6}\b/)?.[0];
+  const addrHit = !!streetNo && cityHit && hay.includes(streetNo);
+  if (domainMatch || addrHit) return 3; // proven THIS business
+  if (nameHit && cityHit) return 2;      // name + city — acceptable
+  return 0;                              // unproven → never attach
+}
+
+/** Confirm candidate accounts via Apify (the only channel that can actually load
+ *  the profile) and return the best PROVEN one. Scrapes each candidate's profile in
+ *  parallel (identity + recency in one call), keeps only those the profile proves
+ *  belong to this business, then ranks by proof strength → recency → verified →
+ *  followers. Returns undefined when NONE prove out — the caller then attaches
+ *  nothing (a blank the human fills), never a guessed account. */
+async function confirmProfiles(platform: string, host: SocialHost, handles: string[], name: string, ctx: VerifyCtx): Promise<string | undefined> {
+  if (!handles.length) return undefined;
+  const scored = await Promise.all(handles.map(async (h) => {
+    const id = await collectProfileIdentity(platform, `${PREFIX[host]}${h}`, { maxMs: 40000 }).catch(() => undefined);
+    if (!id) return undefined;
+    const strength = identityMatch(id, name, ctx);
+    return strength ? { h, strength, at: id.latestPostAt ?? 0, followers: id.followers ?? 0, verified: id.verified ? 1 : 0 } : undefined;
+  }));
+  const ok = scored.filter((x): x is NonNullable<typeof x> => !!x);
+  if (!ok.length) return undefined;
+  ok.sort((a, b) => b.strength - a.strength || b.at - a.at || b.verified - a.verified || b.followers - a.followers);
+  return ok[0].h;
 }
 
 export async function reverseGeoCity(geo?: { lat: number; lng: number }): Promise<string> {
@@ -302,34 +330,25 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   }
   const pick = await pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
 
-  // Recency-among-duplicates — but CONFIRM first, THEN prefer the active one.
-  // The order matters: "which posts most recently" is only meaningful AFTER we've
-  // proven each account actually belongs to this business. So when 2+ accounts of
-  // the same business are plausible, first keep only the ones with HARD proof — the
-  // profile links back to the business's own website, or matches its address/phone
-  // (a mere name/city coincidence is NOT enough; that's what let unrelated accounts
-  // in). Only among those confirmed accounts does recency pick the live one
-  // (e.g. @manpasand_atx over the stale @manpasandaustin). If nothing confirms with
-  // hard proof, we DON'T let recency override — we fall back to the careful LLM pick.
-  if (pick.plausible.length >= 2 && apifyConfigured()) {
-    const verified = await Promise.all(
-      pick.plausible.slice(0, 4).map(async (h) => ({ h, v: await verifyProfile(`${PREFIX[host]}${h}`, name, ctx) })),
-    );
-    const confirmed = verified.filter((x) => x.v.backlink || x.v.strong).map((x) => x.h);
-    if (confirmed.length >= 2) {
-      const recent = await pickMostRecent(host, confirmed);
-      if (recent) return { handle: recent, confidence: "high" }; // confirmed AND most active
-    }
-    if (confirmed.length === 1) return { handle: confirmed[0], confidence: "high" };
-    // 0 confirmed with hard proof → fall through to the LLM pick (no recency override).
+  // PROD path (Instagram): CONFIRM via Apify, then prefer the active account.
+  // A plain fetch to instagram.com is blocked from datacenter IPs (Vercel), so the
+  // old web-verify was inert and the raw LLM guess leaked through — which is how
+  // unrelated accounts got attached. Apify can actually load the profile, so we
+  // scrape each name-matching candidate, keep only the ones the profile PROVES are
+  // this business (links our website, or names our address/city), and among those
+  // prefer the currently-active one (@manpasand_atx over stale @manpasandaustin).
+  // If NONE prove out, we attach nothing — a blank the human fills, never a guess.
+  if (host === "instagram.com" && apifyConfigured()) {
+    const pool = [...new Set([pick.chosen, ...pick.plausible, ...heuristicPlausible(all, name)].filter((h): h is string => !!h))].slice(0, 3);
+    const confirmed = await confirmProfiles("instagram", host, pool, name, ctx);
+    return confirmed ? { handle: confirmed, confidence: "high" } : undefined;
   }
 
+  // Non-Apify path (local/dev; and Facebook/TikTok): the LLM pick + best-effort web
+  // verify. Returns nothing rather than a guess when the model isn't confident.
   const chosen = pick.chosen;
   if (!chosen) return undefined;
-  // Verify the pick like a human would: open the profile, look for a link back to
-  // the business site (definitive) or its city/name. Backlink → high confidence.
   const v = await verifyProfile(`${PREFIX[host]}${chosen}`, name, ctx);
-  // Backlink OR a hard address/phone match → high confidence (trusted, auto-verified).
   return { handle: chosen, confidence: v.backlink || v.strong ? "high" : "medium" };
 }
 
