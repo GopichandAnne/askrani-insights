@@ -298,15 +298,30 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
     await new Promise((r) => setTimeout(r, 350));
   }
   const pick = await pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
-  let chosen = pick.chosen;
-  // When the same business has 2+ plausible accounts (an old one and a live one),
-  // pick the CURRENTLY-ACTIVE one by which still posts — the way a human narrows it
-  // down (e.g. @manpasand_atx over the stale @manpasandaustin). Bounded, and dormant
-  // unless Apify is configured; when it can't get dates it leaves the LLM pick alone.
+
+  // Recency-among-duplicates — but CONFIRM first, THEN prefer the active one.
+  // The order matters: "which posts most recently" is only meaningful AFTER we've
+  // proven each account actually belongs to this business. So when 2+ accounts of
+  // the same business are plausible, first keep only the ones with HARD proof — the
+  // profile links back to the business's own website, or matches its address/phone
+  // (a mere name/city coincidence is NOT enough; that's what let unrelated accounts
+  // in). Only among those confirmed accounts does recency pick the live one
+  // (e.g. @manpasand_atx over the stale @manpasandaustin). If nothing confirms with
+  // hard proof, we DON'T let recency override — we fall back to the careful LLM pick.
   if (pick.plausible.length >= 2 && apifyConfigured()) {
-    const recent = await pickMostRecent(host, pick.plausible);
-    if (recent) chosen = recent;
+    const verified = await Promise.all(
+      pick.plausible.slice(0, 4).map(async (h) => ({ h, v: await verifyProfile(`${PREFIX[host]}${h}`, name, ctx) })),
+    );
+    const confirmed = verified.filter((x) => x.v.backlink || x.v.strong).map((x) => x.h);
+    if (confirmed.length >= 2) {
+      const recent = await pickMostRecent(host, confirmed);
+      if (recent) return { handle: recent, confidence: "high" }; // confirmed AND most active
+    }
+    if (confirmed.length === 1) return { handle: confirmed[0], confidence: "high" };
+    // 0 confirmed with hard proof → fall through to the LLM pick (no recency override).
   }
+
+  const chosen = pick.chosen;
   if (!chosen) return undefined;
   // Verify the pick like a human would: open the profile, look for a link back to
   // the business site (definitive) or its city/name. Backlink → high confidence.
@@ -495,7 +510,7 @@ export async function findSocialHandles(
   ];
   for (const [key, host] of hosts) {
     if (!want[key]) continue;
-    const r = await findHandle(name, city, host, state, { website: ctx.website, city });
+    const r = await findHandle(name, city, host, state, { website: ctx.website, city, address: ctx.address, phone: ctx.phone });
     if (r && !isGenericHandle(r.handle)) {
       out[key] = `${PREFIX[host]}${r.handle}`;
       (out.confidence ??= {})[key] = r.confidence;
