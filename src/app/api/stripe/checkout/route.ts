@@ -29,7 +29,6 @@ export async function POST(req: Request) {
       customer = created.id;
       await setStripeCustomer(auth.orgId, customer);
     }
-    const isPayment = item.mode === "payment";
     const session = await s.checkout.sessions.create({
       mode: item.mode,
       customer,
@@ -44,20 +43,11 @@ export async function POST(req: Request) {
       billing_address_collection: "required",
       customer_update: { name: "auto", address: "auto" },
       tax_id_collection: { enabled: true },
-      // Subscriptions invoice automatically each cycle; one-time top-ups only emit
-      // a receipt UNLESS we ask for an invoice — so enable it for payment mode.
-      // Stripe then finalizes a real invoice (hosted page + PDF) for the purchase.
-      ...(isPayment
-        ? {
-            invoice_creation: {
-              enabled: true,
-              invoice_data: {
-                metadata: { orgId: auth.orgId, key: String(key) },
-                footer: "Thank you for your purchase — Ask Rani Insights.",
-              },
-            },
-          }
-        : {}),
+      // NOTE: we do NOT pass invoice_creation/invoice_data. Managed Payments (enabled
+      // on this Stripe account — Stripe as merchant of record) generates its own
+      // tax-compliant receipts/invoices, and rejects invoice_creation[invoice_data]
+      // ("not supported when Managed Payments is enabled"). So one-time top-ups rely
+      // on Stripe's managed receipt/invoice instead of a custom invoice_data block.
     });
     return NextResponse.json({ url: session.url });
   } catch (e) {
