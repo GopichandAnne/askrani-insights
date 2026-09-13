@@ -35,6 +35,7 @@ const ICONS = {
   report: <svg {...I}><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v6h6" /><path d="M9 17v-3M12 17v-5M15 17v-2" /></svg>,
   assistant: <svg {...I}><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" /><path d="M8.5 10.5h.01M12 10.5h.01M15.5 10.5h.01" /></svg>,
   add: <svg {...I}><circle cx="12" cy="12" r="9" /><path d="M12 8.5v7M8.5 12h7" /></svg>,
+  queue: <svg {...I}><rect x="3" y="4" width="5" height="5" rx="1" /><path d="m4.2 6.4 1 1 1.7-2" /><path d="M11 6.5h10" /><rect x="3" y="12" width="5" height="5" rx="1" /><path d="M11 14.5h10" /></svg>,
   admin: <svg {...I}><path d="M12 3 5 6v5c0 4.4 3 8 7 9 4-1 7-4.6 7-9V6l-7-3Z" /><path d="m9.5 12 1.8 1.8L15 10" /></svg>,
   watch: <svg {...I}><circle cx="12" cy="12" r="3" /><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /></svg>,
   grow: <svg {...I}><path d="M12 20v-9" /><path d="M12 11c0-3 2.5-5 6-5 0 3.5-2.5 5-6 5Z" /><path d="M12 13c0-2.5-2-4.5-5-4.5 0 3 2 4.5 5 4.5Z" /></svg>,
