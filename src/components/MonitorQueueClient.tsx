@@ -20,13 +20,22 @@ const SEED: Biz[] = [
   { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", ig: "manpasandaustin", place: true },
   { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", ig: "desibrothersaustin", place: true, fb: "995560993644381", note: "Corrected to the Austin account (was the DFW handle) — confirm via Open ↗." },
   { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", ig: "indiabazaaraustin", place: true, fb: "929976970198035" },
-  { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Austin", web: "https://www.big-bazaar.co", ig: "", place: true },
+  { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Cedar Park", web: "https://www.big-bazaar.co", ig: "bigbazaar789", place: true, note: "Two similar Big Bazaar accounts exist — @bigbazaar789 is the one tagged Cedar Park. Confirm via Open ↗." },
   { id: "g5", nm: "Gandhi Bazar", vertical: "grocery", area: "Austin", web: "http://www.gandhi-bazar.com", ig: "" },
   { id: "g6", nm: "International Foods (Halal)", vertical: "grocery", area: "Austin", web: "https://ifatx.com", ig: "internationalfoodsaustin", place: true },
   { id: "g7", nm: "Dana Bazaar Indian Supermarket", vertical: "grocery", area: "Austin", web: "https://danabazaarsupermarket.com", ig: "danabazaarsupermarket" },
   { id: "g8", nm: "Iqbal Foods", vertical: "grocery", area: "Austin", ig: "", place: true },
   { id: "g9", nm: "H Mart (Lakeline)", vertical: "grocery", area: "Austin", web: "https://www.hmart.com", ig: "hmartofficial", place: true, fb: "105951276119949", note: "Korean grocer, not Indian — a competitor. Confirm you want it in the set." },
-  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Cedar Park", web: "https://www.patelbros.com", ig: "patelbrothers", place: true, note: "Open in Cedar Park (2026). No dedicated local Instagram — only national @patelbrothers — so its Google listing / flyers are the better local signal to watch." },
+  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Cedar Park", web: "https://www.patelbros.com", ig: "patelbrotherscedarpark", place: true, note: "Open in Cedar Park (2026). Confirm the local @patelbrotherscedarpark via Open ↗." },
+  // ── Discovered via web search (not yet in the DB) — validate before selecting ──
+  { id: "r11", nm: "Teji's", vertical: "restaurant", area: "Austin", ig: "tejisindian", place: true },
+  { id: "r12", nm: "Tulsi Indian Cuisine", vertical: "restaurant", area: "Austin", ig: "tulsifineindian_austin", place: true },
+  { id: "r13", nm: "Kuppanna Indian Restaurant", vertical: "restaurant", area: "Austin", ig: "kuppannaaustin", place: true },
+  { id: "r14", nm: "Aroma — Indian Food Park", vertical: "restaurant", area: "Round Rock", ig: "aromaaustin", place: true },
+  { id: "r15", nm: "Bayleaf Indian Restaurant & Bar", vertical: "restaurant", area: "Round Rock", ig: "bayleaf_indian_restaurant_bar", place: true },
+  { id: "r16", nm: "Asiana Indian Cuisine", vertical: "restaurant", area: "Austin", ig: "asiana_indian_cuisine", place: true },
+  { id: "g11", nm: "Khana Khazana ATX", vertical: "grocery", area: "Cedar Park", ig: "khana_khazana_atx", place: true },
+  { id: "g12", nm: "MTM Indian Grocery & Fish", vertical: "grocery", area: "Austin", ig: "mtmindianfoodsinc", place: true },
 ];
 
 const mapsUrl = (b: Biz) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.nm} ${b.area} TX`)}`;
