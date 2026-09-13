@@ -18,6 +18,7 @@ import { generateRivalReviews, rivalReviewsIsGood } from "@/lib/rivalreviews";
 import { generateInspiration, inspirationIsGood } from "@/lib/inspiration";
 import { generateFestivalPlanner, festivalIsGood } from "@/lib/festival";
 import { generateFallingBehind, fallingBehindIsGood } from "@/lib/fallingbehind";
+import { generateFacets, facetsIsGood } from "@/lib/facets";
 import { snapshotMarket, recordMarketEvents } from "@/lib/panel";
 import { buildPriceCanon } from "@/lib/pricecanon";
 import { refreshObjectives } from "@/lib/objectives";
@@ -86,6 +87,7 @@ export async function warmWorkspaceSynthesis(workspaceId: string): Promise<void>
     // market_event log (this cycle's artifacts are banked later by recordMarketEvents
     // in the tail, so the freshest cycle lands on the next warm — fine for a detector
     // over multi-week history). One LLM pass; self-heals on failure.
+    { key: "facets", run: () => generateFacets(row, db), good: (v) => facetsIsGood(v) },
     { key: "fallingBehind", run: () => generateFallingBehind(row, db), good: (v) => fallingBehindIsGood(v) && !v?.failed },
     // NOTE (2026-09-04): the dental priceAnchors + insurance pillars were removed
     // here when dental's special surfaces were disabled (see collect.ts
