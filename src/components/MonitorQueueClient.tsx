@@ -17,11 +17,11 @@ const CHAN: { key: Chan; label: string; icon: string; base: string }[] = [
 
 const SEED: Biz[] = [
   { id: "r1", nm: "Desi Circle", vertical: "restaurant", area: "Austin", web: "https://desicircleusa.com", place: true, handles: { instagram: "desicircleaustin" } },
-  { id: "r2", nm: "Foodistaan", vertical: "restaurant", area: "Austin", web: "https://www.foodistaan.us", place: true, handles: { instagram: "foodistaan.us", facebook: "foodistaan.usa" } },
+  { id: "r2", nm: "Foodistaan", vertical: "restaurant", area: "Cedar Park", web: "https://www.foodistaan.us", place: true, handles: { instagram: "foodistaancp" }, note: "Location account — @foodistaancp (Cedar Park), not the national @foodistaan.us." },
   { id: "r3", nm: "House of Chettinad", vertical: "restaurant", area: "Austin", web: "https://www.houseofchettinad.com", place: true, handles: { instagram: "houseofchettinad_", tiktok: "houseofchettinad_" } },
-  { id: "r4", nm: "Bawarchi Indian Cuisine & Bar", vertical: "restaurant", area: "Leander", web: "https://www.bawarchibiryanis.us", place: true, handles: { instagram: "bawarchibiryanis_usa", facebook: "bawarchirestaurantsusa", youtube: "bawarchibiryanis-us" } },
+  { id: "r4", nm: "Bawarchi Indian Cuisine & Bar", vertical: "restaurant", area: "Leander", web: "https://www.bawarchibiryanis.us", place: true, handles: { instagram: "bawarchi_indiancuisine_bar_tx" }, note: "Location account — @bawarchi_indiancuisine_bar_tx (Leander), not the national @bawarchibiryanis_usa." },
   { id: "r5", nm: "Chowrastha", vertical: "restaurant", area: "Austin", web: "http://desichowrastha.com", place: true, handles: { instagram: "desichowrastha", facebook: "chowrastha-104748712131254" } },
-  { id: "r6", nm: "Hashtag India", vertical: "restaurant", area: "Austin", web: "https://www.hashtagindia.com", place: true, handles: { instagram: "hashtagindia_" } },
+  { id: "r6", nm: "Hashtag India", vertical: "restaurant", area: "Leander", web: "https://www.hashtagindia.com", place: true, handles: { instagram: "hashtagindia.leander" }, note: "Location account — @hashtagindia.leander, not the national @hashtagindia_ (all 15 stores)." },
   { id: "r7", nm: "Naga's Indian Cuisine", vertical: "restaurant", area: "Cedar Park", web: "https://nagasaustin.com", place: true, handles: { instagram: "nagasaustin" } },
   { id: "r8", nm: "Salt N Pepper Gourmet Indian Fare", vertical: "restaurant", area: "Cedar Park", web: "https://saltnpepperusa.com", place: true, handles: { instagram: "saltnpepper_cedarpark" } },
   { id: "r9", nm: "Tandoor Restaurant & Catering", vertical: "restaurant", area: "Austin", web: "https://www.tandoortx.com", place: true, handles: {} },
@@ -33,7 +33,7 @@ const SEED: Biz[] = [
   { id: "r15", nm: "Bayleaf Indian Restaurant & Bar", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "bayleaf_indian_restaurant_bar" } },
   { id: "r16", nm: "Asiana Indian Cuisine", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "asiana_indian_cuisine" } },
   { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", place: true, handles: { instagram: "manpasandaustin" } },
-  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin", facebook: "desibrothers.dfw" }, note: "Facebook reads DFW — confirm the Austin page (IG corrected to the Austin account)." },
+  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin" }, note: "Location account — @desibrothersaustin (the DFW Facebook was dropped as wrong-metro)." },
   { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", place: true, handles: { instagram: "indiabazaaraustin" } },
   { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Cedar Park", web: "https://www.big-bazaar.co", place: true, handles: { instagram: "bigbazaar789" }, note: "Two similar Big Bazaar IG accounts — @bigbazaar789 is the Cedar Park one. Confirm." },
   { id: "g5", nm: "Gandhi Bazar", vertical: "grocery", area: "Austin", web: "http://www.gandhi-bazar.com", place: true, handles: { facebook: "gandhibazarstore" }, note: "Only a Facebook page found — add their Instagram if they have one." },
@@ -53,12 +53,42 @@ export function MonitorQueueClient() {
   const [sel, setSel] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveMsg, setResolveMsg] = useState<string | null>(null);
   const [done, setDone] = useState<{ created: { workspaceId: string; vertical: string; count: number }[]; total: number } | null>(null);
 
   const groups = useMemo(() => ({ restaurant: SEED.filter((b) => b.vertical === "restaurant"), grocery: SEED.filter((b) => b.vertical === "grocery") }), []);
   const chanCount = (id: string) => CHAN.filter((c) => (handles[id]?.[c.key] ?? "").trim()).length;
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const setH = (id: string, key: Chan, v: string) => setHandles((s) => ({ ...s, [id]: { ...s[id], [key]: v.replace(/^@+/, "").trim() } }));
+
+  // Intelligent, location-aware re-resolution: run the app's resolver over the
+  // selected businesses so a multi-location brand resolves to its LOCAL account
+  // (e.g. @foodistaancp) instead of the national one. Chunked (the resolver is slow).
+  async function resolveSelected() {
+    const ids = [...sel];
+    if (!ids.length) { setResolveMsg("Select the businesses to re-resolve first."); return; }
+    setResolving(true); setResolveMsg(null); setErr(null);
+    let updated = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 10) {
+        const chunk = ids.slice(i, i + 10).map((id) => { const b = SEED.find((x) => x.id === id)!; return { id, name: b.nm, area: b.area, website: b.web }; });
+        const r = await fetch("/api/monitor/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ businesses: chunk }) });
+        const d = await r.json();
+        if (!r.ok) { setErr(d.error ?? "Re-resolve failed."); break; }
+        setHandles((s) => {
+          const next = { ...s };
+          for (const res of d.results ?? []) {
+            const h = res.handles ?? {};
+            if (Object.keys(h).length) { next[res.id] = { ...next[res.id], ...h }; updated++; }
+          }
+          return next;
+        });
+      }
+      setResolveMsg(`Re-resolved handles for ${updated} of ${ids.length} selected — review the ↗ links, then collect.`);
+    } catch (e) { setErr((e as Error).message); }
+    finally { setResolving(false); }
+  }
 
   async function begin() {
     if (!sel.size) return;
@@ -91,9 +121,16 @@ export function MonitorQueueClient() {
 
   return (
     <div className="space-y-6">
-      <p className="rounded-xl border border-line/60 bg-surface-sunken px-4 py-3 text-sm text-ink-soft">
-        Each business is watched across <b>Instagram, Facebook, TikTok &amp; YouTube</b> (confirm the handles below) plus <b>Website, Google &amp; Yelp</b> (automatic — matched by name &amp; location, no handle needed).
-      </p>
+      <div className="rounded-xl border border-line/60 bg-surface-sunken px-4 py-3 text-sm text-ink-soft">
+        <p>Each business is watched across <b>Instagram, Facebook, TikTok &amp; YouTube</b> (confirm the handles below) plus <b>Website, Google &amp; Yelp</b> (automatic — matched by name &amp; location, no handle needed).</p>
+        <div className="mt-2.5 flex flex-wrap items-center gap-3">
+          <button onClick={resolveSelected} disabled={resolving} className="rounded-lg border border-brand/40 bg-brand/10 px-3 py-1.5 text-[13px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50">
+            {resolving ? "Re-resolving…" : "🔍 Re-resolve selected (location-aware)"}
+          </button>
+          <span className="text-xs text-ink-faint">Picks the <b>local</b> account for a multi-location brand (e.g. @foodistaancp, not the national handle).</span>
+        </div>
+        {resolveMsg && <p className="mt-2 text-xs text-brand">{resolveMsg}</p>}
+      </div>
 
       {(["restaurant", "grocery"] as const).map((key) => (
         <section key={key} className="space-y-2">
