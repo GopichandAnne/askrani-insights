@@ -18,7 +18,7 @@ const SEED: Biz[] = [
   { id: "r9", nm: "Tandoor Restaurant & Catering", vertical: "restaurant", area: "Austin", web: "https://www.tandoortx.com", ig: "" },
   { id: "r10", nm: "Sangam Chettinad Indian Cuisine", vertical: "restaurant", area: "Austin", web: "https://www.sangamchettinad.com", ig: "austinsangam", place: true },
   { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", ig: "manpasandaustin", place: true },
-  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", ig: "desibrothersdfw", place: true, fb: "995560993644381", note: "Handle reads DFW — confirm it's the Austin account, not Dallas." },
+  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", ig: "desibrothersaustin", place: true, fb: "995560993644381", note: "Corrected to the Austin account (was the DFW handle) — confirm via Open ↗." },
   { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", ig: "indiabazaaraustin", place: true, fb: "929976970198035" },
   { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Austin", web: "https://www.big-bazaar.co", ig: "", place: true },
   { id: "g5", nm: "Gandhi Bazar", vertical: "grocery", area: "Austin", web: "http://www.gandhi-bazar.com", ig: "" },
@@ -26,6 +26,7 @@ const SEED: Biz[] = [
   { id: "g7", nm: "Dana Bazaar Indian Supermarket", vertical: "grocery", area: "Austin", web: "https://danabazaarsupermarket.com", ig: "danabazaarsupermarket" },
   { id: "g8", nm: "Iqbal Foods", vertical: "grocery", area: "Austin", ig: "", place: true },
   { id: "g9", nm: "H Mart (Lakeline)", vertical: "grocery", area: "Austin", web: "https://www.hmart.com", ig: "hmartofficial", place: true, fb: "105951276119949", note: "Korean grocer, not Indian — a competitor. Confirm you want it in the set." },
+  { id: "g10", nm: "Patel Brothers", vertical: "grocery", area: "Austin", web: "https://www.patelbros.com", ig: "patelbrothers", place: true, note: "National chain; the Austin store is new/upcoming and shares the national @patelbrothers. Confirm there's a local presence worth watching before selecting." },
 ];
 
 const mapsUrl = (b: Biz) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${b.nm} ${b.area} TX`)}`;
