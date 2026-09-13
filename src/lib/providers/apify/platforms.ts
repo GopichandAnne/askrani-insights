@@ -381,6 +381,56 @@ export async function collectProfileStats(
   } catch { return { costUsd: 0 }; }
 }
 
+// ── Recency signal (which account is CURRENTLY active) ──────────────────────
+// When a business has several accounts (an old/abandoned one and a live one), the
+// only reliable way to tell which is current is "which one still posts" — exactly
+// how a human narrows it down. This runs the posts Actor with a TINY window (we
+// only need the newest few dates) and returns the most-recent post time in ms, or
+// undefined when unknown. Dormant unless APIFY_TOKEN + the platform Actor are set.
+export async function latestActivityAt(
+  platform: string,
+  target: string,
+  opts: { maxMs?: number } = {},
+): Promise<number | undefined> {
+  const token = process.env.APIFY_TOKEN;
+  const cfg = CONFIG[platform];
+  if (!token || !cfg) return undefined;
+  const actor = cfg.actor();
+  if (!actor) return undefined;
+  // Tiny result window — we only need the newest post's timestamp, not the feed.
+  const input =
+    platform === "instagram" ? { directUrls: [target], resultsType: "posts", resultsLimit: 3 }
+    : platform === "tiktok" ? { profiles: [handleOf(target)], resultsPerPage: 3 }
+    : { startUrls: [{ url: target }], resultsLimit: 3 };
+  const maxMs = opts.maxMs ?? 30000;
+  try {
+    const runRes = await fetch(`https://api.apify.com/v2/acts/${actor}/runs?token=${token}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
+    });
+    if (!runRes.ok) return undefined;
+    const runId = ((await runRes.json()) as any).data?.id;
+    if (!runId) return undefined;
+    const deadline = Date.now() + maxMs;
+    let datasetId: string | undefined;
+    while (Date.now() < deadline) {
+      const st = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`).then((r) => r.json() as any);
+      const s = st.data?.status;
+      if (s === "SUCCEEDED") { datasetId = st.data?.defaultDatasetId; break; }
+      if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return undefined;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    if (!datasetId) return undefined;
+    const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=5`).then((r) => r.json())) as any[];
+    let newest: number | undefined;
+    for (const it of raw ?? []) {
+      const ts = it.timestamp ?? it.createTimeISO ?? it.date ?? it.publishedAt ?? it.time;
+      const ms = ts ? Date.parse(String(ts)) : NaN;
+      if (Number.isFinite(ms)) newest = Math.max(newest ?? 0, ms);
+    }
+    return newest;
+  } catch { return undefined; }
+}
+
 // ── Hashtag discovery (the national industry corpus) ────────────────────────
 // Scrapes the TOP posts under a category hashtag so the best content + accounts
 // EMERGE from engagement (discovery-first), rather than a hand-curated account

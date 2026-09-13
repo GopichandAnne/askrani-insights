@@ -9,6 +9,7 @@
  */
 
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
+import { apifyConfigured, latestActivityAt } from "@/lib/providers/apify/platforms";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
@@ -119,45 +120,85 @@ const PICK_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    handle: { type: "string", description: "The exact handle (no @, no URL) that belongs to THIS business at THIS location, or empty string if none of the candidates clearly match." },
+    handle: { type: "string", description: "The single best handle (no @, no URL) that belongs to THIS business at THIS location, or empty string if none of the candidates clearly match." },
     confident: { type: "boolean", description: "true only if you're confident it's the same business (name + location fit)." },
+    plausible: {
+      type: "array",
+      items: { type: "string" },
+      description: "Every candidate handle (no @) that could belong to THIS SAME business at THIS location — INCLUDE the old/abandoned duplicate accounts of the same business here (a stale account will be filtered out later by which one still posts). EXCLUDE any account for a DIFFERENT city/metro or a DIFFERENT business. Usually 1; give 2+ only when the same business genuinely has multiple accounts.",
+    },
   },
-  required: ["handle", "confident"],
+  required: ["handle", "confident", "plausible"],
 };
 
+/** What the picker returns: the single best guess (when confident) plus every
+ *  handle that plausibly belongs to THIS same business at THIS location. When 2+
+ *  are plausible, the caller breaks the tie by recency (which account still posts). */
+interface Pick { chosen?: string; plausible: string[]; }
+
 /** Intelligent pick: let the model choose the account that matches this business
- *  + location from the candidates. Falls back to the heuristic when unavailable. */
+ *  + location, AND surface every account that plausibly belongs to this SAME
+ *  business here (old + current duplicates) so the caller can break the tie by
+ *  recency. Falls back to the heuristic when the LLM is unavailable. */
 async function pickIntelligent(
   cands: { handle: string; url: string; context: string }[],
   name: string,
   city: string,
   platform: string,
   cityToken: string,
-): Promise<string | undefined> {
-  if (!cands.length) return undefined;
+): Promise<Pick> {
+  if (!cands.length) return { plausible: [] };
   // No lone-candidate shortcut: even a single result must pass the name check in
   // pickHeuristic, so a same-name account for a different business isn't attached.
-  if (!isLlmConfigured()) return pickHeuristic(cands, name, cityToken);
+  if (!isLlmConfigured()) { const h = pickHeuristic(cands, name, cityToken); return { chosen: h, plausible: heuristicPlausible(cands, name) }; }
   try {
     const list = cands.map((c, i) => `${i + 1}. @${c.handle} — ${c.context || "(no description)"}`).join("\n");
-    const { data } = await getLlm().callStructured<{ handle: string; confident: boolean }>({
+    const { data } = await getLlm().callStructured<{ handle: string; confident: boolean; plausible?: string[] }>({
       system: `You verify the official ${platform} account for a SPECIFIC local business location, the way a careful human would — not by matching the name, but by checking it's THIS business at THIS place and it's the CURRENT account.\n` +
         `RULES:\n` +
         `1) Location: many brands run a separate account per city/metro (e.g. "@indiabazaraustin" vs "@indiabazardfw", or a bio saying "Frisco, TX"). REJECT any account whose handle or description points to a DIFFERENT city/metro — a same-name account for another metro is WRONG, not a fallback.\n` +
-        `2) Multiple accounts of the SAME business: a business often has an OLD/abandoned account and a CURRENT one. Prefer the one that reads as the current, primary presence for this location (its description fits this city, looks active/official). Do NOT just pick the one with the most posts — an old account can have more posts than the live one.\n` +
-        `3) Don't guess: if two accounts both plausibly fit this location and you can't tell which is current from the descriptions, return an EMPTY handle (a human will confirm) rather than pick the wrong/stale one. Attaching a stale or wrong account is worse than attaching none.\n` +
-        `Return the exact handle from the list (no '@'), or empty.`,
+        `2) Multiple accounts of the SAME business: a business often has an OLD/abandoned account and a CURRENT one. List ALL of them in "plausible" (they'll be disambiguated by which one still posts). For "handle", give your single best guess for the current primary account; do NOT just pick the one with the most posts — an old account can have more posts than the live one.\n` +
+        `3) Don't guess a single answer when unsure: if two accounts of the same business both fit this location and you can't tell which is current from the descriptions, still list BOTH in "plausible" but set confident=false (a recency check or a human will settle it). Attaching a stale or wrong account is worse than attaching none.\n` +
+        `Return exact handles from the list (no '@').`,
       text: `Business: "${name}"\nCity: ${city || "(unknown)"}\n\nCandidate ${platform} accounts (handle — page name/description):\n${list}`,
       schema: PICK_SCHEMA,
       tier: "classify",
-      maxTokens: 120,
+      maxTokens: 160,
     });
-    const chosen = String(data.handle ?? "").replace(/^@/, "").trim();
-    if (chosen && data.confident && !NEVER_HANDLE.has(chosen.toLowerCase()) && cands.some((c) => c.handle.toLowerCase() === chosen.toLowerCase())) return chosen;
-    return undefined; // model not confident → don't attach a wrong account
+    const valid = (h: unknown) => { const s = String(h ?? "").replace(/^@/, "").trim(); return s && !NEVER_HANDLE.has(s.toLowerCase()) && cands.some((c) => c.handle.toLowerCase() === s.toLowerCase()) ? s : undefined; };
+    const plausible = [...new Set((data.plausible ?? []).map(valid).filter((s): s is string => !!s))];
+    const best = valid(data.handle);
+    if (best && !plausible.some((p) => p.toLowerCase() === best.toLowerCase())) plausible.unshift(best);
+    // chosen = the confident single pick; when not confident we leave it undefined
+    // and let the caller decide (recency among `plausible`, else attach nothing).
+    return { chosen: best && data.confident ? best : undefined, plausible };
   } catch {
-    return pickHeuristic(cands, name, cityToken);
+    const h = pickHeuristic(cands, name, cityToken);
+    return { chosen: h, plausible: heuristicPlausible(cands, name) };
   }
+}
+
+/** Name-matching candidates, for the recency tie-break when the LLM is unavailable.
+ *  Same "must contain a distinctive name token" bar as pickHeuristic (never the
+ *  whole result list), so recency only ever chooses among real same-name accounts. */
+function heuristicPlausible(cands: { handle: string }[], name: string): string[] {
+  const norm = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const toks = nameTokens(name);
+  return cands.filter((c) => toks.some((t) => norm(c.handle).includes(t))).map((c) => c.handle);
+}
+
+/** Break a tie between multiple accounts of the SAME business by recency — the
+ *  currently-active account (most recent post) wins, exactly how a human decides
+ *  "which one do they actually use". Scrapes each candidate's newest post date in
+ *  parallel, bounded. Returns undefined when no candidate yields a date (all blocked
+ *  / not configured) so the caller falls back to the LLM/heuristic pick. */
+async function pickMostRecent(host: SocialHost, handles: string[]): Promise<string | undefined> {
+  const platform = WORD[host];
+  const dated = await Promise.all(
+    handles.slice(0, 3).map(async (h) => ({ h, at: await latestActivityAt(platform, `${PREFIX[host]}${h}`, { maxMs: 28000 }).catch(() => undefined) })),
+  );
+  const known = dated.filter((d) => d.at != null).sort((a, b) => (b.at as number) - (a.at as number));
+  return known[0]?.h; // newest poster; undefined if none returned a date
 }
 
 export async function reverseGeoCity(geo?: { lat: number; lng: number }): Promise<string> {
@@ -256,7 +297,16 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
     if (all.length >= 6) break; // enough to reason over
     await new Promise((r) => setTimeout(r, 350));
   }
-  const chosen = await pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
+  const pick = await pickIntelligent(all.slice(0, 8), name, city, word, cityToken);
+  let chosen = pick.chosen;
+  // When the same business has 2+ plausible accounts (an old one and a live one),
+  // pick the CURRENTLY-ACTIVE one by which still posts — the way a human narrows it
+  // down (e.g. @manpasand_atx over the stale @manpasandaustin). Bounded, and dormant
+  // unless Apify is configured; when it can't get dates it leaves the LLM pick alone.
+  if (pick.plausible.length >= 2 && apifyConfigured()) {
+    const recent = await pickMostRecent(host, pick.plausible);
+    if (recent) chosen = recent;
+  }
   if (!chosen) return undefined;
   // Verify the pick like a human would: open the profile, look for a link back to
   // the business site (definitive) or its city/name. Backlink → high confidence.
