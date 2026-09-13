@@ -6,7 +6,11 @@ import { useMemo, useState } from "react";
 // resolved from their own sites + web search (Sep 2026). Every handle is a
 // SUGGESTION to validate — open the profile to confirm it's the right account.
 type Chan = "instagram" | "facebook" | "tiktok" | "youtube";
-type Biz = { id: string; nm: string; vertical: "restaurant" | "grocery"; area: string; web?: string; place?: boolean; note?: string; handles: Partial<Record<Chan, string>> };
+type Vert = "restaurant" | "grocery";
+// facets: a business can be BOTH (Foodistaan/Desi Circle sell groceries; many desi
+// grocers have a deli/hot counter). It's then watched & compared in each. Defaults
+// to [vertical]; pre-marked for the obvious hybrids, human-adjustable in the UI.
+type Biz = { id: string; nm: string; vertical: Vert; area: string; web?: string; place?: boolean; note?: string; handles: Partial<Record<Chan, string>>; facets?: Vert[] };
 
 const CHAN: { key: Chan; label: string; icon: string; base: string }[] = [
   { key: "instagram", label: "Instagram", icon: "📸", base: "https://instagram.com/" },
@@ -16,8 +20,8 @@ const CHAN: { key: Chan; label: string; icon: string; base: string }[] = [
 ];
 
 const SEED: Biz[] = [
-  { id: "r1", nm: "Desi Circle", vertical: "restaurant", area: "Austin", web: "https://desicircleusa.com", place: true, handles: { instagram: "desicircleaustin" } },
-  { id: "r2", nm: "Foodistaan", vertical: "restaurant", area: "Cedar Park", web: "https://www.foodistaan.us", place: true, handles: { instagram: "foodistaancp" }, note: "Location account — @foodistaancp (Cedar Park), not the national @foodistaan.us." },
+  { id: "r1", nm: "Desi Circle", vertical: "restaurant", area: "Austin", web: "https://desicircleusa.com", place: true, handles: { instagram: "desicircleaustin" }, facets: ["restaurant", "grocery"] },
+  { id: "r2", nm: "Foodistaan", vertical: "restaurant", area: "Cedar Park", web: "https://www.foodistaan.us", place: true, handles: { instagram: "foodistaancp" }, note: "Location account — @foodistaancp (Cedar Park), not the national @foodistaan.us.", facets: ["restaurant", "grocery"] },
   { id: "r3", nm: "House of Chettinad", vertical: "restaurant", area: "Austin", web: "https://www.houseofchettinad.com", place: true, handles: { instagram: "houseofchettinad_", tiktok: "houseofchettinad_" } },
   { id: "r4", nm: "Bawarchi Indian Cuisine & Bar", vertical: "restaurant", area: "Leander", web: "https://www.bawarchibiryanis.us", place: true, handles: { instagram: "bawarchi_indiancuisine_bar_tx" }, note: "Location account — @bawarchi_indiancuisine_bar_tx (Leander), not the national @bawarchibiryanis_usa." },
   { id: "r5", nm: "Chowrastha", vertical: "restaurant", area: "Austin", web: "http://desichowrastha.com", place: true, handles: { instagram: "desichowrastha", facebook: "chowrastha-104748712131254" } },
@@ -32,9 +36,9 @@ const SEED: Biz[] = [
   { id: "r14", nm: "Aroma — Indian Food Park", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "aromaaustin" } },
   { id: "r15", nm: "Bayleaf Indian Restaurant & Bar", vertical: "restaurant", area: "Round Rock", place: true, handles: { instagram: "bayleaf_indian_restaurant_bar" } },
   { id: "r16", nm: "Asiana Indian Cuisine", vertical: "restaurant", area: "Austin", place: true, handles: { instagram: "asiana_indian_cuisine" } },
-  { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", place: true, handles: { instagram: "manpasandaustin" } },
-  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin" }, note: "Location account — @desibrothersaustin (the DFW Facebook was dropped as wrong-metro)." },
-  { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", place: true, handles: { instagram: "indiabazaaraustin" } },
+  { id: "g1", nm: "Man Pasand Supermarket", vertical: "grocery", area: "Austin", web: "https://www.manpasandsupermarket.com", place: true, handles: { instagram: "manpasandaustin" }, facets: ["grocery", "restaurant"] },
+  { id: "g2", nm: "Desi Brothers Farmers Market", vertical: "grocery", area: "Austin", web: "http://www.desibrothers.com", place: true, handles: { instagram: "desibrothersaustin" }, note: "Location account — @desibrothersaustin (the DFW Facebook was dropped as wrong-metro).", facets: ["grocery", "restaurant"] },
+  { id: "g3", nm: "India Bazaar Austin", vertical: "grocery", area: "Cedar Park", web: "https://www.indiabazaar.us", place: true, handles: { instagram: "indiabazaaraustin" }, facets: ["grocery", "restaurant"] },
   { id: "g4", nm: "Big Bazaar Fresh Market", vertical: "grocery", area: "Cedar Park", web: "https://www.big-bazaar.co", place: true, handles: { instagram: "bigbazaar789" }, note: "Two similar Big Bazaar IG accounts — @bigbazaar789 is the Cedar Park one. Confirm." },
   { id: "g5", nm: "Gandhi Bazar", vertical: "grocery", area: "Austin", web: "http://www.gandhi-bazar.com", place: true, handles: { facebook: "gandhibazarstore" }, note: "Only a Facebook page found — add their Instagram if they have one." },
   { id: "g6", nm: "International Foods (Halal)", vertical: "grocery", area: "Austin", web: "https://ifatx.com", place: true, handles: { instagram: "internationalfoodsaustin" } },
@@ -50,6 +54,7 @@ const mapsUrl = (b: Biz) => `https://www.google.com/maps/search/?api=1&query=${e
 
 export function MonitorQueueClient() {
   const [handles, setHandles] = useState<Record<string, Partial<Record<Chan, string>>>>(() => Object.fromEntries(SEED.map((b) => [b.id, { ...b.handles }])));
+  const [facets, setFacets] = useState<Record<string, Vert[]>>(() => Object.fromEntries(SEED.map((b) => [b.id, b.facets ?? [b.vertical]])));
   const [sel, setSel] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -60,6 +65,12 @@ export function MonitorQueueClient() {
   const groups = useMemo(() => ({ restaurant: SEED.filter((b) => b.vertical === "restaurant"), grocery: SEED.filter((b) => b.vertical === "grocery") }), []);
   const chanCount = (id: string) => CHAN.filter((c) => (handles[id]?.[c.key] ?? "").trim()).length;
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const other = (b: Biz): Vert => (b.vertical === "restaurant" ? "grocery" : "restaurant");
+  const isHybrid = (b: Biz) => (facets[b.id] ?? [b.vertical]).includes(other(b));
+  const toggleFacet = (b: Biz) => setFacets((s) => {
+    const cur = s[b.id] ?? [b.vertical]; const o = other(b);
+    return { ...s, [b.id]: cur.includes(o) ? cur.filter((f) => f !== o) : [...cur, o] };
+  });
   const setH = (id: string, key: Chan, v: string) => setHandles((s) => ({ ...s, [id]: { ...s[id], [key]: v.replace(/^@+/, "").trim() } }));
 
   // Intelligent, location-aware re-resolution: run the app's resolver over the
@@ -93,7 +104,7 @@ export function MonitorQueueClient() {
   async function begin() {
     if (!sel.size) return;
     setBusy(true); setErr(null);
-    const businesses = [...sel].map((id) => { const b = SEED.find((x) => x.id === id)!; return { name: b.nm, vertical: b.vertical, website: b.web, handles: handles[id] ?? {} }; });
+    const businesses = [...sel].map((id) => { const b = SEED.find((x) => x.id === id)!; return { name: b.nm, vertical: b.vertical, website: b.web, handles: handles[id] ?? {}, facets: facets[id] ?? [b.vertical] }; });
     try {
       const r = await fetch("/api/monitor/selected", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: "Austin, TX", businesses }) });
       const d = await r.json();
@@ -152,6 +163,10 @@ export function MonitorQueueClient() {
                         <span className="font-semibold">{b.nm}</span>
                         <span className="text-xs text-ink-faint">{b.area}</span>
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${n ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"}`}>{n ? `${n} channel${n === 1 ? "" : "s"}` : "web/Google only"}</span>
+                        <button type="button" onClick={() => toggleFacet(b)} title="Some restaurants also sell groceries (and some grocers have a deli). A hybrid is watched & compared in both."
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isHybrid(b) ? "bg-brand/15 text-brand" : "border border-line/60 text-ink-faint hover:border-brand hover:text-brand"}`}>
+                          {isHybrid(b) ? "🍽️ + 🛒 both" : `+ also ${other(b)}`}
+                        </button>
                       </div>
                       <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
                         {CHAN.map((c) => {

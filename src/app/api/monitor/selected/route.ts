@@ -38,24 +38,27 @@ export async function POST(req: Request) {
       const rawH = (b.handles ?? {}) as Record<string, unknown>;
       const handles: Record<string, string> = {};
       for (const c of CHANS) { const h = cleanHandle(rawH[c] ?? (c === "instagram" ? b.handle ?? b.instagram : "")); if (h) handles[c] = h; }
-      return {
-        name: clean(b.name),
-        website: b.website ? clean(b.website, 300) : undefined,
-        vertical: VERTS.has(String(b.vertical)) ? String(b.vertical) : "restaurant",
-        handles,
-      };
+      const primary = VERTS.has(String(b.vertical)) ? String(b.vertical) : "restaurant";
+      // Facets: a business can be BOTH a restaurant AND a grocery (Foodistaan, Desi
+      // Circle sell groceries; many grocers have a deli/hot counter). It's then watched
+      // and compared in EACH facet, not forced into one. Default = its primary vertical.
+      const rawF = Array.isArray(b.facets) ? (b.facets as unknown[]).map(String) : [];
+      const facets = [...new Set([primary, ...rawF.filter((f) => VERTS.has(f))])].slice(0, 3);
+      return { name: clean(b.name), website: b.website ? clean(b.website, 300) : undefined, vertical: primary, facets, handles };
     })
     .filter((b: { name: string }) => b.name.length > 1)
     .slice(0, 40);
   if (!businesses.length) return badRequest("Select at least one business to monitor.");
 
-  // Group per vertical → one area workspace each (clean detector branches).
-  const groups = new Map<string, typeof businesses>();
-  for (const b of businesses) (groups.get(b.vertical) ?? groups.set(b.vertical, []).get(b.vertical)!).push(b);
+  // One area workspace per vertical; a hybrid business is attached to EVERY facet's
+  // workspace, so it competes with restaurants on its food AND grocers on its groceries.
+  const groups = new Map<string, { name: string; website?: string; vertical: string; handles: Record<string, string> }[]>();
+  for (const b of businesses) for (const f of b.facets) (groups.get(f) ?? groups.set(f, []).get(f)!).push({ name: b.name, website: b.website, vertical: f, handles: b.handles });
 
-  // Charge once, up front, on the whole batch. Gate on balance before creating anything.
-  const quote = quoteAreaMonitor(businesses.length);
-  const charged = await spendCredits(auth.orgId, quote, "monitor_selected_start", { label, businessCount: businesses.length, verticals: [...groups.keys()] });
+  // Charge on the total workspace instances (a hybrid is collected in 2 workspaces).
+  const instances = [...groups.values()].reduce((n, l) => n + l.length, 0);
+  const quote = quoteAreaMonitor(instances);
+  const charged = await spendCredits(auth.orgId, quote, "monitor_selected_start", { label, businessCount: businesses.length, instances, verticals: [...groups.keys()] });
   if (!charged) return NextResponse.json({ needsCredits: true, quote, balance: await getBalance(auth.orgId) }, { status: 402 });
 
   try {
