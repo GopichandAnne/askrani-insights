@@ -248,9 +248,12 @@ export async function collectBusiness(
   // function limit (~300s). Slow sources beyond the budget are skipped this
   // run and picked up on the next scan. `only` restricts to named sources.
   const started = Date.now();
-  const budgetMs = opts.budgetMs ?? 250_000;
+  // Budget sized so worst case fits the 300s function limit: the worker only starts a
+  // job with ~120s elapsed (worker/tick drain headroom), so 120 + ~150 + tail < 300.
+  const budgetMs = opts.budgetMs ?? 150_000;
   const wants = (s: string) => !opts.only || opts.only.includes(s);
   const hasTime = () => Date.now() - started < budgetMs;
+  const remainingMs = () => Math.max(0, budgetMs - (Date.now() - started));
 
   const { data: biz, error: bErr } = await svc
     .from("business")
@@ -634,7 +637,10 @@ export async function collectBusiness(
   const DELIVERY = new Set(["doordash", "ubereats"]);
   for (const platform of APIFY_PLATFORMS) {
     if (!platformActorConfigured(platform) || !wants(platform)) continue;
-    if (!hasTime()) break; // out of time budget — remaining sources next scan
+    // Cap each scrape to the budget still left, so an in-flight run can't overshoot the
+    // pass budget (and the function limit). Stop if too little time remains for one.
+    const scrapeMs = Math.min(120000, remainingMs());
+    if (scrapeMs < 8000) break; // out of time budget — remaining sources next scan
     const isDelivery = DELIVERY.has(platform);
     if (isDelivery && !foodVertical) continue; // no delivery apps for non-food verticals
     const url = identityUrl(platform);
@@ -655,7 +661,7 @@ export async function collectBusiness(
     let apifyCost = 0;
     let apifyRunErr: string | undefined;
     try {
-      const res = await collectApifyPlatform(platform, target, { maxMs: 150000, address: attrs.address, searchQuery });
+      const res = await collectApifyPlatform(platform, target, { maxMs: scrapeMs, address: attrs.address, searchQuery });
       apifyCost = res.costUsd;
       if (res.error) errors.push(`apify:${platform}: ${res.error}`);
       for (const post of res.items) {

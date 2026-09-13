@@ -31,6 +31,12 @@ const handleOf = (url: string) => {
   return m ? m[1].replace(/^@/, "") : url;
 };
 
+/** Best-effort: stop a run we're abandoning after our poll deadline, so it doesn't
+ *  keep executing — and billing — on Apify's side once we've stopped waiting for it. */
+async function abortApifyRun(runId: string, token: string): Promise<void> {
+  try { await fetch(`https://api.apify.com/v2/actor-runs/${runId}/abort?token=${token}`, { method: "POST" }); } catch { /* best-effort */ }
+}
+
 const CONFIG: Record<string, PlatformConfig> = {
   instagram: {
     actor: () => env("APIFY_INSTAGRAM_ACTOR") ?? "apify~instagram-scraper",
@@ -301,7 +307,7 @@ export async function collectApifyPlatform(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd, error: `run ${s}` };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { items: [], costUsd, error: "run still going past time budget" }; // still running past our budget
+    if (!datasetId) { await abortApifyRun(runId, token); return { items: [], costUsd, error: "run still going past time budget" }; } // aborted: was still running past our budget
 
     const raw = (await fetch(
       `https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`,
@@ -363,7 +369,7 @@ export async function collectProfileStats(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { costUsd };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { costUsd };
+    if (!datasetId) { await abortApifyRun(runId, token); return { costUsd }; }
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=1`).then((r) => r.json())) as any[];
     const it = (raw ?? [])[0] ?? {};
     switch (platform) {
@@ -419,7 +425,7 @@ export async function latestActivityAt(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return undefined;
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return undefined;
+    if (!datasetId) { await abortApifyRun(runId, token); return undefined; }
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=5`).then((r) => r.json())) as any[];
     let newest: number | undefined;
     for (const it of raw ?? []) {
@@ -516,7 +522,7 @@ export async function collectProfileIdentities(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return [];
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return [];
+    if (!datasetId) { await abortApifyRun(runId, token); return []; }
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true&limit=${uniq.length + 3}`).then((r) => r.json())) as any[];
     return (raw ?? []).map((it) => mapIdentity(platform, it, costUsd));
   } catch { return []; }
@@ -625,7 +631,7 @@ export async function collectApifyAdLibrary(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { items: [], costUsd };
+    if (!datasetId) { await abortApifyRun(runId, token); return { items: [], costUsd }; }
 
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`).then((r) => r.json())) as any[];
     const items: RivalAd[] = (raw ?? []).map((it) => mapAdItem(it)).filter((a) => a.text.length > 0 || a.snapshotUrl);
@@ -669,7 +675,7 @@ export async function collectApifyHashtag(
       if (s === "FAILED" || s === "ABORTED" || s === "TIMED-OUT") return { items: [], costUsd };
       await new Promise((r) => setTimeout(r, 1500));
     }
-    if (!datasetId) return { items: [], costUsd };
+    if (!datasetId) { await abortApifyRun(runId, token); return { items: [], costUsd }; }
 
     const raw = (await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&clean=true`).then((r) => r.json())) as any[];
     const items: IndustryPost[] = (raw ?? []).map((it) => ({
