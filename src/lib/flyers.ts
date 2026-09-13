@@ -3,7 +3,7 @@ import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyPlatform, apifyConfigured, collectProfileStats } from "@/lib/providers/apify/platforms";
 import { youtubeChannelStats } from "@/lib/providers/youtube";
-import { refundCredits, planOfOrg, retentionDaysForPlan } from "@/lib/credits";
+import { refundCredits, planOfOrg, retentionDaysForPlan, spendForCost } from "@/lib/credits";
 
 /**
  * Flyer deal extraction — the grocery goldmine. Groceries/restaurants post their
@@ -212,33 +212,35 @@ async function runPool<T>(tasks: (() => Promise<T>)[], concurrency: number): Pro
  *  IG/FB/TikTok/YouTube stats in parallel, then SELF-COMMIT the per-channel points
  *  to goals.socialTimeline in its own update — so followers persist every scan even
  *  if the heavier flyer image scrape later times out. Returns points banked. */
-async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: number): Promise<number> {
+async function captureFollowers(ws: WorkspaceRow, svc: Svc, retentionDays: number): Promise<{ count: number; costUsd: number }> {
   const now = new Date().toISOString();
   const ids = await workspaceBusinessIds(ws, svc as any);
   const bizIds = [...ids.competitorIds, ...(ws.target_business_id ? [ws.target_business_id] : [])];
-  if (!bizIds.length) return 0;
+  if (!bizIds.length) return { count: 0, costUsd: 0 };
   const [{ data: biz }, { data: idents }] = await Promise.all([
     svc.from("business").select("id, canonical_name").in("id", bizIds),
     svc.from("external_identity").select("business_id, url, platform").in("platform", ["instagram", "facebook", "tiktok", "youtube"]).in("business_id", bizIds),
   ]);
   const nameById = new Map<string, string>((biz ?? []).map((b: any) => [b.id as string, b.canonical_name as string]));
   const results: { name: string; channel: string; followers: number }[] = [];
+  let cost = 0; // real profile-stats scrape spend (accumulated across the pool)
   const tasks = (idents ?? []).map((r: any) => async () => {
-    // YouTube subscribers come from the official Data API; everything else via the profile-stats scrape
-    const followers = r.platform === "youtube"
-      ? (await youtubeChannelStats(r.url)).subscribers
-      : (await collectProfileStats(r.platform, r.url, { maxMs: 35000 })).followers;
+    // YouTube subscribers come from the official Data API (no Apify cost); everything else via the profile-stats scrape
+    let followers: number | undefined;
+    if (r.platform === "youtube") { followers = (await youtubeChannelStats(r.url)).subscribers; }
+    else { const s = await collectProfileStats(r.platform, r.url, { maxMs: 35000 }); cost += s.costUsd ?? 0; followers = s.followers; }
     if (followers != null) results.push({ name: nameById.get(r.business_id) ?? "?", channel: r.platform, followers });
   });
   await runPool(tasks, 5);
-  if (!results.length) return 0;
+  const costUsd = Number(cost.toFixed(4));
+  if (!results.length) return { count: 0, costUsd };
   // self-commit: read → bank → write ONLY socialTimeline, in its own short update
   const { data: gRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
   const timeline = { ...((goals.socialTimeline as Record<string, TLPoint[]>) ?? {}) };
   for (const r of results) bankChannelFollowers(timeline, r.name, r.channel, r.followers, now, retentionDays);
   await svc.from("workspace").update({ goals: { ...goals, socialTimeline: timeline } }).eq("id", ws.id);
-  return results.length;
+  return { count: results.length, costUsd };
 }
 
 async function visionExtract(ws: WorkspaceRow, flyers: Flyer[]): Promise<{ deals: FlyerDeal[]; visuals: { rival: string; note: string }[] }> {
@@ -356,11 +358,12 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
 
   const retentionDays = retentionDaysForPlan(await planOfOrg(job.orgId));
   // capture followers FIRST (self-commits its own update) so they persist even if
-  // the heavier image scrape below times out
-  if (job.cursor === 0) { try { await captureFollowers(ws, svc, retentionDays); } catch { /* followers are best-effort */ } }
+  // the heavier image scrape below times out. Fold its scrape cost into the job total.
+  let followerCost = 0;
+  if (job.cursor === 0) { try { followerCost = (await captureFollowers(ws, svc, retentionDays)).costUsd; } catch { /* followers are best-effort */ } }
 
   const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
-  let costUsd = job.costUsd;
+  let costUsd = job.costUsd + followerCost;
   let done = 0;
   for (const t of slice) {
     if (Date.now() > deadline) break;
@@ -396,6 +399,12 @@ export async function runFlyerBatch(ws: WorkspaceRow, opts: { batchSize?: number
   if (finished && flyersRead === 0 && job.charged > 0) {
     await refundCredits(job.orgId, job.charged, "flyer_read_refund", { workspaceId: ws.id });
   }
+  // Record the real Apify COGS (Phase-1, record-only) for the AUTO monitoring path
+  // (charged === 0). The manual pay-per-scan flyer read (charged > 0) already paid its
+  // up-front quote, so we skip it there to avoid stacking a second charge.
+  if (finished && job.charged === 0 && costUsd > 0) {
+    await spendForCost(job.orgId, costUsd, { kind: "flyers_auto", workspaceId: ws.id, flyersRead });
+  }
   return { status: finished ? "done" : "running", processed: cursor, total: job.total, flyersRead, deals: mergedRival.length };
 }
 
@@ -421,9 +430,11 @@ export async function refreshFlyers(
 
   const { data: gRow } = await svc.from("workspace").select("goals, organization_id").eq("id", ws.id).maybeSingle();
   const goals = ((gRow?.goals as Record<string, unknown>) ?? {});
-  const retentionDays = retentionDaysForPlan(await planOfOrg((gRow as any)?.organization_id));
+  const orgId = (gRow as any)?.organization_id as string | undefined;
+  const retentionDays = retentionDaysForPlan(await planOfOrg(orgId as string));
   // capture followers first (self-commits) so they persist regardless of the scrape
-  try { await captureFollowers(ws, svc, retentionDays); } catch { /* followers are best-effort */ }
+  let followerCost = 0;
+  try { followerCost = (await captureFollowers(ws, svc, retentionDays)).costUsd; } catch { /* followers are best-effort */ }
   const prevRival = (goals.flyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const prevOwn = (goals.myFlyerDeals as FlyerReport | undefined) ?? { deals: [], flyersRead: 0, at: "" };
   const cursor = Number((goals as any).flyerCursor ?? 0) || 0;
@@ -433,7 +444,7 @@ export async function refreshFlyers(
   const scrapeList = [...ownProfiles, ...rotatedRivals];
 
   const ownFlyers: Flyer[] = [], rivalFlyers: Flyer[] = [];
-  let costUsd = 0; let rivalScraped = 0;
+  let costUsd = followerCost; let rivalScraped = 0;
   const hardStop = Date.now() + 230000;
   for (const t of scrapeList) {
     if (Date.now() > hardStop) break;
@@ -455,5 +466,9 @@ export async function refreshFlyers(
   const { data: freshRow } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const writeGoals = ((freshRow?.goals as Record<string, unknown>) ?? goals);
   await svc.from("workspace").update({ goals: { ...writeGoals, flyerDeals: rivalReport, myFlyerDeals: ownReport, visuals: mergedVisuals, flyerCursor: nextCursor } }).eq("id", ws.id);
+  // Record real Apify COGS (Phase-1, record-only). This synchronous path is called
+  // only from uncharged routes (deep-read finalize + the worker-auth flyers/refresh),
+  // so there's no per-call quote to double up on.
+  if (orgId && costUsd > 0) await spendForCost(orgId, costUsd, { kind: "flyers_auto", workspaceId: ws.id });
   return { activated: true, flyers: rivalFlyers.length + ownFlyers.length, deals: rivalFresh.length + ownFresh.length, costUsd: Number(costUsd.toFixed(4)) };
 }

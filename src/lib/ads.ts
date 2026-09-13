@@ -2,6 +2,7 @@ import { createClient, createServiceClient, type RlsClient } from "@/lib/supabas
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyAdLibrary, adLibraryConfigured, type RivalAd } from "@/lib/providers/apify/platforms";
+import { spendForCost } from "@/lib/credits";
 
 /**
  * "What rivals are paying to promote" — competitor ads from the Meta Ad Library.
@@ -142,8 +143,13 @@ export async function refreshCompetitorAds(
   }
   if (!ads.length) report.empty = true;
 
-  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const { data: cur } = await svc.from("workspace").select("goals, organization_id").eq("id", ws.id).maybeSingle();
   await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), ads: report } }).eq("id", ws.id);
+  // Record the real Ad-Library scrape cost (Phase-1, record-only — never blocks) so
+  // this auto-every-cycle spend is tracked in the ledger like every other scrape,
+  // instead of being silently discarded. No per-call ads quote exists anywhere.
+  const orgId = (cur as any)?.organization_id as string | undefined;
+  if (orgId && costUsd > 0) await spendForCost(orgId, costUsd, { kind: "competitor_ads", workspaceId: ws.id, advertisers: advertisers.length });
   return { activated: true, scraped: ads.length, advertisers: advertisers.length, costUsd: Number(costUsd.toFixed(4)) };
 }
 
