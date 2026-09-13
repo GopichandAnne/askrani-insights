@@ -335,7 +335,7 @@ async function verifyProfile(url: string, name: string, ctx: VerifyCtx): Promise
   }
 }
 
-async function findHandle(name: string, city: string, host: SocialHost, state: { searched: boolean }, ctx: VerifyCtx): Promise<{ handle: string; confidence: HandleConfidence } | undefined> {
+async function findHandle(name: string, city: string, host: SocialHost, state: { searched: boolean }, ctx: VerifyCtx, seedHandle?: string): Promise<{ handle: string; confidence: HandleConfidence } | undefined> {
   const clean = cleanName(name);
   const loc = city ? ` ${city}` : "";
   const cityToken = city.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -369,7 +369,11 @@ async function findHandle(name: string, city: string, host: SocialHost, state: {
   // prefer the currently-active one (@manpasand_atx over stale @manpasandaustin).
   // If NONE prove out, we attach nothing — a blank the human fills, never a guess.
   if (host === "instagram.com" && apifyConfigured()) {
-    const pool = [...new Set([pick.chosen, ...pick.plausible, ...heuristicPlausible(all, name)].filter((h): h is string => !!h))].slice(0, 3);
+    // Include the handle we ALREADY have (seedHandle) in the pool, so re-resolve
+    // verifies it too — if the profile doesn't exist / isn't this business it fails
+    // confirmation and a proven account replaces it (or none does → caller flags it).
+    const seed = (seedHandle ?? "").replace(/^@+/, "").trim();
+    const pool = [...new Set([seed, pick.chosen, ...pick.plausible, ...heuristicPlausible(all, name)].filter((h): h is string => !!h))].slice(0, 4);
     const confirmed = await confirmProfiles("instagram", host, pool, name, ctx);
     return confirmed ? { handle: confirmed, confidence: "high" } : undefined;
   }
@@ -552,6 +556,7 @@ export async function findSocialHandles(
   city: string,
   want: SocialWant = { instagram: true, facebook: true, tiktok: true },
   ctx: VerifyCtx = {},
+  seed: Partial<Record<"instagram" | "facebook" | "tiktok", string>> = {},
 ): Promise<SocialFound> {
   const state = { searched: false };
   const out: SocialFound = { searched: false };
@@ -562,7 +567,7 @@ export async function findSocialHandles(
   ];
   for (const [key, host] of hosts) {
     if (!want[key]) continue;
-    const r = await findHandle(name, city, host, state, { website: ctx.website, city, address: ctx.address, phone: ctx.phone });
+    const r = await findHandle(name, city, host, state, { website: ctx.website, city, address: ctx.address, phone: ctx.phone }, seed[key]);
     if (r && !isGenericHandle(r.handle)) {
       out[key] = `${PREFIX[host]}${r.handle}`;
       (out.confidence ??= {})[key] = r.confidence;

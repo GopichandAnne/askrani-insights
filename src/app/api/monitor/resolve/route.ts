@@ -24,24 +24,38 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const raw = Array.isArray(body.businesses) ? body.businesses : [];
+  const cleanH = (s: unknown) => String(s ?? "").replace(/^@+/, "").replace(/[^A-Za-z0-9_.\-]/g, "").slice(0, 40);
   const businesses = raw
-    .map((b: Record<string, unknown>) => ({
-      id: String(b.id ?? ""),
-      name: String(b.name ?? "").slice(0, 120).trim(),
-      city: String(b.area ?? "").slice(0, 60).trim(),
-      website: b.website ? String(b.website).slice(0, 300) : undefined,
-    }))
+    .map((b: Record<string, unknown>) => {
+      const rawH = (b.handles ?? {}) as Record<string, unknown>;
+      const seed: Partial<Record<"instagram" | "facebook" | "tiktok", string>> = {};
+      for (const k of ["instagram", "facebook", "tiktok"] as const) { const h = cleanH(rawH[k]); if (h) seed[k] = h; }
+      return {
+        id: String(b.id ?? ""),
+        name: String(b.name ?? "").slice(0, 120).trim(),
+        city: String(b.area ?? "").slice(0, 60).trim(),
+        website: b.website ? String(b.website).slice(0, 300) : undefined,
+        seed,
+      };
+    })
     .filter((b: { id: string; name: string }) => b.id && b.name)
     .slice(0, 6); // bounded: each resolves via searches + LLM + Apify profile confirmation
 
-  const results = await Promise.all(businesses.map(async (b: { id: string; name: string; city: string; website?: string }) => {
+  const results = await Promise.all(businesses.map(async (b: { id: string; name: string; city: string; website?: string; seed: Partial<Record<"instagram" | "facebook" | "tiktok", string>> }) => {
     try {
-      const found = await findSocialHandles(b.name, b.city, { instagram: true, facebook: true, tiktok: true }, { website: b.website, city: b.city });
+      const found = await findSocialHandles(b.name, b.city, { instagram: true, facebook: true, tiktok: true }, { website: b.website, city: b.city }, b.seed);
       const handles: Record<string, string> = {};
-      for (const k of ["instagram", "facebook", "tiktok"] as const) { const h = bare(found[k]); if (h) handles[k] = h; }
-      return { id: b.id, handles, confidence: found.confidence ?? {} };
+      const unverified: string[] = [];
+      for (const k of ["instagram", "facebook", "tiktok"] as const) {
+        const h = bare(found[k]);
+        if (h) handles[k] = h;
+        // We had a handle but couldn't confirm any account for this channel — flag it
+        // (the account may not exist / may not be this business) so the human can act.
+        else if (b.seed[k]) unverified.push(k);
+      }
+      return { id: b.id, handles, confidence: found.confidence ?? {}, unverified };
     } catch (e) {
-      return { id: b.id, handles: {}, error: (e as Error).message };
+      return { id: b.id, handles: {}, unverified: [], error: (e as Error).message };
     }
   }));
 

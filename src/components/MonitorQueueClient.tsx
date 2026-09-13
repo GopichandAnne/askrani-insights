@@ -43,6 +43,9 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
   }, [handles, facets]);
   const [resolving, setResolving] = useState(false);
   const [resolveMsg, setResolveMsg] = useState<string | null>(null);
+  // Channels a re-resolve couldn't confirm (the account may not exist / not be this
+  // business) — shown as ⚠ so you know to check the ↗ link and fix or clear it.
+  const [unverified, setUnverified] = useState<Record<string, Chan[]>>({});
   const [done, setDone] = useState<{ created: { workspaceId: string; vertical: string; count: number }[]; total: number } | null>(null);
 
   const groups = useMemo(() => ({ restaurant: SEED.filter((b) => b.vertical === "restaurant"), grocery: SEED.filter((b) => b.vertical === "grocery") }), [SEED]);
@@ -63,10 +66,10 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
     const ids = [...sel];
     if (!ids.length) { setResolveMsg("Select the businesses to re-resolve first."); return; }
     setResolving(true); setResolveMsg(null); setErr(null);
-    let updated = 0;
+    let filledN = 0, replacedN = 0, flaggedN = 0;
     try {
       for (let i = 0; i < ids.length; i += 3) {
-        const chunk = ids.slice(i, i + 3).map((id) => { const b = SEED.find((x) => x.id === id)!; return { id, name: b.nm, area: b.area, website: b.web }; });
+        const chunk = ids.slice(i, i + 3).map((id) => { const b = SEED.find((x) => x.id === id)!; return { id, name: b.nm, area: b.area, website: b.web, handles: handles[id] ?? {} }; });
         const r = await fetch("/api/monitor/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ businesses: chunk }) });
         const d = await r.json();
         if (!r.ok) { setErr(d.error ?? "Re-resolve failed."); break; }
@@ -74,21 +77,33 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
           const next = { ...s };
           for (const res of d.results ?? []) {
             const h = (res.handles ?? {}) as Partial<Record<Chan, string>>;
+            const conf = (res.confidence ?? {}) as Partial<Record<Chan, "high" | "medium">>;
             const cur = { ...next[res.id] };
-            let filled = false;
-            // FILL BLANKS ONLY — never overwrite a handle you've set/curated. A single
-            // bad auto-resolve used to clobber good handles and the auto-save persisted
-            // it. To replace a wrong one, clear the field then re-resolve.
             for (const c of CHAN.map((x) => x.key)) {
               const v = (h[c] ?? "").trim();
-              if (v && !((cur[c] ?? "").trim())) { cur[c] = v; filled = true; }
+              if (!v) continue;
+              const curV = (cur[c] ?? "").trim();
+              // Fill any blank. REPLACE a non-blank ONLY when the result is proven
+              // (Instagram: Apify-confirmed the profile is this business). An unproven
+              // guess never overwrites a handle you've curated.
+              if (!curV) { cur[c] = v; filledN++; }
+              else if (conf[c] === "high" && curV.toLowerCase() !== v.toLowerCase()) { cur[c] = v; replacedN++; }
             }
-            if (filled) { next[res.id] = cur; updated++; }
+            next[res.id] = cur;
           }
           return next;
         });
+        setUnverified((u) => {
+          const n = { ...u };
+          for (const res of d.results ?? []) {
+            const flags = ((res.unverified ?? []) as Chan[]).filter((c) => CHAN.some((x) => x.key === c));
+            if (flags.length) { n[res.id] = flags; flaggedN += flags.length; } else delete n[res.id];
+          }
+          return n;
+        });
       }
-      setResolveMsg(`Filled blank handles for ${updated} of ${ids.length} selected — your existing handles were kept. To replace a wrong one, clear the field then re-resolve.`);
+      const parts = [replacedN && `replaced ${replacedN}`, filledN && `filled ${filledN}`, flaggedN && `⚠ ${flaggedN} couldn't be verified`].filter(Boolean);
+      setResolveMsg(parts.length ? `${parts.join(", ")}. Open the ↗ links to check; a ⚠ handle may not exist — fix or clear it.` : `Nothing to change — your handles look set. (⚠ marks any that couldn't be verified.)`);
     } catch (e) { setErr((e as Error).message); }
     finally { setResolving(false); }
   }
@@ -128,9 +143,9 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
         <p>Each business is watched across <b>Instagram, Facebook, TikTok &amp; YouTube</b> (confirm the handles below) plus <b>Website, Google &amp; Yelp</b> (automatic — matched by name &amp; location, no handle needed).</p>
         <div className="mt-2.5 flex flex-wrap items-center gap-3">
           <button onClick={resolveSelected} disabled={resolving} className="rounded-lg border border-brand/40 bg-brand/10 px-3 py-1.5 text-[13px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50">
-            {resolving ? "Resolving…" : "🔍 Fill blank handles (location-aware)"}
+            {resolving ? "Verifying…" : "🔍 Verify & fill handles"}
           </button>
-          <span className="text-xs text-ink-faint">Only fills <b>empty</b> channels — never overwrites a handle you&apos;ve set. To replace a wrong one, clear it first.</span>
+          <span className="text-xs text-ink-faint">Confirms each Instagram account really exists &amp; is this business (via profile scrape); fills blanks, replaces a wrong one only when it proves a better account, and marks <span className="text-rose-500">⚠</span> any it can&apos;t verify.</span>
           <span className="ml-auto text-xs text-ink-faint">{saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved — your edits persist" : "Edits save automatically"}</span>
         </div>
         {resolveMsg && <p className="mt-2 text-xs text-brand">{resolveMsg}</p>}
@@ -164,11 +179,13 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
                       <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
                         {CHAN.map((c) => {
                           const v = (handles[b.id]?.[c.key] ?? "").trim();
+                          const flagged = (unverified[b.id] ?? []).includes(c.key) && !!v;
                           return (
                             <div key={c.key} className="flex items-center gap-1.5">
                               <span className="w-7 text-center text-sm" title={c.label} aria-hidden>{c.icon}</span>
                               <input value={v} onChange={(e) => setH(b.id, c.key, e.target.value)} placeholder={`${c.label} handle`} spellCheck={false} autoCapitalize="off"
-                                className="min-w-0 flex-1 rounded-lg border border-line/60 bg-surface-sunken px-2.5 py-1 font-mono text-[13px] outline-none focus:border-brand" />
+                                className={`min-w-0 flex-1 rounded-lg border bg-surface-sunken px-2.5 py-1 font-mono text-[13px] outline-none focus:border-brand ${flagged ? "border-rose-400 dark:border-rose-500" : "border-line/60"}`} />
+                              {flagged && <span title="Couldn't verify this account exists / belongs to this business — check the ↗ link, then fix or clear it." className="text-xs text-rose-500" aria-label="unverified">⚠</span>}
                               <a href={v ? `${c.base}${v}` : undefined} target="_blank" rel="noopener noreferrer" aria-disabled={!v}
                                 className={`rounded-md px-2 py-1 text-xs font-medium ${v ? "bg-brand/10 text-brand hover:bg-brand/20" : "pointer-events-none text-ink-faint"}`}>↗</a>
                             </div>
