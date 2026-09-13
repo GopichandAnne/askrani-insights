@@ -91,6 +91,9 @@ function candidatesFor(results: SearchResult[], host: SocialHost): { handle: str
     const handle = m[1].replace(/^@/, "");
     const lc = handle.toLowerCase();
     if (GENERIC[host].includes(lc) || NEVER_HANDLE.has(lc)) continue;
+    // Platform script/SEO paths (story.php, profile.php, sharer.php, …) match the
+    // handle regex but are never a real account — reject anything ending in .php.
+    if (/\.php$/i.test(lc)) continue;
     if (seen.has(lc)) continue;
     seen.add(handle.toLowerCase());
     out.push({ handle, url: r.url, context: `${r.title ?? ""} ${r.description ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 160) });

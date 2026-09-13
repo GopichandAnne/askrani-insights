@@ -73,13 +73,22 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
         setHandles((s) => {
           const next = { ...s };
           for (const res of d.results ?? []) {
-            const h = res.handles ?? {};
-            if (Object.keys(h).length) { next[res.id] = { ...next[res.id], ...h }; updated++; }
+            const h = (res.handles ?? {}) as Partial<Record<Chan, string>>;
+            const cur = { ...next[res.id] };
+            let filled = false;
+            // FILL BLANKS ONLY — never overwrite a handle you've set/curated. A single
+            // bad auto-resolve used to clobber good handles and the auto-save persisted
+            // it. To replace a wrong one, clear the field then re-resolve.
+            for (const c of CHAN.map((x) => x.key)) {
+              const v = (h[c] ?? "").trim();
+              if (v && !((cur[c] ?? "").trim())) { cur[c] = v; filled = true; }
+            }
+            if (filled) { next[res.id] = cur; updated++; }
           }
           return next;
         });
       }
-      setResolveMsg(`Re-resolved handles for ${updated} of ${ids.length} selected — review the ↗ links, then collect.`);
+      setResolveMsg(`Filled blank handles for ${updated} of ${ids.length} selected — your existing handles were kept. To replace a wrong one, clear the field then re-resolve.`);
     } catch (e) { setErr((e as Error).message); }
     finally { setResolving(false); }
   }
@@ -119,9 +128,9 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
         <p>Each business is watched across <b>Instagram, Facebook, TikTok &amp; YouTube</b> (confirm the handles below) plus <b>Website, Google &amp; Yelp</b> (automatic — matched by name &amp; location, no handle needed).</p>
         <div className="mt-2.5 flex flex-wrap items-center gap-3">
           <button onClick={resolveSelected} disabled={resolving} className="rounded-lg border border-brand/40 bg-brand/10 px-3 py-1.5 text-[13px] font-medium text-brand hover:bg-brand/20 disabled:opacity-50">
-            {resolving ? "Re-resolving…" : "🔍 Re-resolve selected (location-aware)"}
+            {resolving ? "Resolving…" : "🔍 Fill blank handles (location-aware)"}
           </button>
-          <span className="text-xs text-ink-faint">Picks the <b>local</b> account for a multi-location brand (e.g. @foodistaancp, not the national handle).</span>
+          <span className="text-xs text-ink-faint">Only fills <b>empty</b> channels — never overwrites a handle you&apos;ve set. To replace a wrong one, clear it first.</span>
           <span className="ml-auto text-xs text-ink-faint">{saveState === "saving" ? "Saving…" : saveState === "saved" ? "✓ Saved — your edits persist" : "Edits save automatically"}</span>
         </div>
         {resolveMsg && <p className="mt-2 text-xs text-brand">{resolveMsg}</p>}
