@@ -110,6 +110,17 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
 
   async function begin() {
     if (!sel.size) return;
+    // Collection watches at most 15 businesses per category (the createAreaWorkspace
+    // cap). A hybrid counts in BOTH its categories. Block here rather than let the
+    // server silently drop the extras after charging.
+    const PER_VERTICAL_CAP = 15;
+    const perVert: Record<string, number> = {};
+    for (const id of sel) { const b = SEED.find((x) => x.id === id)!; for (const f of (facets[id] ?? [b.vertical])) perVert[f] = (perVert[f] ?? 0) + 1; }
+    const over = Object.entries(perVert).filter(([, n]) => n > PER_VERTICAL_CAP);
+    if (over.length) {
+      setErr(`You can monitor at most ${PER_VERTICAL_CAP} per category (a “both” business counts in each). Selected: ${over.map(([v, n]) => `${n} ${v}`).join(", ")}. Deselect a few, or start a second batch after this one.`);
+      return;
+    }
     setBusy(true); setErr(null);
     const businesses = [...sel].map((id) => { const b = SEED.find((x) => x.id === id)!; return { name: b.nm, vertical: b.vertical, website: b.web, handles: handles[id] ?? {}, facets: facets[id] ?? [b.vertical] }; });
     try {
@@ -127,10 +138,13 @@ export function MonitorQueueClient({ initial }: { initial: Candidate[] }) {
   }
 
   if (done) {
+    // Show the TRUE number of monitored instances (sum of what each workspace
+    // actually created), not just the selected count — a hybrid is watched in two.
+    const made = done.created.reduce((n, c) => n + c.count, 0);
     return (
       <div className="glass-strong rounded-3xl p-6">
         <div className="text-2xl">✅</div>
-        <h2 className="mt-2 font-display text-xl font-bold">Collecting for {done.total} business{done.total === 1 ? "" : "es"} across every channel.</h2>
+        <h2 className="mt-2 font-display text-xl font-bold">Collecting {made} watch{made === 1 ? "" : "es"} across {done.created.length} categor{done.created.length === 1 ? "y" : "ies"}.</h2>
         <p className="mt-1 text-ink-soft">Queued {done.created.map((c) => `${c.count} ${c.vertical}`).join(" · ")}. Website, Google &amp; Yelp start immediately; social posts follow as each handle is targeted.</p>
         <button onClick={openFirst} className="mt-4 rounded-xl bg-brand px-5 py-2.5 font-medium text-white hover:bg-brand-deep">Open the market →</button>
       </div>

@@ -597,14 +597,19 @@ export async function findSocialHandles(
     ["facebook", "facebook.com"],
     ["tiktok", "tiktok.com"],
   ];
-  for (const [key, host] of hosts) {
-    if (!want[key]) continue;
+  // Resolve the platforms in PARALLEL — each does its own searches + (for IG/FB) an
+  // Apify confirmation batch. Sequential, a single business could stack IG≈55s + FB≈55s
+  // and approach the resolve route's time limit; in parallel the wall-clock is the
+  // slowest platform, not their sum. (state.searched is a monotonic true flag and the
+  // confidence assignment runs on the single JS thread, so there's no write race.)
+  await Promise.all(hosts.map(async ([key, host]) => {
+    if (!want[key]) return;
     const r = await findHandle(name, city, host, state, { website: ctx.website, city, address: ctx.address, phone: ctx.phone }, seed[key]);
     if (r && !isGenericHandle(r.handle)) {
       out[key] = `${PREFIX[host]}${r.handle}`;
       (out.confidence ??= {})[key] = r.confidence;
     }
-  }
+  }));
   out.searched = state.searched;
   return out;
 }
