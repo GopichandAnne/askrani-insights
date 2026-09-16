@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { liveDeals } from "@/lib/dealfreshness";
+import { detectPriceMoves } from "@/lib/pricedeltas";
 import { buildDigest, type DigestItem, type ActSpec } from "@/lib/digest";
 import { OBJECTIVES, type AttnMode } from "@/lib/attention-prefs";
 
@@ -88,7 +88,6 @@ const FEEDBACK_WEIGHT: Record<string, number> = { useful: 6, acted: 12, not_usef
 const clampFb = (v?: number): number => Math.max(-40, Math.min(40, v ?? 0));
 
 const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
-const parseUsd = (s?: string): number | null => { const m = String(s ?? "").match(/\$?\s*(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : null; };
 
 // Map the digest's source pillar → an attention kind, so we can re-rank across sources.
 const PILLAR_KIND: Record<string, AttnKind> = {
@@ -178,37 +177,26 @@ export function buildAttention(
     }, now.getTime()));
   }
 
-  // 3) Competitor flyer price-DROPS (goals.flyerDeals) — the "rival cut X" moves owners
-  //    told us they check first. Detect from the itemized flyer history we already store.
-  const flyer = liveDeals((goals.flyerDeals?.deals ?? []) as any[]);
-  const hist = new Map<string, { price: number; seen: number; rival: string; item: string }[]>();
-  for (const d of flyer) {
-    const n = parseUsd(d.price); if (n == null) continue;
-    const rival = clean(d.rival), item = clean(d.item); if (!rival || !item) continue;
-    const key = `${rival}|${item}`.toLowerCase();
-    const t = new Date(d.seenAt ?? d.postedAt ?? 0).getTime();
-    (hist.get(key) ?? hist.set(key, []).get(key)!).push({ price: n, seen: t, rival, item });
-  }
-  const drops: { rival: string; item: string; from: number; to: number; when?: number }[] = [];
-  for (const arr of hist.values()) {
-    if (arr.length < 2) continue;
-    arr.sort((a, b) => a.seen - b.seen);
-    const latest = arr[arr.length - 1];
-    const priorMin = Math.min(...arr.slice(0, -1).map((x) => x.price));
-    if (latest.price < priorMin) drops.push({ rival: latest.rival, item: latest.item, from: priorMin, to: latest.price, when: latest.seen });
-  }
-  for (const dp of drops.sort((a, b) => (b.from - b.to) - (a.from - a.to)).slice(0, 3)) {
-    const id = `pricedrop:${dp.rival.toLowerCase()}:${dp.item.slice(0, 24).toLowerCase()}`;
-    const cut = (dp.from - dp.to).toFixed(2);
+  // 3) Competitor price MOVES (goals.flyerDeals) — the "rival cut X" (and "raised X")
+  //    week-over-week deltas owners check first. Unit- & size-aware, freshness-gated;
+  //    detected from the itemized flyer history we already store (see pricedeltas.ts).
+  //    A cut is a threat (high impact); a hike is an opening (you now look cheaper).
+  for (const mv of detectPriceMoves(goals.flyerDeals?.deals as any[], now).moves.slice(0, 4)) {
+    const cut = mv.direction === "cut";
+    const id = `pricemove:${mv.direction}:${mv.rival.toLowerCase()}:${mv.item.slice(0, 24).toLowerCase()}`;
     cands.push({
       ...toItem({
-        id, cls: "A", kind: "competitor_price", category: "Competitor price cut", icon: "📉",
-        headline: `${dp.rival} dropped ${dp.item} to $${dp.to.toFixed(2)}`,
-        take: `Was $${dp.from.toFixed(2)} — a $${cut} cut. Rani's read: check if it's a promo before you chase it.`,
+        id, cls: cut ? "A" : "B", kind: "competitor_price",
+        category: cut ? "Competitor price cut" : "Competitor price hike", icon: cut ? "📉" : "📈",
+        headline: cut
+          ? `${mv.rival} cut ${mv.item} to ${mv.toPrice}`
+          : `${mv.rival} raised ${mv.item} to ${mv.toPrice}`,
+        take: `Was ${mv.fromPrice} (${cut ? "" : "+"}${mv.deltaPct}%). ${mv.action}`,
         actions: actionsFor("competitor_price"),
         href: "/offers", isNew: !seen.has(id),
       }, now.getTime()),
-      score: KIND_WEIGHT.competitor_price + CLS_BASE.A + (seen.has(id) ? 0 : 14) + recencyBoost(new Date(dp.when ?? 0).toISOString(), now.getTime()),
+      score: KIND_WEIGHT.competitor_price + CLS_BASE[cut ? "A" : "B"] + (seen.has(id) ? 0 : 14)
+        + recencyBoost(mv.at, now.getTime()) + Math.min(12, Math.round(Math.abs(mv.deltaPct) / 5)),
     });
   }
 

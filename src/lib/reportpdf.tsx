@@ -1,5 +1,6 @@
 import React from "react";
 import { liveDeals } from "@/lib/dealfreshness";
+import { detectPriceMoves } from "@/lib/pricedeltas";
 import { Document, Page, View, Text, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import type { Digest, DigestItem } from "@/lib/digest";
 
@@ -348,7 +349,7 @@ export function buildReportSections(goals: Record<string, any>): ReportSection[]
 
   // 1) Sales & deals — the priced sale items + promos rivals are advertising
   const dealRows: ReportRow[] = [];
-  const priced = ((goals.flyerDeals?.deals ?? []) as any[])
+  const priced = liveDeals((goals.flyerDeals?.deals ?? []) as any[])   // only currently-valid prices
     .map((d) => ({ item: clean(d.item), price: clean(d.price), rival: clean(d.rival), n: parseUsd(d.price) }))
     .filter((d) => d.item);
   const seen = new Set<string>();
@@ -363,6 +364,16 @@ export function buildReportSections(goals: Record<string, any>): ReportSection[]
     if (dealRows.length >= 16) break;
   }
   if (dealRows.length) sections.push({ title: "Sales & deals in your market", note: "The prices and promos rivals are advertising right now — match or beat them.", rows: dealRows });
+
+  // 1b) Rival price MOVES — where a competitor CHANGED a price week-over-week. A cut
+  //     is a threat to react to; a hike is an opening (you now look cheaper).
+  const moveRows: ReportRow[] = detectPriceMoves((goals.flyerDeals?.deals ?? []) as any[]).moves.slice(0, 8).map((mv) => ({
+    primary: `${mv.rival} ${mv.direction === "cut" ? "cut" : "raised"} ${mv.item}`,
+    secondary: `${mv.fromPrice} → ${mv.toPrice}`,
+    tag: `${mv.direction === "cut" ? "−" : "+"}${Math.abs(mv.deltaPct)}%`,
+    tagTone: mv.direction === "cut" ? "alert" : "brand",
+  }));
+  if (moveRows.length) sections.push({ title: "Rival price moves this week", note: "Where a competitor changed a price recently — a cut is a threat to answer, a hike is a chance to win the switch.", rows: moveRows });
 
   // 2) Popular & winning nearby — what's trending + gaps to grab
   const popRows: ReportRow[] = [];
