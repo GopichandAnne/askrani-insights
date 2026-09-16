@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { liveDeals } from "@/lib/dealfreshness";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { retrieveLiveContext, type RetrievedSource } from "@/lib/retrieval";
 import { upcomingOccasions } from "@/lib/occasions";
@@ -60,7 +61,7 @@ export function buildKnowledge(ws: { name: string; vertical?: string }, goals: R
   // competitor priced items + promos — items matching the question come FIRST so a
   // specific "price on X?" question sees every rival that lists X (cap lifted when
   // the question is item-specific).
-  const flyer = arr(goals.flyerDeals?.deals);
+  const flyer = liveDeals(arr(goals.flyerDeals?.deals));
   const rank = (d: any) => (qWords.length && qHit(`${d.item ?? ""} ${d.rival ?? ""}`) ? 0 : 1);
   // YOUR OWN advertised prices, read from your own sale flyer / posts — the owner's
   // side of any "which items am I cheaper/pricier on?" question. Kept separate from

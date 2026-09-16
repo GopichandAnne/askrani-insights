@@ -4,6 +4,7 @@ import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { collectApifyPlatform, apifyConfigured, collectProfileStats } from "@/lib/providers/apify/platforms";
 import { youtubeChannelStats } from "@/lib/providers/youtube";
 import { refundCredits, planOfOrg, retentionDaysForPlan, spendForCost } from "@/lib/credits";
+import { parseValidity } from "@/lib/dealfreshness";
 
 /**
  * Flyer deal extraction — the grocery goldmine. Groceries/restaurants post their
@@ -22,7 +23,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const BUCKET = "flyers";
 type Svc = ReturnType<typeof createServiceClient>;
 
-export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string; postedAt?: string; seenAt?: string; lastSeen?: string }
+export interface FlyerDeal { rival: string; item: string; price?: string; terms?: string; imageUrl?: string; postUrl?: string; source?: string; postedAt?: string; seenAt?: string; lastSeen?: string; validFrom?: string; validTo?: string }
 export interface FlyerReport { deals: FlyerDeal[]; flyersRead: number; at: string; empty?: boolean }
 export interface FlyerProfile { url: string; rival: string; platform: string; own?: boolean; placeId?: string }
 const googleConfigured = () => !!process.env.GOOGLE_MAPS_API_KEY;
@@ -313,7 +314,11 @@ function mergeDeals(prev: FlyerDeal[], fresh: FlyerDeal[], now: string, retentio
   for (const d of fresh) {
     const k = dkey(d); if (freshKeys.has(k)) continue; freshKeys.add(k);
     const was = prevByKey.get(k);
-    out.push({ ...d, seenAt: was?.seenAt ?? now, postedAt: d.postedAt ?? was?.postedAt, lastSeen: now } as FlyerDeal);
+    const postedAt = d.postedAt ?? was?.postedAt;
+    // Parse the flyer's printed validity ("Sep 11-13", "thru Sun") into real dates so
+    // downstream surfaces can tell a live sale from an expired one.
+    const v = parseValidity(d.terms, postedAt);
+    out.push({ ...d, seenAt: was?.seenAt ?? now, postedAt, validFrom: v.validFrom ?? was?.validFrom, validTo: v.validTo ?? was?.validTo, lastSeen: now } as FlyerDeal);
   }
   for (const d of prev) { if (!freshKeys.has(dkey(d))) out.push(d); }
   const cutoff = Date.now() - retentionDays * 86400000;

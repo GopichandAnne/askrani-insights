@@ -1,4 +1,5 @@
 import { createServiceClient, type RlsClient } from "@/lib/supabase/server";
+import { liveDeals } from "@/lib/dealfreshness";
 import { buildWorkspaceReport } from "@/lib/report";
 import { workspaceBusinessIds, type WorkspaceRow } from "@/lib/workspace";
 
@@ -77,7 +78,7 @@ export async function recordMarketEvents(ws: WorkspaceRow, _db?: RlsClient): Pro
   };
 
   for (const d of (goals.deals?.deals ?? []) as any[]) add("deal", { rival: d.rival, title: d.deal, detail: d.item });
-  for (const d of (goals.flyerDeals?.deals ?? []) as any[]) add("deal", { rival: d.rival, title: d.item, detail: [d.price, d.terms].filter(Boolean).join(" · "), url: d.postUrl });
+  for (const d of liveDeals((goals.flyerDeals?.deals ?? []) as any[])) add("deal", { rival: d.rival, title: d.item, detail: [d.price, d.terms].filter(Boolean).join(" · "), url: d.postUrl });
   const topAdvertiser = (goals.ads?.advertisers ?? [])[0];
   for (const p of (goals.ads?.patterns ?? []) as any[]) add("ad_move", { rival: topAdvertiser, title: p.pattern, detail: p.example });
   for (const b of (goals.socialPulse?.breakouts ?? []) as any[]) add("breakout", { rival: b.rival, title: b.caption, metric: b.multiple, detail: `${b.eng} engagement` });

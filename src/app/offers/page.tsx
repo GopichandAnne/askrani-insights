@@ -1,4 +1,5 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
+import { liveDeals } from "@/lib/dealfreshness";
 import { createClient } from "@/lib/supabase/server";
 import { getOrMakeDeals, getOrMakeMyDeals, type DealItem } from "@/lib/deals";
 import { getOrMakePriceGaps, type GapVerdict } from "@/lib/pricegaps";
@@ -94,7 +95,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
   for (const [rival, times] of datesByRival) { const c = detectCadence(times); if (c) cadenceByRival.set(rival, c); }
 
   // apply the date window
-  const flyerDeals = allFlyerDeals.filter(inWindow);
+  const flyerDeals = liveDeals(allFlyerDeals.filter(inWindow)); // drop deals whose printed validity has passed
   const windowedPromos = rivalDeals.deals.filter(inWindow);
 
   // merge everything into ONE bundle per rival (promos + priced flyer items)

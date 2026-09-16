@@ -1,4 +1,5 @@
 import React from "react";
+import { liveDeals } from "@/lib/dealfreshness";
 import { Document, Page, View, Text, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import type { Digest, DigestItem } from "@/lib/digest";
 
@@ -290,7 +291,7 @@ export function buildReportInput(
   if (digest.newCount > 0) stats.push({ value: String(digest.newCount), label: `new ${period === "daily" ? "today" : "this week"}`, tone: "neutral" });
 
   const rivals = new Set<string>();
-  for (const d of [...((goals.deals?.deals ?? []) as any[]), ...((goals.flyerDeals?.deals ?? []) as any[])]) {
+  for (const d of [...((goals.deals?.deals ?? []) as any[]), ...liveDeals((goals.flyerDeals?.deals ?? []) as any[])]) {
     const r = String(d?.rival ?? "").trim(); if (r) rivals.add(r.toLowerCase());
   }
   if (rivals.size > 0) stats.push({ value: String(rivals.size), label: rivals.size === 1 ? "rival with live deals" : "rivals with live deals", tone: "neutral" });

@@ -1,4 +1,5 @@
 import { staleCached } from "@/lib/staleCache";
+import { liveDeals } from "@/lib/dealfreshness";
 import { createClient, type RlsClient } from "@/lib/supabase/server";
 import { isLlmConfigured } from "@/lib/extraction/llm";
 import { resolveConcepts } from "@/lib/conceptcanon";
@@ -285,7 +286,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   if (hasGrocery) {
     const goals = (ws.goals as Record<string, unknown> | null) ?? {};
     const myDeals = ((goals.myFlyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
-    const compDeals = ((goals.flyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[];
+    const compDeals = liveDeals(((goals.flyerDeals as { deals?: FlyerDeal[] } | null)?.deals ?? []) as FlyerDeal[]);
     const priceCanonMap = ((goals.priceCanon as { canon?: Record<string, string> } | null)?.canon ?? {}) as Record<string, string>;
     const normItem = (s: string) => s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\b\d+(?:\.\d+)?\s*(?:lbs?|oz|kg|g|l|ml|ct|pk|pack|gallon|quart|pint|dozen)\b/g, " ").replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
     const canonItem = (it: string) => { const n = normItem(it); return priceCanonMap[n] ?? n; };

@@ -1,4 +1,5 @@
 import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
+import { liveDeals } from "@/lib/dealfreshness";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
 import { buildScorecard, type Scorecard } from "@/lib/scorecard";
@@ -85,7 +86,7 @@ export function makeIntel(scorecard: Scorecard, goals: Record<string, any>): Rec
     insurance: g.insurance && !g.insurance.empty ? { summary: clip(g.insurance.summary, 200), youAcceptCount: g.insurance.youPayerCount, competitorsTakeYouDont: arr(g.insurance.youMissing).slice(0, 10), onlyYouTake: arr(g.insurance.youUnique).slice(0, 10), marketPlans: arr(g.insurance.market).slice(0, 12).map((m: any) => ({ plan: m.payer, practicesAccepting: m.count, youAccept: m.youAccept })) } : null,
     unmetDemand: g.demand ? { summary: clip(g.demand.summary), needs: arr(g.demand.demands).slice(0, 5).map((x: any) => ({ need: x.need, move: clip(x.move, 110), servedLocally: x.servedLocally })) } : null,
     localTrends: g.localTrends ? { summary: clip(g.localTrends.summary), trends: arr(g.localTrends.trends).slice(0, 5).map((t: any) => ({ topic: t.topic, momentum: t.momentum, yourMove: clip(t.yourMove, 110) })) } : null,
-    flyerDeals: g.flyerDeals && !g.flyerDeals.empty ? arr(g.flyerDeals.deals).slice(0, 8) : null,
+    flyerDeals: g.flyerDeals && !g.flyerDeals.empty ? liveDeals(arr(g.flyerDeals.deals)).slice(0, 8) : null,
   };
 }
 

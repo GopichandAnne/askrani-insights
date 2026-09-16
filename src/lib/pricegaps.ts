@@ -1,4 +1,5 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { liveDeals } from "@/lib/dealfreshness";
 import type { WorkspaceRow } from "@/lib/workspace";
 import { workspaceBusinessIds } from "@/lib/workspace";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
@@ -56,7 +57,7 @@ export async function analyzePriceGaps(ws: WorkspaceRow): Promise<PriceGapReport
 
   const { data: wRow } = await supabase.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
   const goals = (wRow?.goals as Record<string, any>) ?? {};
-  const theirs: FlyerDeal[] = (goals.flyerDeals?.deals ?? []).filter((d: FlyerDeal) => d.price);
+  const theirs: FlyerDeal[] = liveDeals((goals.flyerDeals?.deals ?? []).filter((d: FlyerDeal) => d.price));
   const ours: { item: string; price: string }[] = (goals.myFlyerDeals?.deals ?? [])
     .filter((d: FlyerDeal) => d.price).map((d: FlyerDeal) => ({ item: clean(d.item), price: clean(d.price) }));
 

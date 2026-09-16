@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { liveDeals } from "@/lib/dealfreshness";
 
 /**
  * The weekly digest — the "push" that turns Insights from a dashboard you have
@@ -200,7 +201,7 @@ export function buildDigest(
   //  separately so we never say "running 34 deals". (Specific price DROPS are
   //  surfaced sharper by the attention layer.)
   const promoDeals = ((goals.deals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: clean(d.deal) }));
-  const flyerItems = ((goals.flyerDeals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: `${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}` }));
+  const flyerItems = liveDeals((goals.flyerDeals?.deals ?? []) as any[]).map((d) => ({ rival: clean(d.rival), deal: `${clean(d.item)}${d.price ? ` — ${clean(d.price)}` : ""}` }));
   const promosByRival = new Map<string, string[]>();
   for (const d of promoDeals.filter((d) => d.rival && d.deal)) {
     const l = promosByRival.get(d.rival) ?? []; if (!l.includes(d.deal)) l.push(d.deal); promosByRival.set(d.rival, l);

@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
+import { liveDeals } from "@/lib/dealfreshness";
 import { buildDigest, type DigestItem, type ActSpec } from "@/lib/digest";
 import { OBJECTIVES, type AttnMode } from "@/lib/attention-prefs";
 
@@ -179,7 +180,7 @@ export function buildAttention(
 
   // 3) Competitor flyer price-DROPS (goals.flyerDeals) — the "rival cut X" moves owners
   //    told us they check first. Detect from the itemized flyer history we already store.
-  const flyer = (goals.flyerDeals?.deals ?? []) as any[];
+  const flyer = liveDeals((goals.flyerDeals?.deals ?? []) as any[]);
   const hist = new Map<string, { price: number; seen: number; rival: string; item: string }[]>();
   for (const d of flyer) {
     const n = parseUsd(d.price); if (n == null) continue;
