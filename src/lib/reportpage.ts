@@ -37,6 +37,9 @@ const clean = (s: unknown) => String(s ?? "")
 const GENERIC = new Set(["item", "product", "produce", "unlabeled", "assorted", "various", "misc", "sale", "special", "offer", "deal", "combo", "na", "tbd"]);
 const isJunkItem = (s: string) => { const n = s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim(); return !n || n.length < 2 || n.split(" ").every((w) => GENERIC.has(w)); };
 const isFreebie = (s?: string) => /spend|free|\$\d+\+|liking|sharing|follow/i.test(s ?? "");
+// Drop prices the vision read couldn't resolve ("$1.xx"), and empty/placeholder ones,
+// so the customer-facing board never shows garbage. Keeps real prices AND promo phrases.
+const badPrice = (p: string) => !p || p === "—" || /x\.?x|\.xx|\d[._][x_?]|[x_?][._]\d/i.test(p) || !/\d|free|bogo|special|buy|get/i.test(p);
 
 function dateLabel(now: Date): string {
   return now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -59,7 +62,8 @@ export function buildPublicReport(
   const standings: Standing[] = peers.map((p) => ({
     name: clean(p.name),
     rating: typeof p.rating === "number" ? p.rating : null,
-    reviews: reviewCountByName[clean(p.name)] ?? null,
+    // the target's own review count comes fresh from `you.reputation`; rivals' from the snapshot
+    reviews: p.isTarget && typeof rep.reviewCount === "number" ? rep.reviewCount : (reviewCountByName[clean(p.name)] ?? null),
     isYou: !!p.isTarget,
   }));
   const total = rep.total ?? standings.length ?? null;
@@ -77,7 +81,7 @@ export function buildPublicReport(
   // ── the move ──────────────────────────────────────────────────────────────
   let move: ReportData["move"] | undefined;
   const counts = standings.filter((s) => typeof s.reviews === "number");
-  const youReviews = you1?.reviews ?? rep.reviewCount ?? null;
+  const youReviews = (typeof rep.reviewCount === "number" ? rep.reviewCount : null) ?? you1?.reviews ?? null;
   const leastReviewed = counts.length >= 2 && youReviews != null && counts.every((s) => s.isYou || (s.reviews ?? 0) >= youReviews);
   if (rankTop && leastReviewed) {
     const rivals = counts.filter((s) => !s.isYou).sort((a, b) => (b.reviews ?? 0) - (a.reviews ?? 0)).slice(0, 2);
@@ -99,10 +103,11 @@ export function buildPublicReport(
   const byRival = new Map<string, { items: BoardItem[]; latest: number; seen: Set<string> }>();
   for (const d of live) {
     const rival = clean(d.rival), item = clean(d.item); if (!rival || !item || isJunkItem(item)) continue;
+    const price = clean(d.price); if (badPrice(price)) continue;   // no readable price → skip
     const g = byRival.get(rival) ?? { items: [], latest: 0, seen: new Set() };
     const key = item.toLowerCase(); if (g.seen.has(key)) continue; g.seen.add(key);
     const t = new Date(d.postedAt ?? d.seenAt ?? 0).getTime(); if (!isNaN(t)) g.latest = Math.max(g.latest, t);
-    if (g.items.length < 6) g.items.push({ label: item, price: clean(d.price) || "—", free: isFreebie(d.price) || isFreebie(d.terms) });
+    if (g.items.length < 6) g.items.push({ label: item, price, free: isFreebie(d.price) || isFreebie(d.terms) });
     byRival.set(rival, g);
   }
   // ── price moves (computed before the board so we can flag the top cutter) ──

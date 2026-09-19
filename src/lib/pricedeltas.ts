@@ -67,6 +67,9 @@ export function parsePrice(raw?: string): ParsedPrice | null {
   if (!t) return null;
   // non-comparable forms — a % off, a BOGO, or an open-ended floor
   if (/%|\bbogo\b|buy\s*\d*\s*get|b\dg\d|\bfree\b|\bfrom\b|as\s+low\s+as|starting|call|tbd|market/.test(t)) return null;
+  // unreadable price the vision read couldn't resolve ("$1.xx", "$_.__", "1.??") —
+  // never treat these as a real number.
+  if (/\d[._]\s*[x_?]|[x_?]\s*[._]\s*\d|\bx\.?x\b|\.xx/.test(t) || /\$\s*\d+\.\s*(?![\d])/.test(t)) return null;
 
   // multi-buy: "2 for $5", "3/$1", "6 for $1". The count must be a BARE small integer,
   // never the fractional part of a price (so "$9.99 / $5.99" is not read as "99 for $5.99").
