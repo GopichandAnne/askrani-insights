@@ -396,7 +396,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
             <span className="ml-1 text-xs font-normal text-ink-faint">the raw catalog spread</span>
             <span className="ml-auto text-xs font-normal text-ink-faint transition-transform group-open:rotate-180">▾</span>
           </summary>
-          <table className="mt-3 w-full text-sm">
+          <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[22rem] text-sm">
             <thead><tr className="border-b border-line text-left text-xs text-ink-faint"><th className="py-1.5 font-medium">Business</th><th className="py-1.5 text-right font-medium">Avg</th><th className="py-1.5 text-right font-medium">Range</th><th className="py-1.5 text-right font-medium">Items</th></tr></thead>
             <tbody>
               {priceRows.map((r) => (
@@ -408,7 +408,7 @@ export default async function OffersPage({ searchParams }: { searchParams: Promi
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </details>
       )}
     </div>

@@ -50,6 +50,8 @@ export interface FallingBehindFlag {
   recurring: boolean;    // demand seen on ≥2 dates
   evidence?: string;     // one supply example ("Rival: title")
   demandExample?: string;
+  occursOn?: string;     // festival flags: the occasion date (ISO) — timing is computed
+                         // at READ time from this, so a cached flag never goes stale.
   seen: string[];        // distinct dates
   score: number;
 }
@@ -136,7 +138,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const targetConcepts = new Set<string>(weOffer);
   targetCaps.forEach((_, j) => { const m = tags[targetOffset + j]; if (m?.concept) targetConcepts.add(conceptKey(m.concept)); });
 
-  interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string>; occ: { name: string; inDays: number } | null }
+  interface Agg { concept: string; rivals: Map<string, string>; promo: Set<string>; standing: Set<string>; offeringDates: Set<string>; qualityHits: number; supplyEx: string[]; demandEx: string[]; dates: Set<string>; occ: { name: string; inDays: number; whenISO: string } | null }
   const byC = new Map<string, Agg>();
   const getAgg = (concept: string): Agg => {
     const key = concept.toLowerCase().trim();
@@ -150,7 +152,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
   const noteOccasion = (a: Agg, title: string) => {
     const o = nearestOccasion(title, now);
     if (!o || o.inDays < -3 || o.inDays > FEST_WINDOW) return; // past or too far out
-    if (!a.occ || o.inDays < a.occ.inDays) a.occ = { name: o.name, inDays: o.inDays };
+    if (!a.occ || o.inDays < a.occ.inDays) a.occ = { name: o.name, inDays: o.inDays, whenISO: o.whenISO };
   };
 
   ev.forEach((r, i) => {
@@ -261,11 +263,13 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
 
     // Reframe a festival flag to the specific upcoming occasion + timing, and rank it
     // by urgency (sooner = higher) so the run-up you can still act on floats up.
+    // For a festival flag, the concept is just the occasion NAME — the "happening
+    // now / in N days" timing is computed at READ time from occursOn, so a cached
+    // flag can't show a stale "happening now" once the date has passed.
     let displayConcept = a.concept;
     if (isFestival && a.occ) {
-      const dd = a.occ.inDays;
-      displayConcept = `${a.occ.name} — ${dd <= 0 ? "happening now" : `in ${dd} day${dd === 1 ? "" : "s"}`}`;
-      score += Math.max(0, 34 - Math.floor(dd / 2));
+      displayConcept = a.occ.name;
+      score += Math.max(0, 34 - Math.floor(a.occ.inDays / 2));
     }
 
     flags.push({
@@ -273,6 +277,7 @@ export async function generateFallingBehind(ws: WorkspaceRow, db?: RlsClient): P
       rivals: [...a.rivals.values()].slice(0, 6), rivalCount,
       demandDates, recurring,
       evidence: a.supplyEx[0], demandExample: a.demandEx[0],
+      ...(isFestival && a.occ ? { occursOn: a.occ.whenISO } : {}),
       seen: [...a.dates].sort(), score,
     });
   }
