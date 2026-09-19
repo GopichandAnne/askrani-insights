@@ -323,9 +323,17 @@ export async function upsertBusiness(
     const { data } = await svc.from("business").select(SEL).filter("attributes->>place_id", "eq", placeId).limit(1).maybeSingle();
     existing = (data as any) ?? null;
   }
+  // A chain runs one corporate website + one brand name across many branches
+  // (Patel Brothers Cedar Park vs Irving share patelbros.com). place_id is the
+  // authoritative identity: when THIS candidate has its own place_id, a fallback
+  // (website / name) match to a business with a DIFFERENT place_id is a different
+  // BRANCH, not the same business — keep them separate so each gets its own market.
+  const sameBranch = (row: { attributes?: any } | null): boolean =>
+    !!row && !(placeId && row.attributes?.place_id && row.attributes.place_id !== placeId);
+
   if (!existing && website) {
     const { data } = await svc.from("business").select(SEL).eq("website", website).limit(1).maybeSingle();
-    existing = (data as any) ?? null;
+    if (sameBranch(data as any)) existing = (data as any) ?? null;
   }
   if (!existing) {
     const { data } = await svc
@@ -335,7 +343,7 @@ export async function upsertBusiness(
       .eq("vertical", vertical)
       .limit(1)
       .maybeSingle();
-    existing = (data as any) ?? null;
+    if (sameBranch(data as any)) existing = (data as any) ?? null;
   }
 
   let businessId = existing?.id;
