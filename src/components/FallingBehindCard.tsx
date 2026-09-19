@@ -2,6 +2,18 @@ import Link from "next/link";
 import type { FallingBehind, PriceWin } from "@/lib/fallingbehind";
 import { FallingBehindFlags } from "@/components/FallingBehindFlags";
 import { ActOnIt } from "@/components/ActOnIt";
+import { nearestOccasion } from "@/lib/occasions";
+
+/** Read-time freshness: drop a festival-shaped flag whose occasion is clearly over,
+ *  even if it's still in the cache from an earlier cycle (fixes "Ganesh Chaturthi —
+ *  happening now" lingering after the festival passed). Non-festival flags are kept. */
+function fresh(flags: FallingBehind["flags"]): FallingBehind["flags"] {
+  const now = new Date();
+  return (flags ?? []).filter((f) => {
+    const o = nearestOccasion(f.concept, now);
+    return !(o && o.inDays < -2);
+  });
+}
 
 /** Positive counterpart: staples the owner beats the market on — a promotable win. */
 function PriceWins({ wins }: { wins: PriceWin[] }) {
@@ -36,7 +48,8 @@ function PriceWins({ wins }: { wins: PriceWin[] }) {
  * no LLM on the render path; the interactive flag list is a client child.
  */
 export function FallingBehindCard({ data }: { data: FallingBehind }) {
-  if (!data || data.empty || (!data.flags?.length && !data.priceWins?.length)) return null;
+  const flags = fresh(data?.flags);
+  if (!data || data.empty || (!flags.length && !data.priceWins?.length)) return null;
   return (
     <section className="card">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -47,10 +60,10 @@ export function FallingBehindCard({ data }: { data: FallingBehind }) {
         <Link href="/competitors" className="shrink-0 text-xs font-semibold text-brand-deep hover:underline">See competitors →</Link>
       </div>
 
-      {data.flags.length > 0 && (
+      {flags.length > 0 && (
         <>
           <p className="mb-3 text-xs text-ink-faint">Moves several competitors are making that you&apos;re not — from what we&apos;ve observed across your market.</p>
-          <FallingBehindFlags flags={data.flags} />
+          <FallingBehindFlags flags={flags} />
         </>
       )}
 
