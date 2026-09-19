@@ -27,7 +27,13 @@ export interface ReportData {
   calendar: CalendarEvent[];
 }
 
-const clean = (s: unknown) => String(s ?? "").replace(/<\/?[a-z][^>]*>/gi, "").replace(/\s+/g, " ").trim();
+// Decode literal \uXXXX escapes some cached LLM text carries (e.g. "★"→★),
+// strip stray tags, collapse whitespace.
+const clean = (s: unknown) => String(s ?? "")
+  .replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  .replace(/<\/?[a-z][^>]*>/gi, "")
+  .replace(/\s+/g, " ")
+  .trim();
 const GENERIC = new Set(["item", "product", "produce", "unlabeled", "assorted", "various", "misc", "sale", "special", "offer", "deal", "combo", "na", "tbd"]);
 const isJunkItem = (s: string) => { const n = s.toLowerCase().replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim(); return !n || n.length < 2 || n.split(" ").every((w) => GENERIC.has(w)); };
 const isFreebie = (s?: string) => /spend|free|\$\d+\+|liking|sharing|follow/i.test(s ?? "");
