@@ -1,5 +1,5 @@
 import { buildWorkspaceReport } from "@/lib/report";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import type { WorkspaceRow } from "@/lib/workspace";
 
 /**
@@ -29,6 +29,7 @@ export interface Scorecard {
   composite: { you: number | null; avg: number | null; best: number | null; bestName: string | null; rank: number | null; total: number };
   headline: string;
   empty: boolean;
+  at?: string;              // when this scorecard was built (drives the read cache)
 }
 
 // outer → inner ring order (matches the locked hero design)
@@ -206,4 +207,25 @@ function buildHeadline(metrics: MetricScore[]): string {
   if (weak.length) return `Trailing the market on ${weak.join(" & ")} — your biggest openings.`;
   if (strong) return `Ahead of the market on ${strong} — keep it up.`;
   return "Here's how you stack up against your market.";
+}
+
+/**
+ * Cached scorecard for the render path. buildScorecard runs a full
+ * buildWorkspaceReport (queries every business's content over 30 days), which is
+ * too heavy to run on every Today / Market-Position page view. This caches the
+ * result on goals.scorecard and rebuilds only when it's older than maxAgeMinutes —
+ * the underlying ratings/prices move on collection (≈weekly), so a cache this fresh
+ * is always accurate. Warm can also refresh it; a cold first read builds + stores.
+ */
+export async function getOrMakeScorecard(ws: WorkspaceRow, maxAgeMinutes = 60): Promise<Scorecard> {
+  const svc = createServiceClient();
+  const { data } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  const goals = (data?.goals as Record<string, any>) ?? {};
+  const cached = goals.scorecard as Scorecard | undefined;
+  if (cached?.at && Date.now() - new Date(cached.at).getTime() < maxAgeMinutes * 60_000) return cached;
+
+  const sc = { ...(await buildScorecard(ws, svc)), at: new Date().toISOString() };
+  const { data: cur } = await svc.from("workspace").select("goals").eq("id", ws.id).maybeSingle();
+  await svc.from("workspace").update({ goals: { ...((cur?.goals as object) ?? {}), scorecard: sc } }).eq("id", ws.id).then(() => {}, () => {});
+  return sc;
 }

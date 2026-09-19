@@ -1,7 +1,7 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { getObjectives } from "@/lib/objectives";
-import { buildScorecard } from "@/lib/scorecard";
+import { getOrMakeScorecard } from "@/lib/scorecard";
 import { ObjectivesBoard } from "@/components/ObjectivesBoard";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export default async function PlanPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="Your plan" />;
   const ws = state.workspace;
-  const [objectives, sc] = await Promise.all([getObjectives(ws), buildScorecard(ws)]);
+  const [objectives, sc] = await Promise.all([getObjectives(ws), getOrMakeScorecard(ws)]);
   const standing = sc.empty
     ? { you: null, rank: null, total: 0, leader: null, leaderScore: null }
     : { you: sc.composite.you, rank: sc.composite.rank, total: sc.composite.total, leader: sc.composite.bestName, leaderScore: sc.composite.best };

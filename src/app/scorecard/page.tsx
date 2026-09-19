@@ -2,7 +2,7 @@ import { activeWorkspace } from "@/lib/workspace";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { collectionActive } from "@/lib/jobs";
-import { buildScorecard } from "@/lib/scorecard";
+import { getOrMakeScorecard } from "@/lib/scorecard";
 import { ScorecardView } from "@/components/ScorecardView";
 import { ShareReadButton } from "@/components/ShareReadButton";
 
@@ -14,7 +14,7 @@ export default async function ScorecardPage() {
   const state = await activeWorkspace();
   if (state.status !== "ok") return <ScreenNotReady state={state} title="You vs Your Market" />;
   if (await collectionActive(state.workspace.id)) return <CollectingScreen workspaceId={state.workspace.id} title="You vs Your Market" />;
-  const sc = await buildScorecard(state.workspace);
+  const sc = await getOrMakeScorecard(state.workspace);
   const ephemeral = !!(state.workspace.goals as { ephemeral?: boolean } | null)?.ephemeral;
 
   return (

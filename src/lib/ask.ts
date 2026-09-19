@@ -2,7 +2,7 @@ import { activeWorkspace, workspaceBusinessIds } from "@/lib/workspace";
 import { liveDeals } from "@/lib/dealfreshness";
 import { createClient } from "@/lib/supabase/server";
 import { buildWorkspaceReport } from "@/lib/report";
-import { buildScorecard, type Scorecard } from "@/lib/scorecard";
+import { getOrMakeScorecard, type Scorecard } from "@/lib/scorecard";
 import { getLlm, isLlmConfigured } from "@/lib/extraction/llm";
 import { type Source, SOURCES_SENTINEL } from "@/lib/ask-shared";
 
@@ -113,7 +113,7 @@ async function buildAskPrompt(question: string): Promise<Prompt> {
   // Build the raw report AND the synthesized competitive scorecard in parallel —
   // the scorecard is what makes Rani an ADVISOR (it knows every metric vs the
   // market + leader), not just a reader of raw rows.
-  const [report, scorecard] = await Promise.all([buildWorkspaceReport(ws), buildScorecard(ws)]);
+  const [report, scorecard] = await Promise.all([buildWorkspaceReport(ws), getOrMakeScorecard(ws)]);
   const supabase = await createClient();
   const ids = await workspaceBusinessIds(ws);
   const scope = ids.all.length ? ids.all : ["00000000-0000-0000-0000-000000000000"];

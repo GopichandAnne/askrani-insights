@@ -1,6 +1,6 @@
 import { activeWorkspace } from "@/lib/workspace";
 import { getOrMakeAttention } from "@/lib/attention";
-import { buildScorecard } from "@/lib/scorecard";
+import { getOrMakeScorecard } from "@/lib/scorecard";
 import { ScreenNotReady } from "@/components/ScreenNotReady";
 import { CollectingScreen } from "@/components/CollectingScreen";
 import { collectionActive } from "@/lib/jobs";
@@ -33,7 +33,7 @@ export default async function BriefPage() {
   // the decision surface — the brief must never fail on the position strip.
   const [board, sc] = await Promise.all([
     getOrMakeAttention({ id: ws.id, name: ws.name, vertical: ws.vertical }),
-    buildScorecard(ws).catch(() => null),
+    getOrMakeScorecard(ws).catch(() => null),
   ]);
   const goals = (ws.goals as Record<string, unknown> | null) ?? {};
   const alertLog = (goals.alertLog as AlertLogEntry[]) ?? [];
