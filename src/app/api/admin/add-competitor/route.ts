@@ -34,16 +34,21 @@ export async function POST(req: Request) {
   const { data: ws } = await svc.from("workspace").select("target_business_id, vertical").eq("id", workspaceId).maybeSingle();
   if (!ws) return NextResponse.json({ error: "workspace not found" }, { status: 404 });
   let geo: { lat: number; lng: number } | undefined, category: string | undefined, subtype: string[] | undefined;
+  let targetName = "", targetPlaceId = "";
   if (ws.target_business_id) {
-    const { data: b } = await svc.from("business").select("category, attributes").eq("id", ws.target_business_id).maybeSingle();
+    const { data: b } = await svc.from("business").select("canonical_name, category, attributes").eq("id", ws.target_business_id).maybeSingle();
     category = (b?.category as string) ?? undefined;
     subtype = (b?.attributes as any)?.subtype as string[] | undefined;
     geo = (b?.attributes as any)?.geo;
+    targetName = String(b?.canonical_name ?? "").toLowerCase().trim();
+    targetPlaceId = String((b?.attributes as any)?.place_id ?? "");
   }
+  const isTarget = (c: { name: string; raw?: any }) =>
+    (targetPlaceId && c.raw?.id === targetPlaceId) || c.name.toLowerCase().trim() === targetName;
 
   try {
     const cands = await discoverCandidates({ query, near: geo ? { lat: geo.lat, lng: geo.lng, radiusKm: 25 } : undefined, limit: Math.max(8, max * 3) });
-    const pool = indianOnly ? cands.filter((c) => INDIAN.test(c.name)) : cands;
+    const pool = (indianOnly ? cands.filter((c) => INDIAN.test(c.name)) : cands).filter((c) => !isTarget(c));
     const added: string[] = [];
     const skipped: string[] = [];
     for (const cand of pool.slice(0, max)) {
