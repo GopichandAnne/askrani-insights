@@ -70,7 +70,7 @@ export async function updateSession(request: NextRequest) {
     const p = request.nextUrl.pathname;
     const exempt =
       p.startsWith("/welcome") || p.startsWith("/login") || p.startsWith("/auth") ||
-      p.startsWith("/api") || p.startsWith("/explore") || p.startsWith("/r/");
+      p.startsWith("/api") || p.startsWith("/explore") || p.startsWith("/r/") || p.startsWith("/claim/");
     const toWelcome = () => {
       const to = request.nextUrl.clone();
       to.pathname = "/welcome";

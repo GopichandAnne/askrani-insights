@@ -18,7 +18,10 @@ export type AnalyticsEvent =
   | "collect_started"
   | "deep_read_quote"
   | "deep_read_run"
-  | "workspace_promoted";
+  | "workspace_promoted"
+  | "report_link_viewed"
+  | "report_claim_completed"
+  | "trial_started";
 
 export async function logEvent(
   event: AnalyticsEvent,

@@ -75,6 +75,17 @@ export interface Billing {
   ledger: LedgerEntry[]; // capped recent history
   processedEvents?: string[]; // Stripe event ids handled (idempotency)
   rev?: number;          // optimistic-concurrency counter (compare-and-swap)
+  trialStartedAt?: string; // 15-day time-trial start (report-link claim) — ISO
+  trialEndsAt?: string;    // trial expiry; after this the plan drops to free (read-time)
+  subscribed?: boolean;    // a real paid Stripe subscription is active (never trial-expire)
+}
+
+/** The effective plan after honoring a time-trial's expiry: a `trialEndsAt` in the
+ *  past (with no real subscription) reads as free — no cron needed. */
+export function effectivePlan(b: Billing): string {
+  const plan = b.plan ?? "free";
+  if (b.trialEndsAt && !b.subscribed && Date.now() > new Date(b.trialEndsAt).getTime()) return "free";
+  return plan;
 }
 
 const DEFAULT: Billing = { plan: "free", planCredits: 0, topupCredits: 0, trialGranted: false, status: "active", totalSpent: 0, totalCostUsd: 0, ledger: [], rev: 0 };
@@ -316,7 +327,25 @@ export async function planOfOrg(orgId: string): Promise<string> {
   if (store) { const w = await walletBalance(store); if (w) return w.plan; }
   const svc = createServiceClient();
   const { billing } = await readBilling(svc, orgId);
-  return billing.plan ?? "free";
+  return effectivePlan(billing);
+}
+
+/** Start (or extend to) a time-based trial — full access for `days`, then it reads
+ *  as free automatically (effectivePlan). Idempotent: won't restart an active trial
+ *  or override a real subscription. Used by the report-link claim. */
+export async function startTimeTrial(orgId: string, days = 15, plan = "starter"): Promise<void> {
+  const svc = createServiceClient();
+  await mutateBilling(svc, orgId, (b) => {
+    if (b.subscribed) return BILLING_ABORT;                 // never touch a paid subscription
+    const now = Date.now();
+    const activeTrial = b.trialEndsAt && new Date(b.trialEndsAt).getTime() > now;
+    if (activeTrial && b.plan === plan) return BILLING_ABORT; // already trialing this tier
+    b.plan = plan;
+    b.status = "active";
+    if (!b.trialStartedAt) b.trialStartedAt = new Date(now).toISOString();
+    b.trialEndsAt = new Date(now + days * 86_400_000).toISOString();
+    b.ledger.push({ ts: new Date().toISOString(), delta: 0, bucket: "plan", reason: `trial_start_${days}d` });
+  });
 }
 
 // ── Stripe-driven grants (Phase 3). Called from the webhook (low frequency). ──

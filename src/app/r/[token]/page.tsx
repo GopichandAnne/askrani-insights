@@ -84,6 +84,6 @@ export default async function ReportSharePage({ params }: Params) {
   // Best-effort view count bump (never blocks render).
   svc.from("report_share").update({ view_count: (share.view_count ?? 0) + 1 }).eq("id", share.id).then(() => {}, () => {});
 
-  const claimHref = `/login?claim=${encodeURIComponent(token)}&mode=signup`;
+  const claimHref = `/claim/${encodeURIComponent(token)}`;
   return <PublicReport data={data} claimHref={claimHref} />;
 }

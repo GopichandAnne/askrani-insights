@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { requireOrg, unauthorized, badRequest } from "@/lib/api";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/analytics";
 import { normalizePhone, setAccountPhone } from "@/lib/accountPhone";
+import { claimWorkspace, CLAIM_COOKIE } from "@/lib/claim";
 
 export const dynamic = "force-dynamic";
 
@@ -114,5 +116,20 @@ export async function POST(req: Request) {
   }
 
   void logEvent("profile_completed", { hasPhone: !!phone, authPhoneSet }, { orgId: auth.orgId, path: "/welcome" });
-  return NextResponse.json({ ok: true, orgId: auth.orgId, emailLinked });
+
+  // Report-link claim: if they arrived from a public /r/[token] link, bind that
+  // pre-provisioned workspace to their new org now (their org exists as of requireOrg)
+  // and start the 15-day trial — so they land on a dashboard already populated.
+  let claimed: { workspaceId: string } | null = null;
+  const claimToken = (await cookies()).get(CLAIM_COOKIE)?.value;
+  if (claimToken && user) {
+    try {
+      const r = await claimWorkspace(user.id, auth.orgId, claimToken);
+      if (r.ok) { claimed = { workspaceId: r.workspaceId }; void logEvent("report_claim_completed", { workspaceId: r.workspaceId }, { orgId: auth.orgId }); }
+    } catch { /* never block onboarding on the claim */ }
+  }
+
+  const res = NextResponse.json({ ok: true, orgId: auth.orgId, emailLinked, claimed });
+  if (claimToken) res.cookies.set(CLAIM_COOKIE, "", { path: "/", maxAge: 0 }); // consume it
+  return res;
 }
