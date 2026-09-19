@@ -30,8 +30,12 @@ export function WelcomeForm({
   // A verified phone from a phone-OTP signup is read-only; anyone else must type one.
   const phoneVerified = !!prefill.phone;
 
-  function goOn() {
-    router.push("/onboarding");
+  // Land on Today (/brief) when they already have a workspace — a claimer (report
+  // link) or an existing owner backfilling their phone. Only a genuinely new owner
+  // with no workspace goes to /onboarding to set one up.
+  const [pendingDest, setPendingDest] = useState<string>(needPhoneOnly ? "/brief" : "/onboarding");
+  function goOn(dest = pendingDest) {
+    router.push(dest);
     router.refresh();
   }
 
@@ -55,7 +59,11 @@ export function WelcomeForm({
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "Couldn't save your details — please try again.");
-      if (needPhoneOnly) { goOn(); return; }
+      if (needPhoneOnly) { goOn("/brief"); return; }
+      // A claimer (report link) already owns a transferred workspace → straight to
+      // Today; a brand-new owner with none → set one up.
+      const dest = j.claimed ? "/brief" : "/onboarding";
+      setPendingDest(dest);
       // Profile saved. If the email couldn't be linked (already tied to another
       // account), tell them plainly and let them continue on the next click —
       // don't silently swallow it.
@@ -64,7 +72,7 @@ export function WelcomeForm({
         setNotice(`Your workspace is ready. Heads-up: ${f.email.trim()} is already linked to another account, so we couldn't add it as an email login — you'll keep signing in with your phone. It's still saved for report delivery. Tap Continue to go on.`);
         return;
       }
-      goOn();
+      goOn(dest);
     } catch (e) {
       setErr((e as Error).message);
     } finally {

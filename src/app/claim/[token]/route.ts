@@ -22,7 +22,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
       const orgId = await ensureOrgForUser(user.id, user.email ?? null);
       await claimWorkspace(user.id, orgId, token);
     } catch { /* fall through — still send them into the app */ }
-    return NextResponse.redirect(new URL("/", origin));
+    return NextResponse.redirect(new URL("/brief", origin)); // Today, not setup
   }
 
   const res = NextResponse.redirect(new URL("/login?mode=signup", origin));

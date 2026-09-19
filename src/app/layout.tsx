@@ -25,9 +25,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const user = await getUser();
   const admin = isSuperAdmin(user);
 
-  // businesses this login can switch between (only meaningful when signed in)
-  const workspaces = user ? await listWorkspaces() : [];
-  const active = user ? await activeWorkspace() : null;
+  // businesses this login can switch between + active workspace + nav credit balance.
+  // Fetched CONCURRENTLY (they don't depend on each other) so the per-navigation
+  // layout cost is one round-trip, not three in series.
+  let workspaces: Awaited<ReturnType<typeof listWorkspaces>> = [];
+  let active: Awaited<ReturnType<typeof activeWorkspace>> | null = null;
+  let credits: number | null = null;
+  if (user) {
+    [workspaces, active, credits] = await Promise.all([
+      listWorkspaces(),
+      activeWorkspace(),
+      ensureOrgForUser(user.id, user.email).then(navBalance).catch(() => null),
+    ]);
+  }
   const activeId = active?.status === "ok" ? active.workspace.id : "";
 
   // Area workspaces get a market-only nav (no "you" surfaces).
@@ -39,12 +49,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        { href: "/admin", label: "Admin", icon: "admin" }]
     : (areaMode ? MORE_AREA : MORE_NORMAL);
   const home = sections[0].href;
-
-  // remaining monitoring credits (shown in the nav)
-  let credits: number | null = null;
-  if (user) {
-    try { credits = await navBalance(await ensureOrgForUser(user.id, user.email)); } catch { /* non-fatal */ }
-  }
 
   return (
     <html lang="en">
